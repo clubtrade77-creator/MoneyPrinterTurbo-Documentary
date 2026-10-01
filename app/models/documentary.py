@@ -83,6 +83,23 @@ class NarrativePurpose(str, Enum):
     transition = "transition"
 
 
+class VideoMetadata(BaseModel):
+    """Technical metadata needed by transcription, clip selection, and rendering."""
+
+    duration_seconds: float = Field(gt=0)
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    fps: float = Field(gt=0)
+    has_audio: bool = False
+    video_codec: str = ""
+    audio_codec: str = ""
+    container: str = ""
+    file_size_bytes: int = Field(default=0, ge=0)
+    rotation_degrees: int = 0
+    audio_channels: Optional[int] = Field(default=None, ge=1)
+    audio_sample_rate: Optional[int] = Field(default=None, ge=1)
+
+
 class SourceAsset(BaseModel):
     id: str = Field(default_factory=lambda: f"source_{uuid4().hex[:12]}")
     source_type: SourceType
@@ -96,6 +113,7 @@ class SourceAsset(BaseModel):
     original_filename: str = ""
     local_path: str = ""
     checksum_sha256: str = ""
+    video_metadata: Optional[VideoMetadata] = None
 
     rights_status: RightsStatus = RightsStatus.unknown_review_required
     rights_note: str = ""
