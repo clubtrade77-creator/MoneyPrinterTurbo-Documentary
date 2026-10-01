@@ -38,6 +38,13 @@ _PROJECT_LOCK_TIMEOUT_SECONDS = 10.0
 _PROJECT_LOCK_POLL_SECONDS = 0.05
 _MALFORMED_LOCK_STALE_SECONDS = 5.0
 _LOCAL_VIDEO_EXTENSIONS = {".mp4", ".mov"}
+_VIDEO_SOURCE_TYPES = {
+    SourceType.local_video,
+    SourceType.youtube,
+    SourceType.bodycam,
+    SourceType.cctv,
+    SourceType.broll,
+}
 
 
 class ProjectConflictError(RuntimeError):
@@ -414,7 +421,9 @@ def attach_local_copy_to_source(
     """Attach a local media copy to an existing external source asset.
 
     Rights metadata is intentionally unchanged: possessing a local copy does not prove
-    permission to publish it. The copied file is removed if the manifest update fails.
+    permission to publish it. Video-like sources require MP4/MOV and are probed before
+    the manifest is updated so downstream transcription/rendering sees verified media
+    metadata. The copied file is removed if probing or manifest update fails.
     """
     source_path = Path(source_path).expanduser().resolve()
     if not source_path.is_file():
@@ -426,18 +435,29 @@ def attach_local_copy_to_source(
         if source is None:
             raise ValueError(f"source not found in project: {source_id}")
 
+        suffix = source_path.suffix.lower()
+        should_probe_video = source.source_type in _VIDEO_SOURCE_TYPES
+        if should_probe_video and suffix not in _LOCAL_VIDEO_EXTENSIONS:
+            allowed = ", ".join(sorted(_LOCAL_VIDEO_EXTENSIONS))
+            raise ValueError(
+                f"unsupported local copy for video source; expected one of: {allowed}"
+            )
+
         target_dir = project_dir(project_id, root) / "sources"
-        target_path = target_dir / (
-            f"{source.id}-{uuid4().hex[:8]}{source_path.suffix.lower()}"
-        )
+        target_path = target_dir / f"{source.id}-{uuid4().hex[:8]}{suffix}"
         old_local_path = source.local_path
+        old_video_metadata = source.video_metadata
         shutil.copy2(source_path, target_path)
         target_path = target_path.resolve()
 
-        source.original_filename = source_path.name
-        source.local_path = str(target_path)
-        source.checksum_sha256 = sha256_file(target_path)
         try:
+            video_metadata = (
+                probe_video_metadata(target_path) if should_probe_video else old_video_metadata
+            )
+            source.original_filename = source_path.name
+            source.local_path = str(target_path)
+            source.checksum_sha256 = sha256_file(target_path)
+            source.video_metadata = video_metadata
             _save_project_unlocked(project, root)
         except Exception:
             target_path.unlink(missing_ok=True)
@@ -448,10 +468,7 @@ def attach_local_copy_to_source(
             try:
                 old_resolved = old_path.expanduser().resolve()
                 target_dir_resolved = target_dir.resolve()
-                if (
-                    old_resolved != target_path
-                    and target_dir_resolved in old_resolved.parents
-                ):
+                if old_resolved != target_path and target_dir_resolved in old_resolved.parents:
                     old_path.unlink(missing_ok=True)
             except OSError:
                 # The manifest already points at the new valid copy; stale-file cleanup
