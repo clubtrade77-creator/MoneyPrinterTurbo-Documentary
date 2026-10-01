@@ -62,8 +62,8 @@ def build_youtube_source_asset(
 ) -> SourceAsset:
     """Create a traceable SourceAsset from a YouTube URL without downloading media.
 
-    Metadata enrichment and authorized/local media acquisition are deliberately kept
-    separate. YouTube is recorded as provenance, never as evidence of reuse rights.
+    Metadata enrichment and local media acquisition are deliberately kept separate.
+    YouTube is recorded as provenance, never as evidence of reuse rights.
     """
     video_id = extract_youtube_video_id(url)
     return SourceAsset(
@@ -73,6 +73,7 @@ def build_youtube_source_asset(
         title=title,
         source_url=canonical_youtube_url(video_id),
         publisher=channel,
+        publication_date=published_at,
         rights_status=rights_status,
         rights_note=rights_note,
         youtube_video_id=video_id,
