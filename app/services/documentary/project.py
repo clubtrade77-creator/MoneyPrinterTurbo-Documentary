@@ -34,6 +34,7 @@ PROJECT_SUBDIRS = (
 _PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{3,120}$")
 _PROJECT_LOCK_TIMEOUT_SECONDS = 10.0
 _PROJECT_LOCK_POLL_SECONDS = 0.05
+_MALFORMED_LOCK_STALE_SECONDS = 5.0
 
 
 class ProjectConflictError(RuntimeError):
@@ -73,6 +74,52 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
         temp_path.unlink(missing_ok=True)
 
 
+def _process_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
+def _remove_stale_lock(lock_path: Path) -> bool:
+    """Best-effort recovery for a lock left behind by a crashed local process."""
+    try:
+        raw = lock_path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+    match = re.fullmatch(r"pid=(\d+)", raw)
+    if match:
+        if _process_is_alive(int(match.group(1))):
+            return False
+    else:
+        try:
+            age = time.time() - lock_path.stat().st_mtime
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+        if age < _MALFORMED_LOCK_STALE_SECONDS:
+            return False
+
+    try:
+        lock_path.unlink()
+        return True
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
 @contextmanager
 def _project_lock(
     project_id: str,
@@ -83,7 +130,8 @@ def _project_lock(
     """Cross-process lock for short project manifest mutations.
 
     Atomic ``O_EXCL`` creation works on the supported local filesystems without adding
-    a new dependency. The lock is deliberately held only around project mutations.
+    a new dependency. A lock left by a crashed local process is recovered by checking
+    the recorded PID. The lock is deliberately held only around project mutations.
     """
     target = project_dir(project_id, root)
     if not target.is_dir():
@@ -95,8 +143,16 @@ def _project_lock(
     while fd is None:
         try:
             fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            os.write(fd, f"pid={os.getpid()}\n".encode("utf-8"))
+            try:
+                os.write(fd, f"pid={os.getpid()}\n".encode("utf-8"))
+            except Exception:
+                os.close(fd)
+                fd = None
+                lock_path.unlink(missing_ok=True)
+                raise
         except FileExistsError:
+            if _remove_stale_lock(lock_path):
+                continue
             if time.monotonic() >= deadline:
                 raise TimeoutError(
                     f"timed out waiting for documentary project lock: {project_id}"
@@ -121,6 +177,21 @@ def _load_project_unlocked(
     return DocumentaryProject.model_validate(payload)
 
 
+def _validate_local_source_paths(
+    project: DocumentaryProject, root: str | os.PathLike | None = None
+) -> None:
+    """Keep persisted local media references inside this project's sources folder."""
+    sources_dir = (project_dir(project.id, root) / "sources").resolve()
+    for source in project.sources:
+        if not source.local_path:
+            continue
+        resolved = Path(source.local_path).expanduser().resolve()
+        if sources_dir != resolved.parent and sources_dir not in resolved.parents:
+            raise ValueError(
+                f"documentary source local_path escapes project sources directory: {source.id}"
+            )
+
+
 def _save_project_unlocked(
     project: DocumentaryProject, root: str | os.PathLike | None = None
 ) -> Path:
@@ -136,6 +207,8 @@ def _save_project_unlocked(
             f"stale documentary project revision: expected {current_revision}, "
             f"got {project.revision}"
         )
+
+    _validate_local_source_paths(project, root)
 
     updated_at = utc_now()
     next_revision = current_revision + 1
@@ -169,12 +242,15 @@ def create_project(
 
     project_id = project_id or f"doc_{uuid4().hex[:12]}"
     target = project_dir(project_id, root)
-    if target.exists():
-        raise FileExistsError(f"documentary project already exists: {project_id}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target.mkdir(exist_ok=False)
+    except FileExistsError:
+        raise FileExistsError(f"documentary project already exists: {project_id}") from None
 
     try:
         for subdir in PROJECT_SUBDIRS:
-            (target / subdir).mkdir(parents=True, exist_ok=True)
+            (target / subdir).mkdir(parents=True, exist_ok=False)
 
         project = DocumentaryProject(
             id=project_id,
@@ -243,6 +319,7 @@ def attach_local_file(
     safe_suffix = source_path.suffix.lower()
     target_path = target_dir / f"{source_id}{safe_suffix}"
     shutil.copy2(source_path, target_path)
+    target_path = target_path.resolve()
 
     source = SourceAsset(
         id=source_id,
@@ -270,10 +347,10 @@ def attach_local_copy_to_source(
     *,
     root: str | os.PathLike | None = None,
 ) -> SourceAsset:
-    """Attach an authorized/local media copy to an existing external source asset.
+    """Attach a local media copy to an existing external source asset.
 
-    The newly copied file is unique and is removed if the manifest update fails. This
-    prevents a failed save from destroying or silently replacing the previous copy.
+    Rights metadata is intentionally unchanged: possessing a local copy does not prove
+    permission to publish it. The copied file is removed if the manifest update fails.
     """
     source_path = Path(source_path).expanduser().resolve()
     if not source_path.is_file():
@@ -291,6 +368,7 @@ def attach_local_copy_to_source(
         )
         old_local_path = source.local_path
         shutil.copy2(source_path, target_path)
+        target_path = target_path.resolve()
 
         source.original_filename = source_path.name
         source.local_path = str(target_path)
@@ -304,10 +382,10 @@ def attach_local_copy_to_source(
         if old_local_path:
             old_path = Path(old_local_path)
             try:
-                old_resolved = old_path.resolve()
+                old_resolved = old_path.expanduser().resolve()
                 target_dir_resolved = target_dir.resolve()
                 if (
-                    old_resolved != target_path.resolve()
+                    old_resolved != target_path
                     and target_dir_resolved in old_resolved.parents
                 ):
                     old_path.unlink(missing_ok=True)
