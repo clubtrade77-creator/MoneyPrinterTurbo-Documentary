@@ -3,8 +3,12 @@ from pathlib import Path
 import pytest
 
 from app.models.documentary import (
+    DocumentaryPlan,
+    DocumentaryProject,
+    DocumentaryScene,
     ProvenanceType,
     RightsStatus,
+    SceneType,
     SourceAsset,
     SourceType,
 )
@@ -44,6 +48,19 @@ def test_create_documentary_project_layout(tmp_path: Path):
     assert loaded.revision == 1
 
 
+def test_duplicate_project_creation_does_not_destroy_existing_project(tmp_path: Path):
+    project = create_project(
+        "Original", project_id="doc_duplicate_case", root=tmp_path
+    )
+
+    with pytest.raises(FileExistsError):
+        create_project("Replacement", project_id=project.id, root=tmp_path)
+
+    loaded = load_project(project.id, tmp_path)
+    assert loaded.title == "Original"
+    assert loaded.revision == 1
+
+
 @pytest.mark.parametrize(
     ("url", "video_id"),
     [
@@ -66,9 +83,12 @@ def test_youtube_asset_keeps_provenance_separate_from_rights(tmp_path: Path):
         "https://youtu.be/dQw4w9WgXcQ",
         title="Reference footage",
         channel="Example Channel",
+        published_at="2026-09-30",
     )
     assert source.provenance == ProvenanceType.third_party_platform
     assert source.rights_status == RightsStatus.unknown_review_required
+    assert source.publication_date == "2026-09-30"
+    assert source.youtube_published_at == "2026-09-30"
     assert source.is_renderable is False
     assert source.is_publishable is False
 
@@ -84,6 +104,7 @@ def test_youtube_asset_keeps_provenance_separate_from_rights(tmp_path: Path):
     )
     assert attached.is_renderable is True
     assert attached.is_publishable is False
+    assert Path(attached.local_path).is_absolute()
     assert Path(attached.local_path).is_file()
     assert attached.checksum_sha256
 
@@ -106,6 +127,7 @@ def test_attach_local_file_copies_and_registers_source(tmp_path: Path):
     assert source.source_type == SourceType.bodycam
     assert source.provenance == ProvenanceType.user_provided
     assert source.original_filename == "bodycam.mp4"
+    assert Path(source.local_path).is_absolute()
     assert Path(source.local_path).is_file()
     assert source.is_renderable is True
     assert source.is_publishable is True
@@ -147,6 +169,50 @@ def test_legacy_official_public_source_is_migrated_without_granting_rights():
     assert source.is_publishable is False
 
 
+def test_project_rejects_duplicate_source_ids():
+    first = SourceAsset(id="source_duplicate", source_type=SourceType.news)
+    second = SourceAsset(id="source_duplicate", source_type=SourceType.photo)
+
+    with pytest.raises(ValueError, match="duplicate source ids"):
+        DocumentaryProject(id="doc_duplicate_sources", title="Duplicate", sources=[first, second])
+
+
+def test_project_rejects_duplicate_scene_ids():
+    source = SourceAsset(id="source_one", source_type=SourceType.bodycam)
+    first = DocumentaryScene(
+        id="scene_duplicate",
+        scene_type=SceneType.original_clip,
+        source_id=source.id,
+        source_start=0,
+        source_end=1,
+    )
+    second = first.model_copy()
+
+    with pytest.raises(ValueError, match="duplicate scene ids"):
+        DocumentaryProject(
+            id="doc_duplicate_scenes",
+            title="Duplicate scenes",
+            sources=[source],
+            plan=DocumentaryPlan(scenes=[first, second]),
+        )
+
+
+def test_project_rejects_scene_reference_to_unknown_source():
+    scene = DocumentaryScene(
+        scene_type=SceneType.original_clip,
+        source_id="source_missing",
+        source_start=0,
+        source_end=2,
+    )
+
+    with pytest.raises(ValueError, match="unknown source_id"):
+        DocumentaryProject(
+            id="doc_bad_reference",
+            title="Bad reference",
+            plan=DocumentaryPlan(scenes=[scene]),
+        )
+
+
 def test_stale_project_snapshot_cannot_overwrite_newer_revision(tmp_path: Path):
     project = create_project(
         "Revision Case", project_id="doc_revision_case", root=tmp_path
@@ -165,6 +231,39 @@ def test_stale_project_snapshot_cannot_overwrite_newer_revision(tmp_path: Path):
     loaded = load_project(project.id, tmp_path)
     assert loaded.title == "First writer"
     assert loaded.revision == 2
+
+
+def test_stale_process_lock_is_recovered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    project = create_project(
+        "Lock Case", project_id="doc_lock_case", root=tmp_path
+    )
+    lock_path = project_dir(project.id, tmp_path) / ".project.lock"
+    lock_path.write_text("pid=12345\n", encoding="utf-8")
+    monkeypatch.setattr(project_service, "_process_is_alive", lambda pid: False)
+
+    loaded = load_project(project.id, tmp_path)
+    loaded.title = "Recovered"
+    save_project(loaded, tmp_path)
+
+    assert load_project(project.id, tmp_path).title == "Recovered"
+    assert not lock_path.exists()
+
+
+def test_source_local_path_cannot_escape_project_sources(tmp_path: Path):
+    project = create_project(
+        "Path Case", project_id="doc_path_case", root=tmp_path
+    )
+    outside_file = tmp_path / "outside.mp4"
+    outside_file.write_bytes(b"outside")
+    source = SourceAsset(
+        source_type=SourceType.local_video,
+        local_path=str(outside_file),
+    )
+
+    with pytest.raises(ValueError, match="escapes project sources directory"):
+        add_source(project.id, source, root=tmp_path)
+
+    assert load_project(project.id, tmp_path).sources == []
 
 
 def test_failed_local_copy_manifest_save_rolls_back_new_file(
