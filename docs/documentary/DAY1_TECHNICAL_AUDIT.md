@@ -14,6 +14,7 @@ Keep the current short-video workflow intact and add a parallel documentary pack
 app/services/documentary/
   __init__.py
   pipeline.py
+  youtube_source.py
   transcription.py
   story_planner.py
   clip_selector.py
@@ -66,8 +67,8 @@ Do not treat stock/generated material as the primary documentary source.
 
 Extend the provenance concept with documentary source metadata:
 - source URL
-- publisher / agency
-- source type (bodycam, CCTV, court, interview, document, photo, B-roll)
+- publisher / agency / YouTube channel
+- source type (bodycam, CCTV, court, interview, document, photo, YouTube, B-roll)
 - incident/case ID
 - publication date
 - rights status
@@ -76,6 +77,36 @@ Extend the provenance concept with documentary source metadata:
 - local filename
 - optional checksum
 
+### YouTube source ingestion
+YouTube is a first-class Documentary source, not merely a discovery aid.
+
+Add `app/services/documentary/youtube_source.py`.
+
+MVP behavior:
+- accept one or many YouTube URLs pasted by the user
+- resolve and store public metadata needed for editorial traceability: video ID, title, channel, source URL and publication metadata when available
+- register every YouTube item as a `SourceAsset`
+- support a local media copy when the user has permission/rights to download or otherwise provides the file
+- when direct acquisition is not permitted or not available, retain the YouTube URL as an external source reference and require an authorized/local copy before rendering that footage
+- transcribe the local/authorized media copy through the same Whisper pipeline as any other source
+- allow the Clip Selector to return exact YouTube-source time ranges once a usable media copy exists
+
+Recommended YouTube provenance fields:
+
+```text
+source_type: youtube
+youtube_video_id
+youtube_url
+youtube_title
+youtube_channel
+youtube_published_at
+rights_status
+rights_note
+local_file
+```
+
+The system must not mark a YouTube video as reusable merely because it is publicly viewable. Copyright/license status remains separate from discoverability.
+
 ### `app/services/task.py`
 Keep unchanged for legacy short-video tasks.
 
@@ -83,7 +114,7 @@ The current pipeline is:
 `script -> search terms -> narration -> subtitles -> materials -> render -> optional publish`.
 
 Documentary pipeline must instead be:
-`sources -> transcription/index -> research facts -> story plan -> scene timeline -> narration/localization -> render -> QA`.
+`sources (local + YouTube + other originals) -> transcription/index -> research facts -> story plan -> scene timeline -> narration/localization -> render -> QA`.
 
 Add `documentary/pipeline.py` rather than adding many documentary branches to `_run_pipeline()`.
 
@@ -143,7 +174,8 @@ Current WebUI is a large Streamlit monolith. Avoid embedding the whole documenta
 Add a separate documentary UI module/component and expose it as a distinct mode/page. MVP UI should have only:
 - create/select documentary project
 - upload source files
-- list sources
+- paste YouTube source URL(s)
+- list sources and provenance status
 - run transcription
 - show/edit story plan
 - show/edit scene timeline
@@ -257,6 +289,8 @@ It consumes an approved timeline. Example:
 For `narration_over_source`, source audio is ducked/muted and narration is mixed over it.
 For `mixed`, narration and source sound can have separate gain envelopes.
 
+YouTube-backed sources use the same scene model after a usable local/authorized media copy has been attached to the `SourceAsset`; the timeline continues to preserve the original YouTube URL and video ID for traceability.
+
 ## 6. Viral/retention layer
 
 Do not use an opaque numerical “viral score” as the product decision.
@@ -280,9 +314,9 @@ The system should distinguish:
 - user-owned source
 - unknown/review required
 
-Do not infer copyright status merely because a video is publicly accessible.
+YouTube is a distribution platform, not a rights status. A public YouTube URL does not by itself establish permission to reuse the footage.
 
-The final render manifest should record which source file and source time range was used in every scene.
+The final render manifest should record which source file and source time range was used in every scene, plus the originating YouTube URL/video ID where applicable.
 
 ## 8. What is already strong enough to reuse
 
@@ -303,35 +337,43 @@ The final render manifest should record which source file and source time range 
 ## 9. What is missing for Documentary MVP
 
 1. documentary-specific project/schema
-2. structured source transcription JSON
-3. source-first documentary pipeline
-4. story planner producing validated scene JSON
-5. exact clip selector using timestamps
-6. renderer that preserves original source audio
-7. per-scene audio mixing
-8. rights/provenance manifest
-9. dedicated Documentary UI
-10. documentary tests
+2. YouTube SourceAsset ingestion and provenance adapter
+3. structured source transcription JSON
+4. source-first documentary pipeline
+5. story planner producing validated scene JSON
+6. exact clip selector using timestamps
+7. renderer that preserves original source audio
+8. per-scene audio mixing
+9. rights/provenance manifest
+10. dedicated Documentary UI
+11. documentary tests
 
 ## 10. Implementation order after baseline run
 
 After confirming the unmodified fork runs correctly on the target Mac:
 
 1. add documentary Pydantic models
-2. add structured transcription service
-3. add project/source manifest
-4. add deterministic scene renderer for manually supplied timeline JSON
-5. test ORIGINAL / NARRATION / MIXED audio modes
-6. add Story Planner
-7. add Clip Selector
-8. add Viral Editor
-9. add EN/RU/ES localization
-10. add UI workflow
+2. add SourceAsset manifest including local and YouTube sources
+3. add YouTube URL ingestion/metadata adapter
+4. add structured transcription service
+5. add deterministic scene renderer for manually supplied timeline JSON
+6. test ORIGINAL / NARRATION / MIXED audio modes
+7. add Story Planner
+8. add Clip Selector
+9. add Viral Editor
+10. add EN/RU/ES localization
+11. add UI workflow
 
 ## 11. Day 1 conclusion
 
 MoneyPrinterTurbo is a suitable base. The main rendering, TTS, subtitle, LLM and task infrastructure does not need to be rebuilt.
 
 The core design rule is isolation: keep the existing short-video pipeline working and build Documentary Mode as a parallel pipeline using shared low-level services.
+
+Documentary Mode source priority should be:
+1. original/official footage for the story, including authorized YouTube sources
+2. other verified source footage/documents/photos
+3. stock B-roll where the story has no direct visual
+4. generated visuals only when needed and clearly separated from original evidence footage
 
 Day 2 should be a baseline installation/run of the existing fork on the target Mac before feature code is added. This gives a known-good baseline and prevents documentary changes from being blamed for pre-existing environment/setup problems.
