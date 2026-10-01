@@ -5,10 +5,19 @@ import json
 import os
 import re
 import shutil
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from app.models.documentary import DocumentaryProject, SourceAsset, SourceType, utc_now
+from app.models.documentary import (
+    DocumentaryProject,
+    ProvenanceType,
+    RightsStatus,
+    SourceAsset,
+    SourceType,
+    utc_now,
+)
 
 PROJECT_SUBDIRS = (
     "sources",
@@ -23,6 +32,12 @@ PROJECT_SUBDIRS = (
     "manifests",
 )
 _PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{3,120}$")
+_PROJECT_LOCK_TIMEOUT_SECONDS = 10.0
+_PROJECT_LOCK_POLL_SECONDS = 0.05
+
+
+class ProjectConflictError(RuntimeError):
+    """Raised when a stale project snapshot would overwrite newer project data."""
 
 
 def default_documentary_root() -> Path:
@@ -49,19 +64,96 @@ def project_manifest_path(
 def _atomic_write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_suffix(path.suffix + f".{uuid4().hex}.tmp")
-    temp_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    os.replace(temp_path, path)
+    try:
+        temp_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        os.replace(temp_path, path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+@contextmanager
+def _project_lock(
+    project_id: str,
+    root: str | os.PathLike | None = None,
+    *,
+    timeout: float = _PROJECT_LOCK_TIMEOUT_SECONDS,
+):
+    """Cross-process lock for short project manifest mutations.
+
+    Atomic ``O_EXCL`` creation works on the supported local filesystems without adding
+    a new dependency. The lock is deliberately held only around project mutations.
+    """
+    target = project_dir(project_id, root)
+    if not target.is_dir():
+        raise FileNotFoundError(f"documentary project not found: {project_id}")
+
+    lock_path = target / ".project.lock"
+    deadline = time.monotonic() + timeout
+    fd = None
+    while fd is None:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.write(fd, f"pid={os.getpid()}\n".encode("utf-8"))
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"timed out waiting for documentary project lock: {project_id}"
+                )
+            time.sleep(_PROJECT_LOCK_POLL_SECONDS)
+
+    try:
+        yield
+    finally:
+        if fd is not None:
+            os.close(fd)
+        lock_path.unlink(missing_ok=True)
+
+
+def _load_project_unlocked(
+    project_id: str, root: str | os.PathLike | None = None
+) -> DocumentaryProject:
+    manifest_path = project_manifest_path(project_id, root)
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"documentary project not found: {project_id}")
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    return DocumentaryProject.model_validate(payload)
+
+
+def _save_project_unlocked(
+    project: DocumentaryProject, root: str | os.PathLike | None = None
+) -> Path:
+    """Persist one already-locked project snapshot with optimistic revision checking."""
+    manifest_path = project_manifest_path(project.id, root)
+    current_revision = 0
+    if manifest_path.is_file():
+        current_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        current_revision = int(current_payload.get("revision", 0))
+
+    if project.revision != current_revision:
+        raise ProjectConflictError(
+            f"stale documentary project revision: expected {current_revision}, "
+            f"got {project.revision}"
+        )
+
+    updated_at = utc_now()
+    next_revision = current_revision + 1
+    payload = project.model_dump(mode="json")
+    payload["updated_at"] = updated_at.isoformat()
+    payload["revision"] = next_revision
+    _atomic_write_json(manifest_path, payload)
+
+    project.updated_at = updated_at
+    project.revision = next_revision
+    return manifest_path
 
 
 def save_project(
     project: DocumentaryProject, root: str | os.PathLike | None = None
 ) -> Path:
-    project.updated_at = utc_now()
-    manifest_path = project_manifest_path(project.id, root)
-    _atomic_write_json(manifest_path, project.model_dump(mode="json"))
-    return manifest_path
+    with _project_lock(project.id, root):
+        return _save_project_unlocked(project, root)
 
 
 def create_project(
@@ -80,26 +172,28 @@ def create_project(
     if target.exists():
         raise FileExistsError(f"documentary project already exists: {project_id}")
 
-    for subdir in PROJECT_SUBDIRS:
-        (target / subdir).mkdir(parents=True, exist_ok=True)
+    try:
+        for subdir in PROJECT_SUBDIRS:
+            (target / subdir).mkdir(parents=True, exist_ok=True)
 
-    project = DocumentaryProject(
-        id=project_id,
-        title=clean_title,
-        master_language=(master_language or "en").strip() or "en",
-    )
-    save_project(project, root)
-    return project
+        project = DocumentaryProject(
+            id=project_id,
+            title=clean_title,
+            master_language=(master_language or "en").strip() or "en",
+        )
+        save_project(project, root)
+        return project
+    except Exception:
+        shutil.rmtree(target, ignore_errors=True)
+        raise
 
 
 def load_project(
     project_id: str, root: str | os.PathLike | None = None
 ) -> DocumentaryProject:
-    manifest_path = project_manifest_path(project_id, root)
-    if not manifest_path.is_file():
-        raise FileNotFoundError(f"documentary project not found: {project_id}")
-    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    return DocumentaryProject.model_validate(payload)
+    # project.json is replaced atomically, so readers either see the previous complete
+    # manifest or the next complete manifest and do not need to hold the write lock.
+    return _load_project_unlocked(project_id, root)
 
 
 def add_source(
@@ -108,13 +202,14 @@ def add_source(
     *,
     root: str | os.PathLike | None = None,
 ) -> DocumentaryProject:
-    project = load_project(project_id, root)
-    existing_ids = {item.id for item in project.sources}
-    if source.id in existing_ids:
-        raise ValueError(f"source already exists in project: {source.id}")
-    project.sources.append(source)
-    save_project(project, root)
-    return project
+    with _project_lock(project_id, root):
+        project = _load_project_unlocked(project_id, root)
+        existing_ids = {item.id for item in project.sources}
+        if source.id in existing_ids:
+            raise ValueError(f"source already exists in project: {source.id}")
+        project.sources.append(source)
+        _save_project_unlocked(project, root)
+        return project
 
 
 def sha256_file(path: str | os.PathLike, chunk_size: int = 1024 * 1024) -> str:
@@ -131,6 +226,8 @@ def attach_local_file(
     *,
     title: str = "",
     source_type: SourceType = SourceType.local_video,
+    rights_status: RightsStatus = RightsStatus.unknown_review_required,
+    rights_note: str = "",
     root: str | os.PathLike | None = None,
 ) -> SourceAsset:
     """Copy a user-provided file into the project's sources directory and register it."""
@@ -150,10 +247,13 @@ def attach_local_file(
     source = SourceAsset(
         id=source_id,
         source_type=source_type,
+        provenance=ProvenanceType.user_provided,
         title=(title or source_path.stem).strip(),
         original_filename=source_path.name,
         local_path=str(target_path),
         checksum_sha256=sha256_file(target_path),
+        rights_status=rights_status,
+        rights_note=rights_note,
     )
     try:
         add_source(project_id, source, root=root)
@@ -170,21 +270,49 @@ def attach_local_copy_to_source(
     *,
     root: str | os.PathLike | None = None,
 ) -> SourceAsset:
-    """Attach an authorized/local media copy to an existing external source asset."""
+    """Attach an authorized/local media copy to an existing external source asset.
+
+    The newly copied file is unique and is removed if the manifest update fails. This
+    prevents a failed save from destroying or silently replacing the previous copy.
+    """
     source_path = Path(source_path).expanduser().resolve()
     if not source_path.is_file():
         raise FileNotFoundError(f"source file not found: {source_path}")
 
-    project = load_project(project_id, root)
-    source = next((item for item in project.sources if item.id == source_id), None)
-    if source is None:
-        raise ValueError(f"source not found in project: {source_id}")
+    with _project_lock(project_id, root):
+        project = _load_project_unlocked(project_id, root)
+        source = next((item for item in project.sources if item.id == source_id), None)
+        if source is None:
+            raise ValueError(f"source not found in project: {source_id}")
 
-    target_dir = project_dir(project_id, root) / "sources"
-    target_path = target_dir / f"{source.id}{source_path.suffix.lower()}"
-    shutil.copy2(source_path, target_path)
-    source.original_filename = source_path.name
-    source.local_path = str(target_path)
-    source.checksum_sha256 = sha256_file(target_path)
-    save_project(project, root)
-    return source
+        target_dir = project_dir(project_id, root) / "sources"
+        target_path = target_dir / (
+            f"{source.id}-{uuid4().hex[:8]}{source_path.suffix.lower()}"
+        )
+        old_local_path = source.local_path
+        shutil.copy2(source_path, target_path)
+
+        source.original_filename = source_path.name
+        source.local_path = str(target_path)
+        source.checksum_sha256 = sha256_file(target_path)
+        try:
+            _save_project_unlocked(project, root)
+        except Exception:
+            target_path.unlink(missing_ok=True)
+            raise
+
+        if old_local_path:
+            old_path = Path(old_local_path)
+            try:
+                old_resolved = old_path.resolve()
+                target_dir_resolved = target_dir.resolve()
+                if (
+                    old_resolved != target_path.resolve()
+                    and target_dir_resolved in old_resolved.parents
+                ):
+                    old_path.unlink(missing_ok=True)
+            except OSError:
+                # The manifest already points at the new valid copy; stale-file cleanup
+                # is best-effort and must not roll back the successful attachment.
+                pass
+        return source
