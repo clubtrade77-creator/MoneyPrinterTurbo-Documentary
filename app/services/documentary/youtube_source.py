@@ -3,7 +3,12 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qs, urlparse
 
-from app.models.documentary import RightsStatus, SourceAsset, SourceType
+from app.models.documentary import (
+    ProvenanceType,
+    RightsStatus,
+    SourceAsset,
+    SourceType,
+)
 
 _YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _YOUTUBE_HOSTS = {
@@ -58,13 +63,13 @@ def build_youtube_source_asset(
     """Create a traceable SourceAsset from a YouTube URL without downloading media.
 
     Metadata enrichment and authorized/local media acquisition are deliberately kept
-    separate. A public YouTube URL is discoverable, but that alone does not establish
-    permission to reuse the footage.
+    separate. YouTube is recorded as provenance, never as evidence of reuse rights.
     """
     video_id = extract_youtube_video_id(url)
     return SourceAsset(
         id=f"youtube_{video_id}",
         source_type=SourceType.youtube,
+        provenance=ProvenanceType.third_party_platform,
         title=title,
         source_url=canonical_youtube_url(video_id),
         publisher=channel,
