@@ -16,8 +16,10 @@ from app.models.documentary import (
     RightsStatus,
     SourceAsset,
     SourceType,
+    VideoMetadata,
     utc_now,
 )
+from app.services.documentary.metadata import probe_video_metadata
 
 PROJECT_SUBDIRS = (
     "sources",
@@ -35,6 +37,7 @@ _PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{3,120}$")
 _PROJECT_LOCK_TIMEOUT_SECONDS = 10.0
 _PROJECT_LOCK_POLL_SECONDS = 0.05
 _MALFORMED_LOCK_STALE_SECONDS = 5.0
+_LOCAL_VIDEO_EXTENSIONS = {".mp4", ".mov"}
 
 
 class ProjectConflictError(RuntimeError):
@@ -296,6 +299,50 @@ def sha256_file(path: str | os.PathLike, chunk_size: int = 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
+def _copy_local_source(
+    project_id: str,
+    source_path: Path,
+    *,
+    title: str,
+    source_type: SourceType,
+    rights_status: RightsStatus,
+    rights_note: str,
+    root: str | os.PathLike | None,
+    probe_video: bool,
+) -> SourceAsset:
+    target_dir = project_dir(project_id, root) / "sources"
+    if not target_dir.is_dir():
+        raise FileNotFoundError(f"documentary project not found: {project_id}")
+
+    source_id = f"source_{uuid4().hex[:12]}"
+    target_path = target_dir / f"{source_id}{source_path.suffix.lower()}"
+    shutil.copy2(source_path, target_path)
+    target_path = target_path.resolve()
+
+    try:
+        video_metadata: VideoMetadata | None = None
+        if probe_video:
+            video_metadata = probe_video_metadata(target_path)
+
+        source = SourceAsset(
+            id=source_id,
+            source_type=source_type,
+            provenance=ProvenanceType.user_provided,
+            title=(title or source_path.stem).strip(),
+            original_filename=source_path.name,
+            local_path=str(target_path),
+            checksum_sha256=sha256_file(target_path),
+            video_metadata=video_metadata,
+            rights_status=rights_status,
+            rights_note=rights_note,
+        )
+        add_source(project_id, source, root=root)
+        return source
+    except Exception:
+        target_path.unlink(missing_ok=True)
+        raise
+
+
 def attach_local_file(
     project_id: str,
     source_path: str | os.PathLike,
@@ -306,38 +353,55 @@ def attach_local_file(
     rights_note: str = "",
     root: str | os.PathLike | None = None,
 ) -> SourceAsset:
-    """Copy a user-provided file into the project's sources directory and register it."""
+    """Copy a generic user-provided file into the project and register it."""
     source_path = Path(source_path).expanduser().resolve()
     if not source_path.is_file():
         raise FileNotFoundError(f"source file not found: {source_path}")
 
-    target_dir = project_dir(project_id, root) / "sources"
-    if not target_dir.is_dir():
-        raise FileNotFoundError(f"documentary project not found: {project_id}")
-
-    source_id = f"source_{uuid4().hex[:12]}"
-    safe_suffix = source_path.suffix.lower()
-    target_path = target_dir / f"{source_id}{safe_suffix}"
-    shutil.copy2(source_path, target_path)
-    target_path = target_path.resolve()
-
-    source = SourceAsset(
-        id=source_id,
+    return _copy_local_source(
+        project_id,
+        source_path,
+        title=title,
         source_type=source_type,
-        provenance=ProvenanceType.user_provided,
-        title=(title or source_path.stem).strip(),
-        original_filename=source_path.name,
-        local_path=str(target_path),
-        checksum_sha256=sha256_file(target_path),
         rights_status=rights_status,
         rights_note=rights_note,
+        root=root,
+        probe_video=False,
     )
-    try:
-        add_source(project_id, source, root=root)
-    except Exception:
-        target_path.unlink(missing_ok=True)
-        raise
-    return source
+
+
+def attach_local_video(
+    project_id: str,
+    source_path: str | os.PathLike,
+    *,
+    title: str = "",
+    source_type: SourceType = SourceType.local_video,
+    rights_status: RightsStatus = RightsStatus.unknown_review_required,
+    rights_note: str = "",
+    root: str | os.PathLike | None = None,
+) -> SourceAsset:
+    """Copy an MP4/MOV into the project and persist verified ffprobe metadata.
+
+    The copied project file, not the external original, is probed. This avoids recording
+    metadata for a different file if the original changes while ingestion is running.
+    """
+    source_path = Path(source_path).expanduser().resolve()
+    if not source_path.is_file():
+        raise FileNotFoundError(f"source file not found: {source_path}")
+    if source_path.suffix.lower() not in _LOCAL_VIDEO_EXTENSIONS:
+        allowed = ", ".join(sorted(_LOCAL_VIDEO_EXTENSIONS))
+        raise ValueError(f"unsupported documentary video extension; expected one of: {allowed}")
+
+    return _copy_local_source(
+        project_id,
+        source_path,
+        title=title,
+        source_type=source_type,
+        rights_status=rights_status,
+        rights_note=rights_note,
+        root=root,
+        probe_video=True,
+    )
 
 
 def attach_local_copy_to_source(
