@@ -125,7 +125,7 @@ class SourceAsset(BaseModel):
     @property
     def has_local_copy(self) -> bool:
         """Whether a real local file currently exists for technical processing."""
-        return bool(self.local_path) and Path(self.local_path).is_file()
+        return bool(self.local_path) and Path(self.local_path).expanduser().is_file()
 
     @property
     def is_renderable(self) -> bool:
@@ -188,3 +188,21 @@ class DocumentaryProject(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
     sources: list[SourceAsset] = Field(default_factory=list)
     plan: DocumentaryPlan = Field(default_factory=DocumentaryPlan)
+
+    @model_validator(mode="after")
+    def validate_references_and_ids(self):
+        source_ids = [source.id for source in self.sources]
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("documentary project contains duplicate source ids")
+
+        scene_ids = [scene.id for scene in self.plan.scenes]
+        if len(scene_ids) != len(set(scene_ids)):
+            raise ValueError("documentary project contains duplicate scene ids")
+
+        known_sources = set(source_ids)
+        for scene in self.plan.scenes:
+            if scene.source_id and scene.source_id not in known_sources:
+                raise ValueError(
+                    f"documentary scene references unknown source_id: {scene.source_id}"
+                )
+        return self
