@@ -2,6 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -17,7 +18,7 @@ from app.services.documentary.project import (
 )
 
 
-def _probe_result(payload: dict, *, returncode: int = 0, stderr: str = ""):
+def _probe_result(payload: Any, *, returncode: int = 0, stderr: str = ""):
     return SimpleNamespace(
         returncode=returncode,
         stdout=json.dumps(payload),
@@ -100,6 +101,43 @@ def test_probe_video_metadata_applies_display_rotation(tmp_path: Path, monkeypat
     assert metadata.has_audio is False
 
 
+def test_probe_video_metadata_skips_attached_picture_stream(tmp_path: Path, monkeypatch):
+    media_file = tmp_path / "with-cover.mp4"
+    media_file.write_bytes(b"video-with-cover")
+    payload = {
+        "streams": [
+            {
+                "codec_type": "video",
+                "codec_name": "mjpeg",
+                "width": 600,
+                "height": 600,
+                "avg_frame_rate": "1/1",
+                "disposition": {"attached_pic": 1},
+            },
+            {
+                "codec_type": "video",
+                "codec_name": "h264",
+                "width": 1280,
+                "height": 720,
+                "avg_frame_rate": "24/1",
+                "disposition": {"attached_pic": 0},
+            },
+        ],
+        "format": {"duration": "5.0", "format_name": "mov,mp4"},
+    }
+    monkeypatch.setattr(
+        metadata_service.subprocess,
+        "run",
+        lambda *args, **kwargs: _probe_result(payload),
+    )
+
+    metadata = probe_video_metadata(media_file, ffprobe_binary="ffprobe-test")
+
+    assert metadata.video_codec == "h264"
+    assert metadata.width == 1280
+    assert metadata.height == 720
+
+
 def test_probe_video_metadata_uses_stream_fallbacks(tmp_path: Path, monkeypatch):
     media_file = tmp_path / "fallback.mp4"
     media_file.write_bytes(b"fallback")
@@ -146,6 +184,19 @@ def test_probe_video_metadata_rejects_missing_video_stream(tmp_path: Path, monke
         probe_video_metadata(media_file, ffprobe_binary="ffprobe-test")
 
 
+def test_probe_video_metadata_rejects_non_object_payload(tmp_path: Path, monkeypatch):
+    media_file = tmp_path / "bad-payload.mp4"
+    media_file.write_bytes(b"bad-payload")
+    monkeypatch.setattr(
+        metadata_service.subprocess,
+        "run",
+        lambda *args, **kwargs: _probe_result([]),
+    )
+
+    with pytest.raises(MediaProbeError, match="invalid payload"):
+        probe_video_metadata(media_file, ffprobe_binary="ffprobe-test")
+
+
 def test_probe_video_metadata_reports_ffprobe_failure(tmp_path: Path, monkeypatch):
     media_file = tmp_path / "broken.mp4"
     media_file.write_bytes(b"broken")
@@ -174,6 +225,19 @@ def test_probe_video_metadata_reports_timeout(tmp_path: Path, monkeypatch):
         probe_video_metadata(
             media_file, ffprobe_binary="ffprobe-test", timeout_seconds=1
         )
+
+
+def test_probe_video_metadata_rejects_non_positive_timeout(tmp_path: Path, monkeypatch):
+    media_file = tmp_path / "clip.mp4"
+    media_file.write_bytes(b"video")
+
+    def should_not_run(*args, **kwargs):
+        raise AssertionError("subprocess must not run")
+
+    monkeypatch.setattr(metadata_service.subprocess, "run", should_not_run)
+
+    with pytest.raises(ValueError, match="greater than zero"):
+        probe_video_metadata(media_file, timeout_seconds=0)
 
 
 def test_attach_local_video_persists_metadata(tmp_path: Path, monkeypatch):
