@@ -81,17 +81,29 @@ def _parse_fps(value: Any) -> float | None:
 def _rotation_degrees(video_stream: dict[str, Any]) -> int:
     raw_rotation: Any = None
     for side_data in video_stream.get("side_data_list", []) or []:
-        if "rotation" in side_data:
+        if isinstance(side_data, dict) and "rotation" in side_data:
             raw_rotation = side_data.get("rotation")
             break
     if raw_rotation is None:
-        raw_rotation = (video_stream.get("tags") or {}).get("rotate")
+        tags = video_stream.get("tags")
+        if isinstance(tags, dict):
+            raw_rotation = tags.get("rotate")
 
     try:
         rotation = int(round(float(raw_rotation))) if raw_rotation is not None else 0
     except (TypeError, ValueError):
         return 0
     return rotation % 360
+
+
+def _is_attached_picture(stream: dict[str, Any]) -> bool:
+    disposition = stream.get("disposition")
+    if not isinstance(disposition, dict):
+        return False
+    try:
+        return int(disposition.get("attached_pic", 0) or 0) == 1
+    except (TypeError, ValueError):
+        return False
 
 
 def _trim_probe_error(stderr: str, limit: int = 1200) -> str:
@@ -111,6 +123,8 @@ def probe_video_metadata(
     path = Path(file_path).expanduser().resolve()
     if not path.is_file():
         raise FileNotFoundError(f"video file not found: {path}")
+    if timeout_seconds <= 0:
+        raise ValueError("ffprobe timeout_seconds must be greater than zero")
 
     command = [
         resolve_ffprobe_binary(ffprobe_binary),
@@ -148,22 +162,34 @@ def probe_video_metadata(
         payload = json.loads(completed.stdout or "{}")
     except json.JSONDecodeError as exc:
         raise MediaProbeError(f"ffprobe returned invalid JSON for {path.name}") from exc
+    if not isinstance(payload, dict):
+        raise MediaProbeError(f"ffprobe returned invalid payload for {path.name}")
 
     streams = payload.get("streams")
     if not isinstance(streams, list):
         raise MediaProbeError(f"ffprobe returned no stream list for {path.name}")
 
     video_stream = next(
-        (stream for stream in streams if stream.get("codec_type") == "video"), None
+        (
+            stream
+            for stream in streams
+            if isinstance(stream, dict)
+            and stream.get("codec_type") == "video"
+            and not _is_attached_picture(stream)
+        ),
+        None,
     )
     if not isinstance(video_stream, dict):
         raise MediaProbeError(f"file contains no video stream: {path.name}")
 
     audio_streams = [
-        stream for stream in streams if isinstance(stream, dict) and stream.get("codec_type") == "audio"
+        stream
+        for stream in streams
+        if isinstance(stream, dict) and stream.get("codec_type") == "audio"
     ]
     audio_stream = audio_streams[0] if audio_streams else None
-    format_info = payload.get("format") if isinstance(payload.get("format"), dict) else {}
+    raw_format = payload.get("format")
+    format_info = raw_format if isinstance(raw_format, dict) else {}
 
     duration = _positive_float(format_info.get("duration")) or _positive_float(
         video_stream.get("duration")
