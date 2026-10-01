@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from pathlib import Path
+from typing import Any, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
@@ -27,13 +28,33 @@ class SourceType(str, Enum):
     other = "other"
 
 
+class ProvenanceType(str, Enum):
+    """Where the material came from; this is intentionally separate from rights."""
+
+    user_provided = "user_provided"
+    third_party_platform = "third_party_platform"
+    official_public_source = "official_public_source"
+    public_record = "public_record"
+    stock_provider = "stock_provider"
+    other = "other"
+
+
 class RightsStatus(str, Enum):
+    """Reuse/publication rights status, independent from source provenance."""
+
     user_owned = "user_owned"
     licensed = "licensed"
     permission_confirmed = "permission_confirmed"
     public_domain = "public_domain"
-    official_public_source = "official_public_source"
     unknown_review_required = "unknown_review_required"
+
+
+_PUBLISHABLE_RIGHTS = {
+    RightsStatus.user_owned,
+    RightsStatus.licensed,
+    RightsStatus.permission_confirmed,
+    RightsStatus.public_domain,
+}
 
 
 class SceneType(str, Enum):
@@ -65,6 +86,7 @@ class NarrativePurpose(str, Enum):
 class SourceAsset(BaseModel):
     id: str = Field(default_factory=lambda: f"source_{uuid4().hex[:12]}")
     source_type: SourceType
+    provenance: ProvenanceType = ProvenanceType.other
     title: str = ""
     source_url: str = ""
     publisher: str = ""
@@ -84,9 +106,39 @@ class SourceAsset(BaseModel):
 
     created_at: datetime = Field(default_factory=utc_now)
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_rights_status(cls, data: Any):
+        """Load early Documentary manifests without treating provenance as permission.
+
+        The first prototype incorrectly used ``official_public_source`` as a rights
+        state. Preserve the provenance signal while downgrading reuse rights to
+        review-required when such a manifest is loaded.
+        """
+        if isinstance(data, dict) and data.get("rights_status") == "official_public_source":
+            migrated = dict(data)
+            migrated.setdefault("provenance", ProvenanceType.official_public_source.value)
+            migrated["rights_status"] = RightsStatus.unknown_review_required.value
+            return migrated
+        return data
+
+    @property
+    def has_local_copy(self) -> bool:
+        """Whether a real local file currently exists for technical processing."""
+        return bool(self.local_path) and Path(self.local_path).is_file()
+
     @property
     def is_renderable(self) -> bool:
-        return bool(self.local_path)
+        """Technical renderability only; publication rights are checked separately."""
+        return self.has_local_copy
+
+    @property
+    def rights_cleared_for_publish(self) -> bool:
+        return self.rights_status in _PUBLISHABLE_RIGHTS
+
+    @property
+    def is_publishable(self) -> bool:
+        return self.has_local_copy and self.rights_cleared_for_publish
 
 
 class DocumentaryScene(BaseModel):
@@ -131,6 +183,7 @@ class DocumentaryProject(BaseModel):
     id: str
     title: str
     master_language: str = "en"
+    revision: int = Field(default=0, ge=0)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
     sources: list[SourceAsset] = Field(default_factory=list)
