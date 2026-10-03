@@ -458,7 +458,15 @@ class DocumentaryScene(BaseModel):
 
 class DocumentaryPlan(BaseModel):
     version: int = 1
+    story_plan_fingerprint: str = ""
     scenes: list[DocumentaryScene] = Field(default_factory=list)
+
+    @field_validator("story_plan_fingerprint")
+    @classmethod
+    def validate_story_plan_fingerprint(cls, value: str) -> str:
+        if value and not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise ValueError("invalid story plan fingerprint")
+        return value
 
 
 class DocumentaryProject(BaseModel):
