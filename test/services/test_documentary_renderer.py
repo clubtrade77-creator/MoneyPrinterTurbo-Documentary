@@ -315,6 +315,42 @@ def test_render_documentary_rejects_wrong_output_metadata_before_publish(
     assert not list(output.parent.glob(".master-*.mp4"))
 
 
+def test_render_documentary_rejects_wrong_output_duration_before_publish(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _project_with_video_source(tmp_path, has_audio=False)
+    _save_scene(project, source, tmp_path, start=0.0, end=2.0)
+
+    def fake_run(command, **kwargs):
+        Path(command[-1]).write_bytes(b"rendered-wrong-duration")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.subprocess.run",
+        fake_run,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.probe_video_metadata",
+        lambda path: VideoMetadata(
+            duration_seconds=1.0,
+            width=1920,
+            height=1080,
+            fps=30,
+            has_audio=True,
+            video_codec="h264",
+            audio_codec="aac",
+            container="mov,mp4",
+            file_size_bytes=Path(path).stat().st_size,
+        ),
+    )
+
+    with pytest.raises(DocumentaryRenderError, match="duration mismatch"):
+        render_documentary(project.id, root=tmp_path)
+
+    assert not documentary_render_path(project.id, tmp_path).exists()
+
+
 def test_render_documentary_rejects_missing_audio_stream_before_publish(
     tmp_path: Path,
     monkeypatch,
