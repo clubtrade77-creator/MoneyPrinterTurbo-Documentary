@@ -58,6 +58,15 @@ def _ensure_model_loaded() -> bool:
     return True
 
 
+def get_whisper_model():
+    """Return the shared Faster-Whisper model, loading it once on first use."""
+    if WhisperModel is None:
+        raise RuntimeError("faster_whisper is not available")
+    if not _ensure_model_loaded() or model is None:
+        raise RuntimeError("failed to load faster_whisper model")
+    return model
+
+
 def create(
     audio_file,
     subtitle_file: str = "",
