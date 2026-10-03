@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 from typing import Callable
@@ -296,10 +297,26 @@ def plan_story(
     generator = generate_fn or llm_service.generate_text
     response = generator(prompt)
     plan = parse_story_plan_response(response)
+    if not math.isclose(
+        plan.target_duration_seconds,
+        target_duration_seconds,
+        rel_tol=0.0,
+        abs_tol=0.01,
+    ):
+        raise StoryPlannerError(
+            "story planner changed the requested target duration"
+        )
+
     validate_story_plan_evidence(plan, transcripts)
+    referenced_source_ids = {
+        evidence.source_id
+        for beat in plan.beats
+        for evidence in beat.evidence
+    }
     plan.transcript_fingerprints = {
         transcript.source_id: _transcript_fingerprint(transcript)
         for transcript in transcripts
+        if transcript.source_id in referenced_source_ids
     }
 
     _atomic_write_json(
@@ -324,13 +341,16 @@ def load_story_plan(
     except (json.JSONDecodeError, ValueError) as exc:
         raise StoryPlannerError(f"invalid documentary story plan: {project_id}") from exc
 
-    source_ids = []
-    seen = set()
-    for beat in plan.beats:
-        for evidence in beat.evidence:
-            if evidence.source_id not in seen:
-                seen.add(evidence.source_id)
-                source_ids.append(evidence.source_id)
+    if plan.transcript_fingerprints:
+        source_ids = list(plan.transcript_fingerprints)
+    else:
+        source_ids = []
+        seen = set()
+        for beat in plan.beats:
+            for evidence in beat.evidence:
+                if evidence.source_id not in seen:
+                    seen.add(evidence.source_id)
+                    source_ids.append(evidence.source_id)
 
     transcripts = _load_transcripts_for_planning(
         project_id,
