@@ -148,7 +148,7 @@ def _build_documentary_render_command_and_expectations(
     width: int = DEFAULT_RENDER_WIDTH,
     height: int = DEFAULT_RENDER_HEIGHT,
     fps: int = DEFAULT_RENDER_FPS,
-) -> tuple[list[str], float, int]:
+) -> tuple[list[str], float, int, int]:
     _validate_render_settings(width, height, fps)
     project = load_project(project_id, root)
     if not project.plan.scenes:
@@ -249,7 +249,7 @@ def _build_documentary_render_command_and_expectations(
         ]
     )
     expected_duration = sum(duration for _, _, duration in resolved_scenes)
-    return command, expected_duration, len(resolved_scenes)
+    return command, expected_duration, len(resolved_scenes), project.revision
 
 
 def build_documentary_render_command(
@@ -262,7 +262,7 @@ def build_documentary_render_command(
     fps: int = DEFAULT_RENDER_FPS,
 ) -> list[str]:
     """Build one shell-free FFmpeg command for the current documentary timeline."""
-    command, _, _ = _build_documentary_render_command_and_expectations(
+    command, _, _, _ = _build_documentary_render_command_and_expectations(
         project_id,
         root=root,
         output_path=output_path,
@@ -339,7 +339,7 @@ def render_documentary(
     staged_path = Path(staged_name)
 
     try:
-        command, expected_duration, scene_count = (
+        command, expected_duration, scene_count, project_revision = (
             _build_documentary_render_command_and_expectations(
                 project_id,
                 root=root,
@@ -395,6 +395,13 @@ def render_documentary(
             expected_duration=expected_duration,
             scene_count=scene_count,
         )
+
+        current_project = load_project(project_id, root)
+        if current_project.revision != project_revision:
+            raise DocumentaryRenderError(
+                "documentary project changed while rendering; "
+                "discarding stale render"
+            )
 
         os.replace(staged_path, output_path)
         return output_path
