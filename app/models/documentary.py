@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from enum import Enum
-import re
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
@@ -133,6 +133,13 @@ class DocumentaryTranscript(BaseModel):
     full_text: str = ""
     segments: list[TranscriptSegment] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
+
+    @field_validator("source_id")
+    @classmethod
+    def validate_source_id(cls, value: str) -> str:
+        if not _SOURCE_ID_RE.fullmatch(value or ""):
+            raise ValueError("invalid documentary source id")
+        return value
 
 
 class VideoMetadata(BaseModel):
