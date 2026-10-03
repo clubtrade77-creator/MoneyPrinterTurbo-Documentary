@@ -198,6 +198,22 @@ def test_story_plan_rejects_unsupported_schema_version():
         parse_story_plan_response(json.dumps(payload))
 
 
+def test_story_plan_rejects_unsafe_beat_id():
+    payload = _plan_payload()
+    payload["beats"][0]["id"] = "../beat"
+
+    with pytest.raises(StoryPlannerError, match="invalid story plan"):
+        parse_story_plan_response(json.dumps(payload))
+
+
+def test_story_plan_rejects_oversized_title():
+    payload = _plan_payload()
+    payload["title"] = "x" * 251
+
+    with pytest.raises(StoryPlannerError, match="invalid story plan"):
+        parse_story_plan_response(json.dumps(payload))
+
+
 def test_story_plan_requires_hook_first():
     payload = _plan_payload()
     payload["beats"][0]["purpose"] = "context"
