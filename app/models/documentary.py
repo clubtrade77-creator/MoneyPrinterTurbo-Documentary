@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def utc_now() -> datetime:
@@ -148,6 +148,8 @@ class DocumentaryTranscript(BaseModel):
 
 
 class StoryEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     source_id: str
     segment_ids: list[int] = Field(min_length=1)
     note: str = ""
@@ -170,6 +172,8 @@ class StoryEvidence(BaseModel):
 
 
 class StoryBeat(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(default_factory=lambda: f"beat_{uuid4().hex[:12]}")
     purpose: NarrativePurpose
     title: str
@@ -192,11 +196,14 @@ class StoryBeat(BaseModel):
 
 
 class StoryPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     version: int = 1
     title: str
     angle: str
     hook: str
     target_duration_seconds: float = Field(default=600, ge=60, le=1800)
+    transcript_fingerprints: dict[str, str] = Field(default_factory=dict)
     beats: list[StoryBeat] = Field(min_length=1, max_length=30)
     created_at: datetime = Field(default_factory=utc_now)
 
