@@ -36,6 +36,10 @@ class StoryPlannerError(RuntimeError):
     """Raised when a grounded documentary story plan cannot be produced safely."""
 
 
+class _NonRetryableStoryPlannerError(StoryPlannerError):
+    """Raised for provider/runtime failures that retries cannot repair."""
+
+
 def story_plan_path(
     project_id: str,
     root: str | os.PathLike | None = None,
@@ -471,6 +475,11 @@ def plan_story(
                         plan=candidate,
                     )
                 )
+                if review_response.strip().startswith("Error:"):
+                    raw_error = review_response.strip()
+                    raise _NonRetryableStoryPlannerError(
+                        raw_error.removeprefix("Error:").strip() or raw_error
+                    )
                 grounding_issues = parse_story_grounding_review_response(
                     review_response
                 )
@@ -482,6 +491,8 @@ def plan_story(
 
             plan = candidate
             break
+        except _NonRetryableStoryPlannerError:
+            raise
         except StoryPlannerError as exc:
             last_error = exc
             if attempt >= MAX_STORY_PLAN_ATTEMPTS:
