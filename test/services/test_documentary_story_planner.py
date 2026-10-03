@@ -121,6 +121,10 @@ def _plan_payload(source_id: str = "source_story") -> dict:
     }
 
 
+def _approve_review(prompt: str) -> str:
+    return json.dumps({"supported": True, "issues": []})
+
+
 def _register_transcript(tmp_path: Path):
     project = create_project(
         "Story planner case",
@@ -273,6 +277,7 @@ def test_plan_story_persists_grounded_plan_and_loads_it(tmp_path: Path):
         target_duration_seconds=120,
         root=tmp_path,
         generate_fn=generate,
+        review_fn=_approve_review,
     )
 
     assert plan.title == "The Traffic Stop"
@@ -294,6 +299,7 @@ def test_plan_story_rejects_llm_target_duration_change(tmp_path: Path):
             target_duration_seconds=120,
             root=tmp_path,
             generate_fn=lambda prompt: json.dumps(payload),
+            review_fn=_approve_review,
         )
 
     assert not story_plan_path(project.id, tmp_path).exists()
@@ -318,6 +324,7 @@ def test_plan_story_retries_invalid_duration_then_succeeds(tmp_path: Path):
         target_duration_seconds=120,
         root=tmp_path,
         generate_fn=generate,
+        review_fn=_approve_review,
     )
 
     assert plan.title == "The Traffic Stop"
@@ -340,6 +347,7 @@ def test_plan_story_does_not_retry_provider_error(tmp_path: Path):
             target_duration_seconds=120,
             root=tmp_path,
             generate_fn=generate,
+            review_fn=_approve_review,
         )
 
     assert len(calls) == 1
@@ -401,6 +409,7 @@ def test_story_plan_fingerprints_only_sources_it_actually_uses(tmp_path: Path):
         target_duration_seconds=120,
         root=tmp_path,
         generate_fn=lambda prompt: json.dumps(payload),
+        review_fn=_approve_review,
     )
 
     assert set(plan.transcript_fingerprints) == {source.id}
@@ -415,6 +424,7 @@ def test_load_story_plan_rejects_changed_transcript_evidence(tmp_path: Path):
         target_duration_seconds=120,
         root=tmp_path,
         generate_fn=lambda prompt: json.dumps(payload),
+        review_fn=_approve_review,
     )
 
     transcript.segments[0].text = "The transcript was manually changed."
@@ -439,6 +449,7 @@ def test_plan_story_rejects_llm_evidence_not_in_transcript(tmp_path: Path):
             target_duration_seconds=120,
             root=tmp_path,
             generate_fn=lambda prompt: json.dumps(payload),
+            review_fn=_approve_review,
         )
 
     assert not story_plan_path(project.id, tmp_path).exists()
@@ -541,6 +552,30 @@ def test_plan_story_retries_after_semantic_grounding_failure(tmp_path: Path):
     assert len(review_prompts) == 2
     assert "semantic grounding review failed" in generation_prompts[1]
     assert "danger or high stakes" in generation_prompts[1]
+
+
+def test_plan_story_requires_reviewer_for_custom_generator(tmp_path: Path):
+    project, source, _ = _register_transcript(tmp_path)
+    payload = _plan_payload(source.id)
+
+    with pytest.raises(ValueError, match="review_fn is required"):
+        plan_story(
+            project.id,
+            target_duration_seconds=120,
+            root=tmp_path,
+            generate_fn=lambda prompt: json.dumps(payload),
+        )
+
+
+def test_load_story_plan_rejects_legacy_unreviewed_plan(tmp_path: Path):
+    project, source, _ = _register_transcript(tmp_path)
+    payload = _plan_payload(source.id)
+    path = story_plan_path(project.id, tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(StoryPlannerError, match="not semantically reviewed"):
+        load_story_plan(project.id, root=tmp_path)
 
 
 def test_story_planner_refuses_silent_prompt_truncation():
