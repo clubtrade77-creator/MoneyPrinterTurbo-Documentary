@@ -19,8 +19,10 @@ from app.services.documentary.project import (
 from app.services.documentary.story_planner import (
     MAX_STORY_PROMPT_CHARS,
     StoryPlannerError,
+    build_story_grounding_review_prompt,
     build_story_planner_prompt,
     load_story_plan,
+    parse_story_grounding_review_response,
     parse_story_plan_response,
     plan_story,
     story_plan_path,
@@ -411,6 +413,91 @@ def test_plan_story_rejects_provider_error_without_writing_file(tmp_path: Path):
         )
 
     assert not story_plan_path(project.id, tmp_path).exists()
+
+
+def test_grounding_review_prompt_contains_plan_and_strict_fact_rules():
+    transcript = _transcript()
+    plan = StoryPlan.model_validate(_plan_payload())
+
+    prompt = build_story_grounding_review_prompt(
+        transcripts=[transcript],
+        plan=plan,
+    )
+
+    assert "strict factual grounding reviewer" in prompt
+    assert "The officer approaches the vehicle." in prompt
+    assert "The Traffic Stop" in prompt
+    assert "does NOT by itself establish escalation" in prompt
+
+
+def test_parse_grounding_review_requires_consistent_verdict():
+    assert parse_story_grounding_review_response(
+        json.dumps({"supported": True, "issues": []})
+    ) == []
+
+    issues = parse_story_grounding_review_response(
+        json.dumps(
+            {
+                "supported": False,
+                "issues": ["The plan invents a danger level."],
+            }
+        )
+    )
+    assert issues == ["The plan invents a danger level."]
+
+    with pytest.raises(StoryPlannerError, match="cannot contain issues"):
+        parse_story_grounding_review_response(
+            json.dumps(
+                {
+                    "supported": True,
+                    "issues": ["contradictory"],
+                }
+            )
+        )
+
+
+def test_plan_story_retries_after_semantic_grounding_failure(tmp_path: Path):
+    project, source, _ = _register_transcript(tmp_path)
+    first = _plan_payload(source.id)
+    first["angle"] = "A dangerous high-stakes confrontation unfolds."
+    second = _plan_payload(source.id)
+
+    generation_responses = [json.dumps(first), json.dumps(second)]
+    review_responses = [
+        json.dumps(
+            {
+                "supported": False,
+                "issues": [
+                    "The transcript does not establish danger or high stakes."
+                ],
+            }
+        ),
+        json.dumps({"supported": True, "issues": []}),
+    ]
+    generation_prompts = []
+    review_prompts = []
+
+    def generate(prompt: str) -> str:
+        generation_prompts.append(prompt)
+        return generation_responses.pop(0)
+
+    def review(prompt: str) -> str:
+        review_prompts.append(prompt)
+        return review_responses.pop(0)
+
+    plan = plan_story(
+        project.id,
+        target_duration_seconds=120,
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=review,
+    )
+
+    assert plan.angle == second["angle"]
+    assert len(generation_prompts) == 2
+    assert len(review_prompts) == 2
+    assert "semantic grounding review failed" in generation_prompts[1]
+    assert "danger or high stakes" in generation_prompts[1]
 
 
 def test_story_planner_refuses_silent_prompt_truncation():
