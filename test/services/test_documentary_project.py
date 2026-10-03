@@ -11,6 +11,7 @@ from app.models.documentary import (
     SceneType,
     SourceAsset,
     SourceType,
+    VideoMetadata,
 )
 from app.services.documentary import project as project_service
 from app.services.documentary.project import (
@@ -88,7 +89,9 @@ def test_extract_youtube_video_id(url: str, video_id: str):
     assert extract_youtube_video_id(url) == video_id
 
 
-def test_youtube_asset_keeps_provenance_separate_from_rights(tmp_path: Path):
+def test_youtube_asset_keeps_provenance_separate_from_rights(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     project = create_project(
         "YouTube Case", project_id="doc_youtube_case", root=tmp_path
     )
@@ -112,6 +115,21 @@ def test_youtube_asset_keeps_provenance_separate_from_rights(tmp_path: Path):
 
     media_file = tmp_path / "authorized.mp4"
     media_file.write_bytes(b"authorized-local-copy")
+    monkeypatch.setattr(
+        project_service,
+        "probe_video_metadata",
+        lambda path: VideoMetadata(
+            duration_seconds=10,
+            width=1280,
+            height=720,
+            fps=30,
+            has_audio=True,
+            video_codec="h264",
+            audio_codec="aac",
+            container="mov,mp4",
+            file_size_bytes=Path(path).stat().st_size,
+        ),
+    )
     attached = attach_local_copy_to_source(
         project.id, source.id, media_file, root=tmp_path
     )
@@ -290,6 +308,22 @@ def test_failed_local_copy_manifest_save_rolls_back_new_file(
 
     media_file = tmp_path / "authorized.mp4"
     media_file.write_bytes(b"authorized-local-copy")
+
+    monkeypatch.setattr(
+        project_service,
+        "probe_video_metadata",
+        lambda path: VideoMetadata(
+            duration_seconds=10,
+            width=1280,
+            height=720,
+            fps=30,
+            has_audio=True,
+            video_codec="h264",
+            audio_codec="aac",
+            container="mov,mp4",
+            file_size_bytes=Path(path).stat().st_size,
+        ),
+    )
 
     def fail_write(*args, **kwargs):
         raise RuntimeError("simulated manifest write failure")
