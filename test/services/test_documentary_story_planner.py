@@ -345,6 +345,33 @@ def test_plan_story_does_not_retry_provider_error(tmp_path: Path):
     assert len(calls) == 1
 
 
+def test_plan_story_does_not_retry_grounding_reviewer_provider_error(tmp_path: Path):
+    project, source, _ = _register_transcript(tmp_path)
+    payload = _plan_payload(source.id)
+    generation_calls = []
+    review_calls = []
+
+    def generate(prompt: str) -> str:
+        generation_calls.append(prompt)
+        return json.dumps(payload)
+
+    def review(prompt: str) -> str:
+        review_calls.append(prompt)
+        return "Error: reviewer unavailable"
+
+    with pytest.raises(StoryPlannerError, match="reviewer unavailable"):
+        plan_story(
+            project.id,
+            target_duration_seconds=120,
+            root=tmp_path,
+            generate_fn=generate,
+            review_fn=review,
+        )
+
+    assert len(generation_calls) == 1
+    assert len(review_calls) == 1
+
+
 def test_story_plan_fingerprints_only_sources_it_actually_uses(tmp_path: Path):
     project, source, _ = _register_transcript(tmp_path)
 
