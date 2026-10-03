@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.models.documentary import RightsStatus, VideoMetadata
+from app.models.documentary import RightsStatus, SourceAsset, SourceType, VideoMetadata
 from app.services.documentary import project as project_service
 from app.services.documentary.metadata import MediaProbeError
 from app.services.documentary.project import (
@@ -108,3 +108,41 @@ def test_youtube_local_copy_probe_failure_rolls_back_copy(
     assert loaded.sources[0].local_path == ""
     assert loaded.sources[0].checksum_sha256 == ""
     assert loaded.sources[0].video_metadata is None
+
+
+def test_news_video_local_copy_is_probed_and_persisted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    project = create_project(
+        "News video ingest", project_id="doc_news_video_ingest", root=tmp_path
+    )
+    source = SourceAsset(
+        id="source_news_video",
+        source_type=SourceType.news,
+        title="News footage",
+    )
+    add_source(project.id, source, root=tmp_path)
+
+    media_file = tmp_path / "news.mov"
+    media_file.write_bytes(b"news-video-copy")
+    expected = VideoMetadata(
+        duration_seconds=18.0,
+        width=1280,
+        height=720,
+        fps=25.0,
+        has_audio=True,
+        video_codec="h264",
+        audio_codec="aac",
+        container="mov,mp4",
+        file_size_bytes=len(b"news-video-copy"),
+    )
+
+    monkeypatch.setattr(project_service, "probe_video_metadata", lambda path: expected)
+
+    attached = attach_local_copy_to_source(
+        project.id, source.id, media_file, root=tmp_path
+    )
+
+    assert attached.video_metadata == expected
+    loaded = load_project(project.id, tmp_path)
+    assert loaded.sources[0].video_metadata == expected
