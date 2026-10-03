@@ -335,7 +335,10 @@ def plan_story(
     for attempt in range(1, MAX_STORY_PLAN_ATTEMPTS + 1):
         response = generator(current_prompt)
         if response.strip().startswith("Error:"):
-            raise parse_story_plan_response(response)
+            raw_error = response.strip()
+            raise StoryPlannerError(
+                raw_error.removeprefix("Error:").strip() or raw_error
+            )
 
         try:
             candidate = parse_story_plan_response(response)
