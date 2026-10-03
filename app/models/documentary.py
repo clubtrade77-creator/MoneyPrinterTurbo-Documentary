@@ -413,6 +413,7 @@ class NarrationAudioAsset(BaseModel):
     language: str = Field(min_length=2, max_length=32)
     local_path: str
     checksum_sha256: str = Field(min_length=64, max_length=64)
+    narration_text_fingerprint: str = ""
     duration_seconds: float = Field(gt=0)
     audio_codec: str = ""
     file_size_bytes: int = Field(default=0, ge=0)
@@ -422,6 +423,13 @@ class NarrationAudioAsset(BaseModel):
     def validate_checksum(cls, value: str) -> str:
         if not re.fullmatch(r"[0-9a-f]{64}", value or ""):
             raise ValueError("invalid narration audio checksum")
+        return value
+
+    @field_validator("narration_text_fingerprint")
+    @classmethod
+    def validate_narration_text_fingerprint(cls, value: str) -> str:
+        if value and not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise ValueError("invalid narration text fingerprint")
         return value
 
 
