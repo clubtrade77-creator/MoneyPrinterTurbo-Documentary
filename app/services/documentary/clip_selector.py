@@ -88,37 +88,44 @@ def _group_evidence_segments(segments, max_merge_gap_seconds: float):
     return groups
 
 
-def build_clip_plan(
-    project_id: str,
-    *,
-    root: str | os.PathLike | None = None,
-    padding_seconds: float = DEFAULT_CLIP_PADDING_SECONDS,
-    max_merge_gap_seconds: float = DEFAULT_MAX_MERGE_GAP_SECONDS,
-) -> ClipPlan:
-    """Convert grounded Story Plan evidence into exact renderable source ranges."""
-    _validate_selector_settings(padding_seconds, max_merge_gap_seconds)
-
-    story_plan = load_story_plan(project_id, root=root)
-    project = load_project(project_id, root)
-    sources = {source.id: source for source in project.sources}
-
-    referenced_source_ids = []
+def _referenced_source_ids(story_plan: StoryPlan) -> list[str]:
+    source_ids = []
     seen_source_ids = set()
     for beat in story_plan.beats:
         for evidence in beat.evidence:
             if evidence.source_id not in seen_source_ids:
                 seen_source_ids.add(evidence.source_id)
-                referenced_source_ids.append(evidence.source_id)
+                source_ids.append(evidence.source_id)
+    return source_ids
 
+
+def _load_current_selection_context(
+    project_id: str,
+    story_plan: StoryPlan,
+    *,
+    root: str | os.PathLike | None,
+):
+    project = load_project(project_id, root)
     transcripts = {
         source_id: load_source_transcript(
             project_id,
             source_id,
             root=root,
         )
-        for source_id in referenced_source_ids
+        for source_id in _referenced_source_ids(story_plan)
     }
+    return project, transcripts
 
+
+def _build_grounded_clips(
+    *,
+    story_plan: StoryPlan,
+    project,
+    transcripts,
+    padding_seconds: float,
+    max_merge_gap_seconds: float,
+) -> list[ClipSelection]:
+    sources = {source.id: source for source in project.sources}
     clips: list[ClipSelection] = []
     clip_number = 0
 
@@ -199,8 +206,73 @@ def build_clip_plan(
 
     if not clips:
         raise ClipSelectorError("story plan produced no renderable clip selections")
+    return clips
+
+
+def _validate_clip_plan_grounding(
+    project_id: str,
+    clip_plan: ClipPlan,
+    story_plan: StoryPlan,
+    *,
+    root: str | os.PathLike | None,
+) -> None:
+    _validate_selector_settings(
+        clip_plan.padding_seconds,
+        clip_plan.max_merge_gap_seconds,
+    )
+    project, transcripts = _load_current_selection_context(
+        project_id,
+        story_plan,
+        root=root,
+    )
+    expected_clips = _build_grounded_clips(
+        story_plan=story_plan,
+        project=project,
+        transcripts=transcripts,
+        padding_seconds=clip_plan.padding_seconds,
+        max_merge_gap_seconds=clip_plan.max_merge_gap_seconds,
+    )
+    actual_payload = [
+        clip.model_dump(mode="json")
+        for clip in clip_plan.clips
+    ]
+    expected_payload = [
+        clip.model_dump(mode="json")
+        for clip in expected_clips
+    ]
+    if actual_payload != expected_payload:
+        raise ClipSelectorError(
+            "documentary clip plan does not match grounded transcript evidence"
+        )
+
+
+def build_clip_plan(
+    project_id: str,
+    *,
+    root: str | os.PathLike | None = None,
+    padding_seconds: float = DEFAULT_CLIP_PADDING_SECONDS,
+    max_merge_gap_seconds: float = DEFAULT_MAX_MERGE_GAP_SECONDS,
+) -> ClipPlan:
+    """Convert grounded Story Plan evidence into exact renderable source ranges."""
+    _validate_selector_settings(padding_seconds, max_merge_gap_seconds)
+
+    story_plan = load_story_plan(project_id, root=root)
+    project, transcripts = _load_current_selection_context(
+        project_id,
+        story_plan,
+        root=root,
+    )
+    clips = _build_grounded_clips(
+        story_plan=story_plan,
+        project=project,
+        transcripts=transcripts,
+        padding_seconds=padding_seconds,
+        max_merge_gap_seconds=max_merge_gap_seconds,
+    )
 
     return ClipPlan(
+        padding_seconds=padding_seconds,
+        max_merge_gap_seconds=max_merge_gap_seconds,
         story_plan_fingerprint=story_plan_fingerprint(story_plan),
         transcript_fingerprints=dict(story_plan.transcript_fingerprints),
         clips=clips,
@@ -231,6 +303,12 @@ def load_clip_plan(
         raise ClipSelectorError(
             "documentary clip plan is stale; transcript evidence changed"
         )
+    _validate_clip_plan_grounding(
+        project_id,
+        clip_plan,
+        story_plan,
+        root=root,
+    )
     return clip_plan
 
 
@@ -271,6 +349,12 @@ def apply_clip_plan(
         raise ClipSelectorError(
             "documentary clip plan is stale; transcript evidence changed"
         )
+    _validate_clip_plan_grounding(
+        project_id,
+        plan,
+        current_story_plan,
+        root=root,
+    )
 
     project = load_project(project_id, root)
     sources = {source.id: source for source in project.sources}
