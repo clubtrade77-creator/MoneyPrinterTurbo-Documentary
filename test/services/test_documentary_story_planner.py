@@ -464,6 +464,7 @@ def test_plan_story_rejects_provider_error_without_writing_file(tmp_path: Path):
             target_duration_seconds=120,
             root=tmp_path,
             generate_fn=lambda prompt: "Error: provider unavailable",
+            review_fn=_approve_review,
         )
 
     assert not story_plan_path(project.id, tmp_path).exists()
