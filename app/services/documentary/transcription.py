@@ -128,8 +128,9 @@ def transcribe_media(
         "vad_filter": True,
         "vad_parameters": {"min_silence_duration_ms": 500},
     }
-    if language:
-        transcribe_kwargs["language"] = language
+    requested_language = (language or "").strip() or None
+    if requested_language:
+        transcribe_kwargs["language"] = requested_language
     if subtitle_service.initial_prompt:
         transcribe_kwargs["initial_prompt"] = subtitle_service.initial_prompt
 
@@ -183,15 +184,21 @@ def transcribe_media(
         raise TranscriptionError(f"Whisper transcription failed for {path.name}: {exc}") from exc
 
     detected_language = str(getattr(info, "language", "") or "")
-    language_probability = _probability(
-        getattr(info, "language_probability", None)
+    language_mode = "forced" if requested_language else "auto"
+    resolved_language = requested_language or detected_language
+    language_probability = (
+        None
+        if requested_language
+        else _probability(getattr(info, "language_probability", None))
     )
     full_text = " ".join(segment.text for segment in segments).strip()
 
     return DocumentaryTranscript(
         source_id=source_id,
         source_checksum_sha256=source_checksum_sha256,
-        language=detected_language,
+        language=resolved_language,
+        language_mode=language_mode,
+        requested_language=requested_language,
         language_probability=language_probability,
         media_duration_seconds=media_duration_seconds,
         model_size=model_name or str(subtitle_service.model_size),
