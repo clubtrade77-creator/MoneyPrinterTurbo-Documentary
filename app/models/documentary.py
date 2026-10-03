@@ -408,6 +408,23 @@ class SourceAsset(BaseModel):
         return self.has_local_copy and self.rights_cleared_for_publish
 
 
+class NarrationAudioAsset(BaseModel):
+    scene_id: str = Field(min_length=1, max_length=160)
+    language: str = Field(min_length=2, max_length=32)
+    local_path: str
+    checksum_sha256: str = Field(min_length=64, max_length=64)
+    duration_seconds: float = Field(gt=0)
+    audio_codec: str = ""
+    file_size_bytes: int = Field(default=0, ge=0)
+
+    @field_validator("checksum_sha256")
+    @classmethod
+    def validate_checksum(cls, value: str) -> str:
+        if not re.fullmatch(r"[0-9a-f]{64}", value or ""):
+            raise ValueError("invalid narration audio checksum")
+        return value
+
+
 class DocumentaryScene(BaseModel):
     id: str = Field(default_factory=lambda: f"scene_{uuid4().hex[:12]}")
     scene_type: SceneType
@@ -480,6 +497,7 @@ class DocumentaryProject(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
     sources: list[SourceAsset] = Field(default_factory=list)
+    narration_audio: list[NarrationAudioAsset] = Field(default_factory=list)
     plan: DocumentaryPlan = Field(default_factory=DocumentaryPlan)
 
     @model_validator(mode="after")
@@ -491,6 +509,15 @@ class DocumentaryProject(BaseModel):
         scene_ids = [scene.id for scene in self.plan.scenes]
         if len(scene_ids) != len(set(scene_ids)):
             raise ValueError("documentary project contains duplicate scene ids")
+
+        narration_keys = [
+            (asset.scene_id, asset.language)
+            for asset in self.narration_audio
+        ]
+        if len(narration_keys) != len(set(narration_keys)):
+            raise ValueError(
+                "documentary project contains duplicate narration audio assets"
+            )
 
         known_sources = set(source_ids)
         for scene in self.plan.scenes:
