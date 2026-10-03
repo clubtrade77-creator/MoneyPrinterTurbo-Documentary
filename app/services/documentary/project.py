@@ -195,8 +195,11 @@ def _load_project_unlocked(
 def _validate_local_source_paths(
     project: DocumentaryProject, root: str | os.PathLike | None = None
 ) -> None:
-    """Keep persisted local media references inside this project's sources folder."""
-    sources_dir = (project_dir(project.id, root) / "sources").resolve()
+    """Keep persisted local media references inside this documentary project."""
+    base_dir = project_dir(project.id, root).resolve()
+    sources_dir = (base_dir / "sources").resolve()
+    audio_dir = (base_dir / "audio").resolve()
+
     for source in project.sources:
         if not source.local_path:
             continue
@@ -204,6 +207,14 @@ def _validate_local_source_paths(
         if sources_dir != resolved.parent and sources_dir not in resolved.parents:
             raise ValueError(
                 f"documentary source local_path escapes project sources directory: {source.id}"
+            )
+
+    for asset in project.narration_audio:
+        resolved = Path(asset.local_path).expanduser().resolve()
+        if audio_dir != resolved.parent and audio_dir not in resolved.parents:
+            raise ValueError(
+                "documentary narration audio path escapes project audio directory: "
+                f"{asset.scene_id}/{asset.language}"
             )
 
 
