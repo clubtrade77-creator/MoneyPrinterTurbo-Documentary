@@ -20,6 +20,7 @@ from app.services.documentary.project import (
     attach_local_copy_to_source,
     attach_local_file,
     create_project,
+    default_documentary_root,
     load_project,
     project_dir,
     save_project,
@@ -28,6 +29,18 @@ from app.services.documentary.youtube_source import (
     build_youtube_source_asset,
     extract_youtube_video_id,
 )
+
+
+def test_default_documentary_root_is_independent_of_current_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.chdir(tmp_path)
+
+    root = default_documentary_root()
+
+    assert root.is_absolute()
+    assert root.name == "documentary"
+    assert root.parent.name == "storage"
 
 
 def test_create_documentary_project_layout(tmp_path: Path):
