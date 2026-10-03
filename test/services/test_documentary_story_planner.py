@@ -185,6 +185,14 @@ def test_story_plan_rejects_unknown_llm_fields():
         parse_story_plan_response(json.dumps(payload))
 
 
+def test_story_plan_rejects_unsupported_schema_version():
+    payload = _plan_payload()
+    payload["version"] = 2
+
+    with pytest.raises(StoryPlannerError, match="invalid story plan"):
+        parse_story_plan_response(json.dumps(payload))
+
+
 def test_story_plan_requires_hook_first():
     payload = _plan_payload()
     payload["beats"][0]["purpose"] = "context"
@@ -252,6 +260,57 @@ def test_plan_story_persists_grounded_plan_and_loads_it(tmp_path: Path):
 
     loaded = load_story_plan(project.id, root=tmp_path)
     assert loaded == plan
+
+
+def test_plan_story_rejects_llm_target_duration_change(tmp_path: Path):
+    project, source, _ = _register_transcript(tmp_path)
+    payload = _plan_payload(source.id)
+    payload["target_duration_seconds"] = 90
+
+    with pytest.raises(StoryPlannerError, match="changed the requested target duration"):
+        plan_story(
+            project.id,
+            target_duration_seconds=120,
+            root=tmp_path,
+            generate_fn=lambda prompt: json.dumps(payload),
+        )
+
+    assert not story_plan_path(project.id, tmp_path).exists()
+
+
+def test_story_plan_fingerprints_only_sources_it_actually_uses(tmp_path: Path):
+    project, source, _ = _register_transcript(tmp_path)
+
+    second_file = tmp_path / "second.wav"
+    second_file.write_bytes(b"second-audio-source")
+    second_source = attach_local_file(
+        project.id,
+        second_file,
+        source_type=SourceType.audio,
+        root=tmp_path,
+    )
+    second_transcript = _transcript(second_source.id).model_copy(
+        update={"source_checksum_sha256": second_source.checksum_sha256}
+    )
+    transcript_path(project.id, second_source.id, tmp_path).write_text(
+        json.dumps(
+            second_transcript.model_dump(mode="json"),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = _plan_payload(source.id)
+    plan = plan_story(
+        project.id,
+        target_duration_seconds=120,
+        root=tmp_path,
+        generate_fn=lambda prompt: json.dumps(payload),
+    )
+
+    assert set(plan.transcript_fingerprints) == {source.id}
+    assert load_story_plan(project.id, root=tmp_path) == plan
 
 
 def test_load_story_plan_rejects_changed_transcript_evidence(tmp_path: Path):
