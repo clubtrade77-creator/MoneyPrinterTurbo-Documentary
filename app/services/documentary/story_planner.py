@@ -444,9 +444,12 @@ def plan_story(
     )
 
     generator = generate_fn or llm_service.generate_text
-    reviewer = review_fn
-    if reviewer is None and generate_fn is None:
-        reviewer = llm_service.generate_text
+    if generate_fn is not None and review_fn is None:
+        raise ValueError(
+            "review_fn is required when generate_fn is supplied so custom story "
+            "generation cannot bypass semantic grounding review"
+        )
+    reviewer = review_fn or llm_service.generate_text
 
     current_prompt = prompt
     plan = None
@@ -468,27 +471,27 @@ def plan_story(
                 transcripts=transcripts,
             )
 
-            if reviewer is not None:
-                review_response = reviewer(
-                    build_story_grounding_review_prompt(
-                        transcripts=transcripts,
-                        plan=candidate,
-                    )
+            review_response = reviewer(
+                build_story_grounding_review_prompt(
+                    transcripts=transcripts,
+                    plan=candidate,
                 )
-                if review_response.strip().startswith("Error:"):
-                    raw_error = review_response.strip()
-                    raise _NonRetryableStoryPlannerError(
-                        raw_error.removeprefix("Error:").strip() or raw_error
-                    )
-                grounding_issues = parse_story_grounding_review_response(
-                    review_response
+            )
+            if review_response.strip().startswith("Error:"):
+                raw_error = review_response.strip()
+                raise _NonRetryableStoryPlannerError(
+                    raw_error.removeprefix("Error:").strip() or raw_error
                 )
-                if grounding_issues:
-                    raise StoryPlannerError(
-                        "semantic grounding review failed: "
-                        + "; ".join(grounding_issues)
-                    )
+            grounding_issues = parse_story_grounding_review_response(
+                review_response
+            )
+            if grounding_issues:
+                raise StoryPlannerError(
+                    "semantic grounding review failed: "
+                    + "; ".join(grounding_issues)
+                )
 
+            candidate.grounding_reviewed = True
             plan = candidate
             break
         except _NonRetryableStoryPlannerError:
@@ -534,6 +537,11 @@ def load_story_plan(
         plan = StoryPlan.model_validate(payload)
     except (json.JSONDecodeError, ValueError) as exc:
         raise StoryPlannerError(f"invalid documentary story plan: {project_id}") from exc
+
+    if not plan.grounding_reviewed:
+        raise StoryPlannerError(
+            "documentary story plan was not semantically reviewed; regenerate it"
+        )
 
     if plan.transcript_fingerprints:
         source_ids = list(plan.transcript_fingerprints)
