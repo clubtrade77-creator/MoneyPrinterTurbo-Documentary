@@ -216,6 +216,14 @@ class StoryPlan(BaseModel):
         beat_ids = [beat.id for beat in self.beats]
         if len(beat_ids) != len(set(beat_ids)):
             raise ValueError("story plan contains duplicate beat ids")
+
+        planned_duration = sum(beat.target_duration_seconds for beat in self.beats)
+        minimum_duration = self.target_duration_seconds * 0.65
+        maximum_duration = self.target_duration_seconds * 1.35
+        if planned_duration < minimum_duration or planned_duration > maximum_duration:
+            raise ValueError(
+                "story beat durations must stay within 35% of target duration"
+            )
         return self
 
 
