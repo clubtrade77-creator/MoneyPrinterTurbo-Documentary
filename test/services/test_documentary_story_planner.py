@@ -21,6 +21,7 @@ from app.services.documentary.story_planner import (
     StoryPlannerError,
     build_story_grounding_review_prompt,
     build_story_planner_prompt,
+    build_story_specificity_review_prompt,
     load_story_plan,
     parse_story_grounding_review_response,
     parse_story_plan_response,
@@ -483,6 +484,8 @@ def test_grounding_review_prompt_contains_plan_and_strict_fact_rules():
     assert "The officer approaches the vehicle." in prompt
     assert "The Traffic Stop" in prompt
     assert "does NOT by itself establish escalation" in prompt
+    assert "does NOT by itself establish a traffic stop" in prompt
+    assert "Temporal order is not causation" in prompt
 
 
 def test_parse_grounding_review_requires_consistent_verdict():
@@ -528,6 +531,7 @@ def test_plan_story_retries_after_semantic_grounding_failure(tmp_path: Path):
             }
         ),
         json.dumps({"supported": True, "issues": []}),
+        json.dumps({"supported": True, "issues": []}),
     ]
     generation_prompts = []
     review_prompts = []
@@ -550,9 +554,71 @@ def test_plan_story_retries_after_semantic_grounding_failure(tmp_path: Path):
 
     assert plan.angle == second["angle"]
     assert len(generation_prompts) == 2
-    assert len(review_prompts) == 2
+    assert len(review_prompts) == 3
     assert "semantic grounding review failed" in generation_prompts[1]
     assert "danger or high stakes" in generation_prompts[1]
+
+
+def test_specificity_review_prompt_targets_incident_labels_and_causality():
+    transcript = _transcript()
+    plan = StoryPlan.model_validate(_plan_payload())
+
+    prompt = build_story_specificity_review_prompt(
+        transcripts=[transcript],
+        plan=plan,
+    )
+
+    assert "second, adversarial reviewer" in prompt
+    assert '"traffic stop"' in prompt
+    assert "Temporal order is not causation" in prompt
+    assert '"A triggered B"' in prompt
+    assert "If uncertain, mark the plan unsupported" in prompt
+
+
+def test_plan_story_retries_after_specificity_failure(tmp_path: Path):
+    project, source, _ = _register_transcript(tmp_path)
+    first = _plan_payload(source.id)
+    first["hook"] = "The officer approaches the vehicle, triggering what follows."
+    second = _plan_payload(source.id)
+
+    generation_responses = [json.dumps(first), json.dumps(second)]
+    review_responses = [
+        json.dumps({"supported": True, "issues": []}),
+        json.dumps(
+            {
+                "supported": False,
+                "issues": [
+                    "The word triggering adds causation not stated in the transcript."
+                ],
+            }
+        ),
+        json.dumps({"supported": True, "issues": []}),
+        json.dumps({"supported": True, "issues": []}),
+    ]
+    generation_prompts = []
+    review_prompts = []
+
+    def generate(prompt: str) -> str:
+        generation_prompts.append(prompt)
+        return generation_responses.pop(0)
+
+    def review(prompt: str) -> str:
+        review_prompts.append(prompt)
+        return review_responses.pop(0)
+
+    plan = plan_story(
+        project.id,
+        target_duration_seconds=120,
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=review,
+    )
+
+    assert plan.hook == second["hook"]
+    assert len(generation_prompts) == 2
+    assert len(review_prompts) == 4
+    assert "semantic specificity review failed" in generation_prompts[1]
+    assert "triggering adds causation" in generation_prompts[1]
 
 
 def test_plan_story_requires_reviewer_for_custom_generator(tmp_path: Path):
