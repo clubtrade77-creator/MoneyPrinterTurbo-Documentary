@@ -485,7 +485,7 @@ def test_grounding_review_prompt_contains_plan_and_strict_fact_rules():
     assert "The Traffic Stop" in prompt
     assert "does NOT by itself establish escalation" in prompt
     assert "does NOT by itself establish a traffic stop" in prompt
-    assert "Temporal order is not causation" in prompt
+    assert "Mere sequence does NOT establish causation" in prompt
 
 
 def test_parse_grounding_review_requires_consistent_verdict():
