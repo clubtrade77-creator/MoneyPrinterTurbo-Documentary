@@ -6,6 +6,7 @@ import pytest
 from app.models.documentary import (
     AudioMode,
     DocumentaryScene,
+    NarrationAudioAsset,
     RightsStatus,
     SceneType,
     SourceAsset,
@@ -229,7 +230,7 @@ def test_build_render_command_rejects_changed_source_file(tmp_path: Path):
         build_documentary_render_command(project.id, root=tmp_path)
 
 
-def test_build_render_command_rejects_unsupported_narration_audio_mode(tmp_path: Path):
+def test_build_render_command_requires_registered_narration_audio(tmp_path: Path):
     project, source, _ = _project_with_video_source(tmp_path)
     _save_scene(
         project,
@@ -238,7 +239,128 @@ def test_build_render_command_rejects_unsupported_narration_audio_mode(tmp_path:
         audio_mode=AudioMode.narration,
     )
 
-    with pytest.raises(DocumentaryRenderError, match="does not support audio mode yet"):
+    with pytest.raises(DocumentaryRenderError, match="narration audio not found"):
+        build_documentary_render_command(project.id, root=tmp_path)
+
+
+def test_build_render_command_uses_narration_audio_and_pads_scene(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _project_with_video_source(tmp_path)
+    _save_scene(
+        project,
+        source,
+        tmp_path,
+        start=1.0,
+        end=5.0,
+        audio_mode=AudioMode.narration,
+    )
+    narration_path = tmp_path / "narration.wav"
+    narration_path.write_bytes(b"narration")
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.load_narration_audio",
+        lambda *args, **kwargs: NarrationAudioAsset(
+            scene_id="scene_renderer",
+            language="en",
+            local_path=str(narration_path.resolve()),
+            checksum_sha256="0" * 64,
+            duration_seconds=2.0,
+            audio_codec="pcm_s16le",
+            file_size_bytes=narration_path.stat().st_size,
+        ),
+    )
+
+    command = build_documentary_render_command(project.id, root=tmp_path)
+    joined = " ".join(command)
+
+    assert str(narration_path.resolve()) in command
+    assert "[1:a]" in joined
+    assert "apad=pad_dur=4.000000" in joined
+    assert "atrim=duration=4.000000" in joined
+    assert "[0:a]" not in joined
+
+
+def test_build_render_command_mixes_original_and_narration_audio(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _project_with_video_source(tmp_path, has_audio=True)
+    _save_scene(
+        project,
+        source,
+        tmp_path,
+        start=1.0,
+        end=5.0,
+        audio_mode=AudioMode.mixed,
+    )
+    narration_path = tmp_path / "narration.wav"
+    narration_path.write_bytes(b"narration")
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.load_narration_audio",
+        lambda *args, **kwargs: NarrationAudioAsset(
+            scene_id="scene_renderer",
+            language="en",
+            local_path=str(narration_path.resolve()),
+            checksum_sha256="0" * 64,
+            duration_seconds=2.0,
+            audio_codec="pcm_s16le",
+            file_size_bytes=narration_path.stat().st_size,
+        ),
+    )
+
+    command = build_documentary_render_command(project.id, root=tmp_path)
+    joined = " ".join(command)
+
+    assert "[0:a]" in joined
+    assert "[1:a]" in joined
+    assert "volume=1.000000[ao0]" in joined
+    assert "volume=1.000000,apad=pad_dur=4.000000" in joined
+    assert "amix=inputs=2:duration=longest:dropout_transition=0:normalize=1" in joined
+
+
+def test_build_render_command_rejects_mixed_audio_without_source_audio(
+    tmp_path: Path,
+):
+    project, source, _ = _project_with_video_source(tmp_path, has_audio=False)
+    _save_scene(
+        project,
+        source,
+        tmp_path,
+        audio_mode=AudioMode.mixed,
+    )
+
+    with pytest.raises(DocumentaryRenderError, match="requires source audio"):
+        build_documentary_render_command(project.id, root=tmp_path)
+
+
+def test_build_render_command_rejects_narration_longer_than_scene(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _project_with_video_source(tmp_path)
+    _save_scene(
+        project,
+        source,
+        tmp_path,
+        start=1.0,
+        end=3.0,
+        audio_mode=AudioMode.narration,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.load_narration_audio",
+        lambda *args, **kwargs: NarrationAudioAsset(
+            scene_id="scene_renderer",
+            language="en",
+            local_path=str((tmp_path / "narration.wav").resolve()),
+            checksum_sha256="0" * 64,
+            duration_seconds=2.2,
+            audio_codec="pcm_s16le",
+            file_size_bytes=1,
+        ),
+    )
+
+    with pytest.raises(DocumentaryRenderError, match="exceeds scene duration"):
         build_documentary_render_command(project.id, root=tmp_path)
 
 
