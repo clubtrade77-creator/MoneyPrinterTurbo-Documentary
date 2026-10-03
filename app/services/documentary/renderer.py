@@ -12,8 +12,10 @@ from app.models.documentary import (
     SourceAsset,
     VideoMetadata,
 )
+from app.services.documentary.clip_selector import story_plan_fingerprint
 from app.services.documentary.metadata import MediaProbeError, probe_video_metadata
 from app.services.documentary.project import load_project, project_dir, sha256_file
+from app.services.documentary.story_planner import load_story_plan
 from app.utils import utils
 
 DEFAULT_RENDER_WIDTH = 1920
@@ -153,6 +155,14 @@ def _build_documentary_render_command_and_expectations(
     project = load_project(project_id, root)
     if not project.plan.scenes:
         raise DocumentaryRenderError("documentary project has no scenes to render")
+
+    if project.plan.story_plan_fingerprint:
+        current_story_plan = load_story_plan(project_id, root=root)
+        current_story_fingerprint = story_plan_fingerprint(current_story_plan)
+        if current_story_fingerprint != project.plan.story_plan_fingerprint:
+            raise DocumentaryRenderError(
+                "documentary timeline is stale; Story Plan changed after clip selection"
+            )
 
     resolved_scenes: list[tuple[object, SourceAsset, float]] = []
     source_cache: dict[str, SourceAsset] = {}
