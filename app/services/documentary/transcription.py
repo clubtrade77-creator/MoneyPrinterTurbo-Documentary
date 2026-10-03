@@ -130,8 +130,12 @@ def transcribe_media(
                 getattr(raw_segment, "end", None),
             )
             text = str(getattr(raw_segment, "text", "") or "").strip()
-            if timing is None or not text:
+            if not text:
                 continue
+            if timing is None:
+                raise TranscriptionError(
+                    f"Whisper returned invalid timing for segment {index} in {path.name}"
+                )
 
             words = []
             for raw_word in getattr(raw_segment, "words", None) or []:
