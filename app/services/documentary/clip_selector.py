@@ -300,6 +300,7 @@ def apply_clip_plan(
             "documentary clip plan became stale before it could be applied"
         )
 
+    project.plan.story_plan_fingerprint = plan.story_plan_fingerprint
     project.plan.scenes = scenes
     save_project(project, root)
     return project
@@ -319,9 +320,9 @@ def select_clips(
         padding_seconds=padding_seconds,
         max_merge_gap_seconds=max_merge_gap_seconds,
     )
+    apply_clip_plan(project_id, clip_plan, root=root)
     _atomic_write_json(
         clip_plan_path(project_id, root),
         clip_plan.model_dump(mode="json"),
     )
-    apply_clip_plan(project_id, clip_plan, root=root)
     return clip_plan
