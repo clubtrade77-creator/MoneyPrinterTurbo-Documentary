@@ -91,6 +91,8 @@ def test_transcribe_media_builds_structured_segment_and_word_timecodes(tmp_path:
     assert transcript.source_id == "source_interview"
     assert transcript.source_checksum_sha256 == "abc123"
     assert transcript.language == "en"
+    assert transcript.language_mode == "auto"
+    assert transcript.requested_language is None
     assert transcript.language_probability == pytest.approx(0.98)
     assert transcript.media_duration_seconds == 10.0
     assert transcript.model_size == "test-whisper"
@@ -102,6 +104,31 @@ def test_transcribe_media_builds_structured_segment_and_word_timecodes(tmp_path:
     assert transcript.segments[0].words[0].probability == pytest.approx(0.94)
     assert model.calls[0][1]["word_timestamps"] is True
     assert model.calls[0][1]["vad_filter"] is True
+
+
+def test_transcribe_media_records_forced_language_without_fake_confidence(
+    tmp_path: Path,
+):
+    media_file = tmp_path / "forced-language.mp4"
+    media_file.write_bytes(b"media")
+    model = FakeWhisperModel(
+        [_segment(0.0, 1.0, "Hello.")],
+        info=SimpleNamespace(language="en", language_probability=1.0),
+    )
+
+    transcript = transcribe_media(
+        media_file,
+        source_id="source_forced_language",
+        language="en",
+        model_override=model,
+        model_name="test-whisper",
+    )
+
+    assert transcript.language == "en"
+    assert transcript.language_mode == "forced"
+    assert transcript.requested_language == "en"
+    assert transcript.language_probability is None
+    assert model.calls[0][1]["language"] == "en"
 
 
 def test_transcribe_media_keeps_text_segment_when_word_alignment_is_missing(
