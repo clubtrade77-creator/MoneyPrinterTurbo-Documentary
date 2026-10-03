@@ -188,8 +188,13 @@ FACTUAL RULES:
   the supplied transcripts.
 - If the evidence is insufficient for a claim, do not include that claim.
 - Do not turn vague wording into a more specific event type, danger level, motive,
-  emotional state, or consequence. For example, "the situation changed" does not
-  prove escalation, danger, tension, high stakes, or what kind of incident occurred.
+  emotional state, consequence, or causal explanation.
+- "The situation changed" does not prove escalation, danger, tension, high stakes,
+  or what kind of incident occurred.
+- "An officer approached a vehicle" does not by itself prove there was a traffic
+  stop, detention, arrest, pursuit, confrontation, or other specific incident type.
+- If one event happens before another, do not say the first "triggered", "caused",
+  "led to", or otherwise produced the second unless the transcript states that link.
 - Avoid dramatic or evaluative adjectives unless the transcript explicitly supports them.
 - "title", "angle", "hook", beat "title", "summary", and "narration_goal" must all
   remain within what the cited transcript evidence actually supports.
@@ -284,6 +289,12 @@ REVIEW RULES:
   "dangerous", or similar language is unsupported unless the evidence establishes it.
 - "The situation changed" does NOT by itself establish escalation, danger, tension,
   what changed, or why.
+- "An officer approached a vehicle" does NOT by itself establish a traffic stop,
+  detention, arrest, pursuit, confrontation, or any other specific incident type.
+- Mere sequence does NOT establish causation: if A happens and B happens later,
+  wording such as "A triggered B", "A caused B", or "A led to B" is unsupported
+  unless the transcript explicitly states that causal relationship.
+- When uncertain whether a claim is entailed, reject it rather than filling the gap.
 - Editorial sequencing is allowed, but it may not smuggle in new facts.
 - Review title, angle, hook, every beat title, summary, narration_goal, and evidence note.
 - Do not reject a claim merely because it paraphrases the transcript faithfully.
@@ -313,6 +324,75 @@ CANDIDATE STORY PLAN:
     if len(prompt) > MAX_STORY_PROMPT_CHARS:
         raise StoryPlannerError(
             "story grounding review is too large for one safe prompt"
+        )
+    return prompt
+
+
+def build_story_specificity_review_prompt(
+    *,
+    transcripts: list[DocumentaryTranscript],
+    plan: StoryPlan,
+) -> str:
+    evidence_payload = [
+        {
+            "source_id": transcript.source_id,
+            "segments": [
+                {
+                    "id": segment.id,
+                    "text": segment.text,
+                }
+                for segment in transcript.segments
+            ],
+        }
+        for transcript in transcripts
+    ]
+
+    prompt = f"""
+You are the second, adversarial reviewer for a factual documentary story plan.
+
+TASK:
+Look ONLY for unsupported specificity or causality that a first reviewer could miss.
+Assume the plan is unsafe unless each descriptive claim stays no more specific than
+the transcript evidence.
+
+STRICT TESTS:
+- A police officer plus a vehicle does not establish "traffic stop", detention,
+  arrest, pursuit, confrontation, or any named incident type unless stated.
+- Temporal order is not causation. "A happened, then B happened" does not support
+  "A triggered B", "A caused B", "A led to B", or equivalent causal wording.
+- "The situation changed" does not tell you what changed, why, whether it escalated,
+  whether it became dangerous, or whether stakes increased.
+- Reject labels such as routine, tense, dramatic, dangerous, high-stakes, sudden
+  escalation, or similar framing unless the transcript itself supports them.
+- Inspect title, angle, hook, every beat title, summary, narration_goal, and note.
+- Faithful neutral paraphrase is allowed. Unsupported embellishment is not.
+- If uncertain, mark the plan unsupported.
+
+OUTPUT:
+Return exactly one JSON object and nothing else:
+{{
+  "supported": true,
+  "issues": []
+}}
+
+If any unsupported specificity or causality exists:
+{{
+  "supported": false,
+  "issues": [
+    "quote or identify the unsupported wording and explain the missing support"
+  ]
+}}
+
+TRANSCRIPT EVIDENCE:
+{json.dumps(evidence_payload, ensure_ascii=False)}
+
+CANDIDATE STORY PLAN:
+{json.dumps(plan.model_dump(mode="json"), ensure_ascii=False)}
+""".strip()
+
+    if len(prompt) > MAX_STORY_PROMPT_CHARS:
+        raise StoryPlannerError(
+            "story specificity review is too large for one safe prompt"
         )
     return prompt
 
@@ -489,6 +569,26 @@ def plan_story(
                 raise StoryPlannerError(
                     "semantic grounding review failed: "
                     + "; ".join(grounding_issues)
+                )
+
+            specificity_response = reviewer(
+                build_story_specificity_review_prompt(
+                    transcripts=transcripts,
+                    plan=candidate,
+                )
+            )
+            if specificity_response.strip().startswith("Error:"):
+                raw_error = specificity_response.strip()
+                raise _NonRetryableStoryPlannerError(
+                    raw_error.removeprefix("Error:").strip() or raw_error
+                )
+            specificity_issues = parse_story_grounding_review_response(
+                specificity_response
+            )
+            if specificity_issues:
+                raise StoryPlannerError(
+                    "semantic specificity review failed: "
+                    + "; ".join(specificity_issues)
                 )
 
             candidate.grounding_reviewed = True
