@@ -657,6 +657,17 @@ def _generate_response(prompt: str, app_config=None) -> str:
                     )
 
 
+def generate_text(prompt: str, app_config=None) -> str:
+    """Public text-generation entry point for non-legacy workflows.
+
+    Documentary services use this thin wrapper instead of depending on the private
+    provider dispatcher directly. Existing provider selection, retries/errors, and
+    runtime configuration behavior remain centralized in this module.
+    """
+    return _generate_response(prompt=prompt, app_config=app_config)
+
+
+
 def test_connection() -> tuple[bool, str, float]:
     """
     使用当前 Provider 配置发起一次最小请求，验证实际生成链路是否可用。
