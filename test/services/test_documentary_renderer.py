@@ -137,6 +137,53 @@ def test_build_render_command_generates_silence_for_muted_scene(tmp_path: Path):
     assert "[0:a]" not in joined
 
 
+def test_build_render_command_concats_multiple_scenes_and_hashes_source_once(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _project_with_video_source(tmp_path, has_audio=False)
+    project.plan.scenes = [
+        DocumentaryScene(
+            id="scene_first",
+            scene_type=SceneType.original_clip,
+            source_id=source.id,
+            source_start=0.0,
+            source_end=2.0,
+            audio_mode=AudioMode.muted,
+        ),
+        DocumentaryScene(
+            id="scene_second",
+            scene_type=SceneType.original_clip,
+            source_id=source.id,
+            source_start=2.0,
+            source_end=4.0,
+            audio_mode=AudioMode.muted,
+        ),
+    ]
+    save_project(project, tmp_path)
+
+    real_sha256_file = sha256_file
+    checksum_calls = []
+
+    def counted_sha256_file(path):
+        checksum_calls.append(Path(path))
+        return real_sha256_file(path)
+
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.sha256_file",
+        counted_sha256_file,
+    )
+
+    command = build_documentary_render_command(project.id, root=tmp_path)
+    joined = " ".join(command)
+
+    assert joined.count("source_renderer.mp4") == 2
+    assert "concat=n=2:v=1:a=1[vout][aout]" in joined
+    assert command.count("[vout]") == 1
+    assert command.count("[aout]") == 1
+    assert len(checksum_calls) == 1
+
+
 def test_build_render_command_rejects_scene_outside_source_duration(tmp_path: Path):
     project, source, _ = _project_with_video_source(
         tmp_path,
