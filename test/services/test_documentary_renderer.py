@@ -14,6 +14,7 @@ from app.models.documentary import (
 from app.services.documentary.project import (
     add_source,
     create_project,
+    load_project,
     project_dir,
     save_project,
     sha256_file,
@@ -385,6 +386,48 @@ def test_render_documentary_rejects_missing_audio_stream_before_publish(
         render_documentary(project.id, root=tmp_path)
 
     assert not documentary_render_path(project.id, tmp_path).exists()
+
+
+def test_render_documentary_discards_output_if_project_changes_during_render(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _project_with_video_source(tmp_path, has_audio=False)
+    _save_scene(project, source, tmp_path, start=0.0, end=2.0)
+    output = documentary_render_path(project.id, tmp_path)
+    output.write_bytes(b"previous-good-render")
+
+    def fake_run(command, **kwargs):
+        Path(command[-1]).write_bytes(b"rendered-stale")
+        changed = load_project(project.id, tmp_path)
+        changed.title = "Changed while rendering"
+        save_project(changed, tmp_path)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.subprocess.run",
+        fake_run,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.probe_video_metadata",
+        lambda path: VideoMetadata(
+            duration_seconds=2.0,
+            width=1920,
+            height=1080,
+            fps=30,
+            has_audio=True,
+            video_codec="h264",
+            audio_codec="aac",
+            container="mov,mp4",
+            file_size_bytes=Path(path).stat().st_size,
+        ),
+    )
+
+    with pytest.raises(DocumentaryRenderError, match="changed while rendering"):
+        render_documentary(project.id, root=tmp_path)
+
+    assert output.read_bytes() == b"previous-good-render"
+    assert not list(output.parent.glob(".master-*.mp4"))
 
 
 def test_render_documentary_does_not_replace_existing_output_on_ffmpeg_failure(
