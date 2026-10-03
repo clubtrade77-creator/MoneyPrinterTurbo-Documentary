@@ -6,11 +6,10 @@ import pytest
 from app.models.documentary import RightsStatus, SourceAsset, SourceType, VideoMetadata
 from app.services.documentary import project as project_service
 from app.services.documentary.project import (
+    attach_local_copy_to_source,
     attach_local_file,
     attach_local_video,
     create_project,
-    load_project,
-    save_project,
 )
 from app.services.documentary.transcription import (
     TranscriptionError,
@@ -140,6 +139,21 @@ def test_transcribe_media_rejects_malformed_segment_timing(tmp_path: Path):
         )
 
 
+def test_transcribe_media_rejects_segment_beyond_media_duration(tmp_path: Path):
+    media_file = tmp_path / "too-long.mp4"
+    media_file.write_bytes(b"media")
+    model = FakeWhisperModel([_segment(0.0, 12.5, "Impossible timing")])
+
+    with pytest.raises(TranscriptionError, match="exceeds media duration"):
+        transcribe_media(
+            media_file,
+            source_id="source_too_long",
+            media_duration_seconds=10.0,
+            model_override=model,
+            model_name="test-whisper",
+        )
+
+
 def test_transcribe_source_persists_and_loads_json_transcript(tmp_path: Path):
     project = create_project(
         "Transcript case", project_id="doc_transcript_case", root=tmp_path
@@ -207,7 +221,9 @@ def test_transcribe_source_rejects_video_without_audio(
     assert not transcript_path(project.id, source.id, tmp_path).exists()
 
 
-def test_load_source_transcript_rejects_stale_source_checksum(tmp_path: Path):
+def test_load_source_transcript_rejects_stale_after_registered_source_replacement(
+    tmp_path: Path,
+):
     project = create_project(
         "Stale transcript", project_id="doc_stale_transcript", root=tmp_path
     )
@@ -227,12 +243,62 @@ def test_load_source_transcript_rejects_stale_source_checksum(tmp_path: Path):
         model_name="test-whisper",
     )
 
-    changed = load_project(project.id, tmp_path)
-    changed.sources[0].checksum_sha256 = "different-checksum"
-    save_project(changed, tmp_path)
+    replacement = tmp_path / "statement-v2.wav"
+    replacement.write_bytes(b"audio-two")
+    attach_local_copy_to_source(
+        project.id,
+        source.id,
+        replacement,
+        root=tmp_path,
+    )
 
     with pytest.raises(TranscriptionError, match="stale"):
         load_source_transcript(project.id, source.id, root=tmp_path)
+
+
+def test_transcribe_source_rejects_file_changed_outside_registry(tmp_path: Path):
+    project = create_project(
+        "Tampered source", project_id="doc_tampered_source", root=tmp_path
+    )
+    media_file = tmp_path / "statement.wav"
+    media_file.write_bytes(b"original-audio")
+    source = attach_local_file(
+        project.id,
+        media_file,
+        source_type=SourceType.audio,
+        root=tmp_path,
+    )
+    Path(source.local_path).write_bytes(b"tampered-audio")
+
+    with pytest.raises(TranscriptionError, match="checksum differs from manifest"):
+        transcribe_source(
+            project.id,
+            source.id,
+            root=tmp_path,
+            model_override=FakeWhisperModel([]),
+        )
+
+
+def test_transcribe_source_rejects_nontranscribable_source_type(tmp_path: Path):
+    project = create_project(
+        "Photo source", project_id="doc_photo_source", root=tmp_path
+    )
+    image_file = tmp_path / "evidence.jpg"
+    image_file.write_bytes(b"image-placeholder")
+    source = attach_local_file(
+        project.id,
+        image_file,
+        source_type=SourceType.photo,
+        root=tmp_path,
+    )
+
+    with pytest.raises(TranscriptionError, match="not transcribable"):
+        transcribe_source(
+            project.id,
+            source.id,
+            root=tmp_path,
+            model_override=FakeWhisperModel([]),
+        )
 
 
 def test_transcription_failure_does_not_leave_partial_json(tmp_path: Path):
