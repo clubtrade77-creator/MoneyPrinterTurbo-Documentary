@@ -90,6 +90,7 @@ def _validate_scene(
     scene,
     *,
     root: str | os.PathLike | None,
+    source_cache: dict[str, SourceAsset] | None = None,
 ) -> tuple[SourceAsset, float]:
     if scene.scene_type not in _SUPPORTED_SCENE_TYPES:
         raise DocumentaryRenderError(
@@ -102,7 +103,13 @@ def _validate_scene(
             f"{scene.audio_mode.value}"
         )
 
-    source = _resolve_source(project, scene.source_id, root=root)
+    source = None
+    if source_cache is not None:
+        source = source_cache.get(scene.source_id)
+    if source is None:
+        source = _resolve_source(project, scene.source_id, root=root)
+        if source_cache is not None:
+            source_cache[scene.source_id] = source
     if scene.source_start is None or scene.source_end is None:
         raise DocumentaryRenderError(
             f"source-backed documentary scene has no source range: {scene.id}"
@@ -142,8 +149,14 @@ def build_documentary_render_command(
         raise DocumentaryRenderError("documentary project has no scenes to render")
 
     resolved_scenes: list[tuple[object, SourceAsset, float]] = []
+    source_cache: dict[str, SourceAsset] = {}
     for scene in project.plan.scenes:
-        source, duration = _validate_scene(project, scene, root=root)
+        source, duration = _validate_scene(
+            project,
+            scene,
+            root=root,
+            source_cache=source_cache,
+        )
         resolved_scenes.append((scene, source, duration))
 
     target = (
