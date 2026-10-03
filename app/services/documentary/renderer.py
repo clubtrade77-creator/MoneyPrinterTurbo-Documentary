@@ -5,7 +5,14 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from app.models.documentary import AudioMode, DocumentaryProject, SceneType, SourceAsset
+from app.models.documentary import (
+    AudioMode,
+    DocumentaryProject,
+    SceneType,
+    SourceAsset,
+    VideoMetadata,
+)
+from app.services.documentary.metadata import MediaProbeError, probe_video_metadata
 from app.services.documentary.project import load_project, project_dir, sha256_file
 from app.utils import utils
 
@@ -133,7 +140,7 @@ def _validate_scene(
     return source, duration
 
 
-def build_documentary_render_command(
+def _build_documentary_render_command_and_expectations(
     project_id: str,
     *,
     root: str | os.PathLike | None = None,
@@ -141,8 +148,7 @@ def build_documentary_render_command(
     width: int = DEFAULT_RENDER_WIDTH,
     height: int = DEFAULT_RENDER_HEIGHT,
     fps: int = DEFAULT_RENDER_FPS,
-) -> list[str]:
-    """Build one shell-free FFmpeg command for the current documentary timeline."""
+) -> tuple[list[str], float, int]:
     _validate_render_settings(width, height, fps)
     project = load_project(project_id, root)
     if not project.plan.scenes:
@@ -242,7 +248,70 @@ def build_documentary_render_command(
             str(target),
         ]
     )
+    expected_duration = sum(duration for _, _, duration in resolved_scenes)
+    return command, expected_duration, len(resolved_scenes)
+
+
+def build_documentary_render_command(
+    project_id: str,
+    *,
+    root: str | os.PathLike | None = None,
+    output_path: str | os.PathLike | None = None,
+    width: int = DEFAULT_RENDER_WIDTH,
+    height: int = DEFAULT_RENDER_HEIGHT,
+    fps: int = DEFAULT_RENDER_FPS,
+) -> list[str]:
+    """Build one shell-free FFmpeg command for the current documentary timeline."""
+    command, _, _ = _build_documentary_render_command_and_expectations(
+        project_id,
+        root=root,
+        output_path=output_path,
+        width=width,
+        height=height,
+        fps=fps,
+    )
     return command
+
+
+def _validate_rendered_output(
+    metadata: VideoMetadata,
+    *,
+    width: int,
+    height: int,
+    fps: int,
+    expected_duration: float,
+    scene_count: int,
+) -> None:
+    if (metadata.width, metadata.height) != (width, height):
+        raise DocumentaryRenderError(
+            "documentary render output resolution mismatch: "
+            f"expected {width}x{height}, got {metadata.width}x{metadata.height}"
+        )
+
+    fps_tolerance = max(0.05, fps * 0.005)
+    if abs(metadata.fps - fps) > fps_tolerance:
+        raise DocumentaryRenderError(
+            "documentary render output fps mismatch: "
+            f"expected {fps}, got {metadata.fps:g}"
+        )
+
+    # Each scene is quantized to output frames independently before concat. Allow
+    # one frame per scene plus a small muxing margin, but reject meaningful
+    # truncation or accidental extra content.
+    duration_tolerance = max(0.25, scene_count / fps + 0.1)
+    if abs(metadata.duration_seconds - expected_duration) > duration_tolerance:
+        raise DocumentaryRenderError(
+            "documentary render output duration mismatch: "
+            f"expected about {expected_duration:.3f}s, "
+            f"got {metadata.duration_seconds:.3f}s"
+        )
+
+    # The renderer always maps an audio stream. Muted/no-audio scenes receive
+    # generated silence so later scenes with original sound remain concat-safe.
+    if not metadata.has_audio:
+        raise DocumentaryRenderError(
+            "documentary render output is missing its audio stream"
+        )
 
 
 def render_documentary(
@@ -270,13 +339,15 @@ def render_documentary(
     staged_path = Path(staged_name)
 
     try:
-        command = build_documentary_render_command(
-            project_id,
-            root=root,
-            output_path=staged_path,
-            width=width,
-            height=height,
-            fps=fps,
+        command, expected_duration, scene_count = (
+            _build_documentary_render_command_and_expectations(
+                project_id,
+                root=root,
+                output_path=staged_path,
+                width=width,
+                height=height,
+                fps=fps,
+            )
         )
         try:
             result = subprocess.run(
@@ -309,6 +380,21 @@ def render_documentary(
             raise DocumentaryRenderError(
                 "ffmpeg documentary render produced no output"
             )
+
+        try:
+            rendered_metadata = probe_video_metadata(staged_path)
+        except (MediaProbeError, OSError, ValueError) as exc:
+            raise DocumentaryRenderError(
+                "ffmpeg documentary render produced an unreadable output"
+            ) from exc
+        _validate_rendered_output(
+            rendered_metadata,
+            width=width,
+            height=height,
+            fps=fps,
+            expected_duration=expected_duration,
+            scene_count=scene_count,
+        )
 
         os.replace(staged_path, output_path)
         return output_path
