@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -23,6 +24,10 @@ _DEFAULT_PROBE_TIMEOUT_SECONDS = 30.0
 
 class NarrationAudioError(RuntimeError):
     """Raised when documentary narration audio is missing, stale, or invalid."""
+
+
+def _narration_text_fingerprint(text: str) -> str:
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
 def _normalize_language(language: str) -> str:
@@ -156,7 +161,8 @@ def attach_narration_audio(
 ) -> NarrationAudioAsset:
     """Copy validated narration audio into a project and track it in project.json."""
     project = load_project(project_id, root)
-    if not any(scene.id == scene_id for scene in project.plan.scenes):
+    scene = next((item for item in project.plan.scenes if item.id == scene_id), None)
+    if scene is None:
         raise ValueError(f"documentary scene not found: {scene_id}")
 
     resolved_language = _normalize_language(language or project.master_language)
@@ -192,6 +198,9 @@ def attach_narration_audio(
             language=resolved_language,
             local_path=str(target),
             checksum_sha256=sha256_file(target),
+            narration_text_fingerprint=_narration_text_fingerprint(
+                scene.narration_text
+            ),
             duration_seconds=duration,
             audio_codec=codec,
             file_size_bytes=target.stat().st_size,
@@ -229,6 +238,12 @@ def load_narration_audio(
 ) -> NarrationAudioAsset:
     """Load one narration asset and reject missing or modified project audio."""
     project = load_project(project_id, root)
+    scene = next((item for item in project.plan.scenes if item.id == scene_id), None)
+    if scene is None:
+        raise NarrationAudioError(
+            f"documentary scene not found for narration audio: {scene_id}"
+        )
+
     resolved_language = _normalize_language(language or project.master_language)
     asset = next(
         (
@@ -252,6 +267,18 @@ def load_narration_audio(
     if sha256_file(path) != asset.checksum_sha256:
         raise NarrationAudioError(
             f"narration audio changed after registration: "
+            f"{scene_id}/{resolved_language}"
+        )
+
+    current_text_fingerprint = _narration_text_fingerprint(scene.narration_text)
+    if not asset.narration_text_fingerprint:
+        raise NarrationAudioError(
+            f"narration audio metadata is outdated for scene {scene_id}; "
+            "reattach or regenerate it"
+        )
+    if asset.narration_text_fingerprint != current_text_fingerprint:
+        raise NarrationAudioError(
+            f"narration audio is stale because scene narration text changed: "
             f"{scene_id}/{resolved_language}"
         )
     return asset
