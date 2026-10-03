@@ -15,6 +15,7 @@ from app.models.documentary import (
 )
 from app.services.documentary.clip_selector import (
     ClipSelectorError,
+    apply_clip_plan,
     build_clip_plan,
     clip_plan_path,
     load_clip_plan,
@@ -167,6 +168,8 @@ def test_build_clip_plan_uses_transcript_timecodes_and_merges_adjacent_segments(
         max_merge_gap_seconds=0.5,
     )
 
+    assert plan.padding_seconds == pytest.approx(0.25)
+    assert plan.max_merge_gap_seconds == pytest.approx(0.5)
     assert len(plan.clips) == 2
     first, second = plan.clips
 
@@ -318,6 +321,45 @@ def test_load_clip_plan_rejects_story_plan_changed_after_selection(tmp_path: Pat
 
     with pytest.raises(ClipSelectorError, match="story plan changed"):
         load_clip_plan(project.id, root=tmp_path)
+
+
+def test_load_clip_plan_rejects_tampered_clip_range(tmp_path: Path):
+    project, source, _ = _register_video_transcript(tmp_path)
+    _create_story_plan(project.id, source.id, tmp_path)
+    select_clips(
+        project.id,
+        root=tmp_path,
+        padding_seconds=0.25,
+        max_merge_gap_seconds=0.5,
+    )
+
+    path = clip_plan_path(project.id, tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["clips"][0]["source_start_seconds"] = 0.0
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ClipSelectorError, match="grounded transcript evidence"):
+        load_clip_plan(project.id, root=tmp_path)
+
+
+def test_apply_clip_plan_rejects_tampered_in_memory_clip(tmp_path: Path):
+    project, source, _ = _register_video_transcript(tmp_path)
+    _create_story_plan(project.id, source.id, tmp_path)
+
+    plan = build_clip_plan(
+        project.id,
+        root=tmp_path,
+        padding_seconds=0.25,
+        max_merge_gap_seconds=0.5,
+    )
+    tampered = plan.model_copy(deep=True)
+    tampered.clips[0].source_end_seconds += 1.0
+
+    with pytest.raises(ClipSelectorError, match="grounded transcript evidence"):
+        apply_clip_plan(project.id, tampered, root=tmp_path)
 
 
 def test_build_clip_plan_rejects_invalid_selector_settings(tmp_path: Path):
