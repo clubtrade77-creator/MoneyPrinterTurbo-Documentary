@@ -299,6 +299,9 @@ class ClipPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: Literal[1] = 1
+    selector_version: Literal[1] = 1
+    padding_seconds: float = Field(default=0.35, ge=0, le=5)
+    max_merge_gap_seconds: float = Field(default=0.75, ge=0, le=10)
     story_plan_fingerprint: str = Field(min_length=64, max_length=64)
     transcript_fingerprints: dict[str, str] = Field(default_factory=dict)
     clips: list[ClipSelection] = Field(min_length=1)
