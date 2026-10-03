@@ -18,6 +18,7 @@ from app.services.documentary.transcription import (
 
 MAX_STORY_PROMPT_CHARS = 120_000
 MAX_STORY_PLAN_ATTEMPTS = 3
+CURRENT_GROUNDING_REVIEW_VERSION = 2
 _ALLOWED_PURPOSES = (
     "hook",
     "context",
@@ -592,6 +593,7 @@ def plan_story(
                 )
 
             candidate.grounding_reviewed = True
+            candidate.grounding_review_version = CURRENT_GROUNDING_REVIEW_VERSION
             plan = candidate
             break
         except _NonRetryableStoryPlannerError:
@@ -641,6 +643,11 @@ def load_story_plan(
     if not plan.grounding_reviewed:
         raise StoryPlannerError(
             "documentary story plan was not semantically reviewed; regenerate it"
+        )
+    if plan.grounding_review_version != CURRENT_GROUNDING_REVIEW_VERSION:
+        raise StoryPlannerError(
+            "documentary story plan uses an outdated semantic review policy; "
+            "regenerate it"
         )
 
     if plan.transcript_fingerprints:
