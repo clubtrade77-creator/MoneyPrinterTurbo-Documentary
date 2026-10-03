@@ -185,6 +185,30 @@ def test_build_render_command_concats_multiple_scenes_and_hashes_source_once(
     assert len(checksum_calls) == 1
 
 
+def test_build_render_command_rejects_timeline_from_changed_story_plan(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _project_with_video_source(tmp_path, has_audio=False)
+    _save_scene(project, source, tmp_path, start=0.0, end=2.0)
+
+    tracked = load_project(project.id, tmp_path)
+    tracked.plan.story_plan_fingerprint = "0" * 64
+    save_project(tracked, tmp_path)
+
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.load_story_plan",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.story_plan_fingerprint",
+        lambda plan: "1" * 64,
+    )
+
+    with pytest.raises(DocumentaryRenderError, match="timeline is stale"):
+        build_documentary_render_command(project.id, root=tmp_path)
+
+
 def test_build_render_command_rejects_scene_outside_source_duration(tmp_path: Path):
     project, source, _ = _project_with_video_source(
         tmp_path,
