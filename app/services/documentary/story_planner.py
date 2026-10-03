@@ -194,8 +194,7 @@ The first beat MUST have purpose "hook".
 Allowed purpose values: {", ".join(_ALLOWED_PURPOSES)}.
 Build a clear progression using only the purposes needed by this story.
 The requested total length is exactly {target_duration_seconds:.0f} seconds.
-The sum of all beat "target_duration_seconds" values MUST stay between
-{target_duration_seconds * 0.65:.0f} and {target_duration_seconds * 1.35:.0f} seconds;
+The sum of all beat "target_duration_seconds" values MUST stay between {target_duration_seconds * 0.65:.0f} and {target_duration_seconds * 1.35:.0f} seconds;
 aim as close as practical to {target_duration_seconds:.0f} seconds.
 Do not pad weak evidence with invented facts just to fill time.
 Each beat "target_duration_seconds" must be greater than 0 and at most 180.
