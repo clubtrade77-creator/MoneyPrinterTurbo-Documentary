@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
+import re
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def utc_now() -> datetime:
@@ -83,6 +84,57 @@ class NarrativePurpose(str, Enum):
     transition = "transition"
 
 
+_SOURCE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{3,160}$")
+
+
+class TranscriptWord(BaseModel):
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(gt=0)
+    text: str
+    probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_time_range(self):
+        if self.end_seconds <= self.start_seconds:
+            raise ValueError("transcript word end_seconds must be greater than start_seconds")
+        self.text = self.text.strip()
+        if not self.text:
+            raise ValueError("transcript word text is required")
+        return self
+
+
+class TranscriptSegment(BaseModel):
+    id: int = Field(ge=0)
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(gt=0)
+    text: str
+    words: list[TranscriptWord] = Field(default_factory=list)
+    avg_logprob: Optional[float] = None
+    no_speech_probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_time_range(self):
+        if self.end_seconds <= self.start_seconds:
+            raise ValueError("transcript segment end_seconds must be greater than start_seconds")
+        self.text = self.text.strip()
+        if not self.text:
+            raise ValueError("transcript segment text is required")
+        return self
+
+
+class DocumentaryTranscript(BaseModel):
+    version: int = 1
+    source_id: str
+    source_checksum_sha256: str = ""
+    language: str = ""
+    language_probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    media_duration_seconds: Optional[float] = Field(default=None, gt=0)
+    model_size: str = ""
+    full_text: str = ""
+    segments: list[TranscriptSegment] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class VideoMetadata(BaseModel):
     """Technical metadata needed by transcription, clip selection, and rendering."""
 
@@ -123,6 +175,13 @@ class SourceAsset(BaseModel):
     youtube_published_at: Optional[str] = None
 
     created_at: datetime = Field(default_factory=utc_now)
+
+    @field_validator("id")
+    @classmethod
+    def validate_source_id(cls, value: str) -> str:
+        if not _SOURCE_ID_RE.fullmatch(value or ""):
+            raise ValueError("invalid documentary source id")
+        return value
 
     @model_validator(mode="before")
     @classmethod
