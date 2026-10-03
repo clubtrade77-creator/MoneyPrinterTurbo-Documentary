@@ -124,6 +124,22 @@ def test_transcribe_media_keeps_text_segment_when_word_alignment_is_missing(
     assert transcript.segments[0].words == []
 
 
+
+
+def test_transcribe_media_rejects_malformed_segment_timing(tmp_path: Path):
+    media_file = tmp_path / "bad-timing.mp4"
+    media_file.write_bytes(b"media")
+    model = FakeWhisperModel([_segment(2.0, 2.0, "Bad timing")])
+
+    with pytest.raises(TranscriptionError, match="invalid timing"):
+        transcribe_media(
+            media_file,
+            source_id="source_bad_timing",
+            model_override=model,
+            model_name="test-whisper",
+        )
+
+
 def test_transcribe_source_persists_and_loads_json_transcript(tmp_path: Path):
     project = create_project(
         "Transcript case", project_id="doc_transcript_case", root=tmp_path
@@ -266,3 +282,10 @@ def test_transcript_path_rejects_unsafe_source_id(tmp_path: Path):
 
     with pytest.raises(ValueError, match="invalid documentary source id"):
         transcript_path(project.id, "../escape", tmp_path)
+
+
+def test_documentary_transcript_rejects_unsafe_source_id():
+    from app.models.documentary import DocumentaryTranscript
+
+    with pytest.raises(ValueError, match="invalid documentary source id"):
+        DocumentaryTranscript(source_id="../escape")
