@@ -295,7 +295,8 @@ def _build_documentary_render_command_and_expectations(
             )
             filters.append(
                 f"[ao{index}][an{index}]"
-                "amix=inputs=2:duration=longest:dropout_transition=0:normalize=1,"
+                "amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,"
+                "alimiter=limit=0.95,"
                 f"atrim=duration={duration:.6f}"
                 f"[a{index}]"
             )
