@@ -198,7 +198,7 @@ class StoryBeat(BaseModel):
 class StoryPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    version: int = 1
+    version: Literal[1] = 1
     title: str
     angle: str
     hook: str
