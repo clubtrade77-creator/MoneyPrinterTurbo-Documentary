@@ -228,10 +228,32 @@ def test_select_clips_persists_plan_and_applies_traceable_scenes(tmp_path: Path)
 
     updated = load_project(project.id, tmp_path)
     assert len(updated.plan.scenes) == 2
+    assert updated.plan.story_plan_fingerprint == clip_plan.story_plan_fingerprint
     assert updated.plan.scenes[0].scene_type == SceneType.original_clip
     assert updated.plan.scenes[0].audio_mode == AudioMode.original
     assert updated.plan.scenes[0].story_beat_id == "beat_clip_01"
     assert updated.plan.scenes[0].transcript_segment_ids == [0, 1]
+
+
+def test_select_clips_does_not_persist_plan_if_apply_fails(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _register_video_transcript(tmp_path)
+    _create_story_plan(project.id, source.id, tmp_path)
+
+    def fail_apply(*args, **kwargs):
+        raise ClipSelectorError("apply failed")
+
+    monkeypatch.setattr(
+        "app.services.documentary.clip_selector.apply_clip_plan",
+        fail_apply,
+    )
+
+    with pytest.raises(ClipSelectorError, match="apply failed"):
+        select_clips(project.id, root=tmp_path)
+
+    assert not clip_plan_path(project.id, tmp_path).exists()
 
 
 def test_select_clips_uses_muted_narration_scene_when_original_audio_not_priority(
