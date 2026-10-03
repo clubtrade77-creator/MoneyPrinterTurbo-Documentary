@@ -17,6 +17,7 @@ from app.services.documentary.transcription import (
 )
 
 MAX_STORY_PROMPT_CHARS = 120_000
+MAX_STORY_PLAN_ATTEMPTS = 3
 _ALLOWED_PURPOSES = (
     "hook",
     "context",
@@ -192,8 +193,12 @@ STORY SHAPE:
 The first beat MUST have purpose "hook".
 Allowed purpose values: {", ".join(_ALLOWED_PURPOSES)}.
 Build a clear progression using only the purposes needed by this story.
-For an 8-15 minute documentary, favor concise beats rather than padding.
-"target_duration_seconds" for each beat must be greater than 0 and at most 180.
+The requested total length is exactly {target_duration_seconds:.0f} seconds.
+The sum of all beat "target_duration_seconds" values MUST stay between
+{target_duration_seconds * 0.65:.0f} and {target_duration_seconds * 1.35:.0f} seconds;
+aim as close as practical to {target_duration_seconds:.0f} seconds.
+Do not pad weak evidence with invented facts just to fill time.
+Each beat "target_duration_seconds" must be greater than 0 and at most 180.
 
 OUTPUT:
 Return exactly one JSON object and nothing else, with this shape:
@@ -273,6 +278,34 @@ def _load_transcripts_for_planning(
     return transcripts
 
 
+def _validate_generated_plan(
+    plan: StoryPlan,
+    *,
+    target_duration_seconds: float,
+    transcripts: list[DocumentaryTranscript],
+) -> None:
+    if not math.isclose(
+        plan.target_duration_seconds,
+        target_duration_seconds,
+        rel_tol=0.0,
+        abs_tol=0.01,
+    ):
+        raise StoryPlannerError(
+            "story planner changed the requested target duration"
+        )
+    validate_story_plan_evidence(plan, transcripts)
+
+
+def _retry_prompt(base_prompt: str, error: StoryPlannerError, attempt: int) -> str:
+    return (
+        f"{base_prompt}\n\n"
+        "CORRECTION REQUIRED:\n"
+        f"Your previous attempt failed validation on attempt {attempt}: {error}\n"
+        "Return a completely new JSON object that fixes this validation error. "
+        "Do not explain the correction and do not output markdown."
+    )
+
+
 def plan_story(
     project_id: str,
     *,
@@ -295,19 +328,33 @@ def plan_story(
     )
 
     generator = generate_fn or llm_service.generate_text
-    response = generator(prompt)
-    plan = parse_story_plan_response(response)
-    if not math.isclose(
-        plan.target_duration_seconds,
-        target_duration_seconds,
-        rel_tol=0.0,
-        abs_tol=0.01,
-    ):
-        raise StoryPlannerError(
-            "story planner changed the requested target duration"
-        )
+    current_prompt = prompt
+    plan = None
+    last_error = None
 
-    validate_story_plan_evidence(plan, transcripts)
+    for attempt in range(1, MAX_STORY_PLAN_ATTEMPTS + 1):
+        response = generator(current_prompt)
+        if response.strip().startswith("Error:"):
+            raise parse_story_plan_response(response)
+
+        try:
+            candidate = parse_story_plan_response(response)
+            _validate_generated_plan(
+                candidate,
+                target_duration_seconds=target_duration_seconds,
+                transcripts=transcripts,
+            )
+            plan = candidate
+            break
+        except StoryPlannerError as exc:
+            last_error = exc
+            if attempt >= MAX_STORY_PLAN_ATTEMPTS:
+                raise
+            current_prompt = _retry_prompt(prompt, exc, attempt)
+
+    if plan is None:
+        raise last_error or StoryPlannerError("story planner failed without a result")
+
     referenced_source_ids = {
         evidence.source_id
         for beat in plan.beats
