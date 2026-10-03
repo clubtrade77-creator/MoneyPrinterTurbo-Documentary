@@ -177,6 +177,14 @@ def test_parse_story_plan_response_rejects_non_json():
         parse_story_plan_response("Here is the plan: not-json")
 
 
+def test_story_plan_rejects_unknown_llm_fields():
+    payload = _plan_payload()
+    payload["unsupported_field"] = "should fail"
+
+    with pytest.raises(StoryPlannerError, match="invalid story plan"):
+        parse_story_plan_response(json.dumps(payload))
+
+
 def test_story_plan_requires_hook_first():
     payload = _plan_payload()
     payload["beats"][0]["purpose"] = "context"
@@ -244,6 +252,27 @@ def test_plan_story_persists_grounded_plan_and_loads_it(tmp_path: Path):
 
     loaded = load_story_plan(project.id, root=tmp_path)
     assert loaded == plan
+
+
+def test_load_story_plan_rejects_changed_transcript_evidence(tmp_path: Path):
+    project, source, transcript = _register_transcript(tmp_path)
+    payload = _plan_payload(source.id)
+    plan_story(
+        project.id,
+        target_duration_seconds=120,
+        root=tmp_path,
+        generate_fn=lambda prompt: json.dumps(payload),
+    )
+
+    transcript.segments[0].text = "The transcript was manually changed."
+    transcript.full_text = " ".join(segment.text for segment in transcript.segments)
+    transcript_path(project.id, source.id, tmp_path).write_text(
+        json.dumps(transcript.model_dump(mode="json"), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(StoryPlannerError, match="story plan is stale"):
+        load_story_plan(project.id, root=tmp_path)
 
 
 def test_plan_story_rejects_llm_evidence_not_in_transcript(tmp_path: Path):
