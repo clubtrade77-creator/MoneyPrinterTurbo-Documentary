@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from app.models.documentary import (
     DocumentaryTranscript,
+    SourceType,
     TranscriptSegment,
     TranscriptWord,
 )
@@ -17,6 +18,17 @@ from app.services import subtitle as subtitle_service
 from app.services.documentary.project import load_project, project_dir, sha256_file
 
 _TRANSCRIPT_SOURCE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{3,160}$")
+_TRANSCRIBABLE_SOURCE_TYPES = {
+    SourceType.local_video,
+    SourceType.youtube,
+    SourceType.bodycam,
+    SourceType.cctv,
+    SourceType.court,
+    SourceType.interview,
+    SourceType.news,
+    SourceType.audio,
+    SourceType.broll,
+}
 
 
 class TranscriptionError(RuntimeError):
@@ -136,6 +148,13 @@ def transcribe_media(
                 raise TranscriptionError(
                     f"Whisper returned invalid timing for segment {index} in {path.name}"
                 )
+            if (
+                media_duration_seconds is not None
+                and timing[1] > media_duration_seconds + 1.0
+            ):
+                raise TranscriptionError(
+                    f"Whisper segment {index} exceeds media duration in {path.name}"
+                )
 
             words = []
             for raw_word in getattr(raw_segment, "words", None) or []:
@@ -195,12 +214,20 @@ def transcribe_source(
     source = next((item for item in project.sources if item.id == source_id), None)
     if source is None:
         raise ValueError(f"source not found in project: {source_id}")
+    if source.source_type not in _TRANSCRIBABLE_SOURCE_TYPES:
+        raise TranscriptionError(
+            f"source type is not transcribable: {source.source_type.value}"
+        )
     if not source.has_local_copy:
         raise TranscriptionError(f"source has no local media copy: {source_id}")
     if source.video_metadata is not None and not source.video_metadata.has_audio:
         raise TranscriptionError(f"source has no audio stream: {source_id}")
 
-    checksum = source.checksum_sha256 or sha256_file(source.local_path)
+    checksum = sha256_file(source.local_path)
+    if source.checksum_sha256 and checksum != source.checksum_sha256:
+        raise TranscriptionError(
+            f"source file checksum differs from manifest: {source_id}"
+        )
     media_duration = (
         source.video_metadata.duration_seconds
         if source.video_metadata is not None
@@ -248,7 +275,18 @@ def load_source_transcript(
         raise TranscriptionError(
             f"transcript source mismatch: expected {source.id}, got {transcript.source_id}"
         )
-    if (
+
+    if source.has_local_copy:
+        actual_checksum = sha256_file(source.local_path)
+        if source.checksum_sha256 and actual_checksum != source.checksum_sha256:
+            raise TranscriptionError(
+                f"source file checksum differs from manifest: {source.id}"
+            )
+        if transcript.source_checksum_sha256 != actual_checksum:
+            raise TranscriptionError(
+                f"transcript is stale for source {source.id}; source file changed"
+            )
+    elif (
         source.checksum_sha256
         and transcript.source_checksum_sha256 != source.checksum_sha256
     ):
