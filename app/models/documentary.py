@@ -247,6 +247,81 @@ class StoryPlan(BaseModel):
         return self
 
 
+class ClipSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(
+        default_factory=lambda: f"clip_{uuid4().hex[:12]}",
+        max_length=120,
+    )
+    story_beat_id: str = Field(max_length=120)
+    purpose: NarrativePurpose
+    source_id: str
+    segment_ids: list[int] = Field(min_length=1)
+    source_start_seconds: float = Field(ge=0)
+    source_end_seconds: float = Field(gt=0)
+    audio_mode: AudioMode = AudioMode.muted
+
+    @field_validator("story_beat_id")
+    @classmethod
+    def validate_story_beat_id(cls, value: str) -> str:
+        if not _BEAT_ID_RE.fullmatch(value or ""):
+            raise ValueError("invalid documentary story beat id")
+        return value
+
+    @field_validator("source_id")
+    @classmethod
+    def validate_source_id(cls, value: str) -> str:
+        if not _SOURCE_ID_RE.fullmatch(value or ""):
+            raise ValueError("invalid documentary source id")
+        return value
+
+    @field_validator("segment_ids")
+    @classmethod
+    def validate_segment_ids(cls, value: list[int]) -> list[int]:
+        if any(segment_id < 0 for segment_id in value):
+            raise ValueError("clip selection segment ids must be non-negative")
+        if len(value) != len(set(value)):
+            raise ValueError("clip selection segment ids must be unique")
+        return value
+
+    @model_validator(mode="after")
+    def validate_source_range(self):
+        if self.source_end_seconds <= self.source_start_seconds:
+            raise ValueError(
+                "clip selection source_end_seconds must be greater than "
+                "source_start_seconds"
+            )
+        return self
+
+
+class ClipPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal[1] = 1
+    story_plan_fingerprint: str = Field(min_length=64, max_length=64)
+    transcript_fingerprints: dict[str, str] = Field(default_factory=dict)
+    clips: list[ClipSelection] = Field(min_length=1)
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @field_validator("story_plan_fingerprint")
+    @classmethod
+    def validate_story_plan_fingerprint(cls, value: str) -> str:
+        if not re.fullmatch(r"[0-9a-f]{64}", value or ""):
+            raise ValueError("invalid story plan fingerprint")
+        return value
+
+    @field_validator("transcript_fingerprints")
+    @classmethod
+    def validate_transcript_fingerprints(cls, value: dict[str, str]) -> dict[str, str]:
+        for source_id, fingerprint in value.items():
+            if not _SOURCE_ID_RE.fullmatch(source_id or ""):
+                raise ValueError("invalid documentary source id")
+            if not re.fullmatch(r"[0-9a-f]{64}", fingerprint or ""):
+                raise ValueError("invalid transcript fingerprint")
+        return value
+
+
 class VideoMetadata(BaseModel):
     """Technical metadata needed by transcription, clip selection, and rendering."""
 
@@ -343,6 +418,24 @@ class DocumentaryScene(BaseModel):
     subtitle_mode: str = "auto"
     on_screen_text: str = ""
     purpose: NarrativePurpose = NarrativePurpose.context
+    story_beat_id: str = ""
+    transcript_segment_ids: list[int] = Field(default_factory=list)
+
+    @field_validator("story_beat_id")
+    @classmethod
+    def validate_optional_story_beat_id(cls, value: str) -> str:
+        if value and not _BEAT_ID_RE.fullmatch(value):
+            raise ValueError("invalid documentary story beat id")
+        return value
+
+    @field_validator("transcript_segment_ids")
+    @classmethod
+    def validate_transcript_segment_ids(cls, value: list[int]) -> list[int]:
+        if any(segment_id < 0 for segment_id in value):
+            raise ValueError("documentary scene transcript segment ids must be non-negative")
+        if len(value) != len(set(value)):
+            raise ValueError("documentary scene transcript segment ids must be unique")
+        return value
 
     @model_validator(mode="after")
     def validate_source_range(self):
