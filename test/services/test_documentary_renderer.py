@@ -316,7 +316,8 @@ def test_build_render_command_mixes_original_and_narration_audio(
     assert "[1:a]" in joined
     assert "volume=1.000000[ao0]" in joined
     assert "volume=1.000000,apad=pad_dur=4.000000" in joined
-    assert "amix=inputs=2:duration=longest:dropout_transition=0:normalize=1" in joined
+    assert "amix=inputs=2:duration=longest:dropout_transition=0:normalize=0" in joined
+    assert "alimiter=limit=0.95" in joined
 
 
 def test_build_render_command_rejects_mixed_audio_without_source_audio(
