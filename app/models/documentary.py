@@ -215,6 +215,7 @@ class StoryPlan(BaseModel):
     hook: str = Field(max_length=1500)
     target_duration_seconds: float = Field(default=600, ge=60, le=1800)
     transcript_fingerprints: dict[str, str] = Field(default_factory=dict)
+    grounding_reviewed: bool = False
     beats: list[StoryBeat] = Field(min_length=1, max_length=30)
     created_at: datetime = Field(default_factory=utc_now)
 
