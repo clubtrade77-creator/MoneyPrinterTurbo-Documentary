@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -86,6 +87,17 @@ def parse_story_plan_response(response_text: str) -> StoryPlan:
         return StoryPlan.model_validate(payload)
     except ValueError as exc:
         raise StoryPlannerError(f"invalid story plan: {exc}") from exc
+
+
+def _transcript_fingerprint(transcript: DocumentaryTranscript) -> str:
+    payload = transcript.model_dump(mode="json")
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def validate_story_plan_evidence(
@@ -285,6 +297,10 @@ def plan_story(
     response = generator(prompt)
     plan = parse_story_plan_response(response)
     validate_story_plan_evidence(plan, transcripts)
+    plan.transcript_fingerprints = {
+        transcript.source_id: _transcript_fingerprint(transcript)
+        for transcript in transcripts
+    }
 
     _atomic_write_json(
         story_plan_path(project_id, root),
@@ -322,4 +338,13 @@ def load_story_plan(
         root=root,
     )
     validate_story_plan_evidence(plan, transcripts)
+
+    current_fingerprints = {
+        transcript.source_id: _transcript_fingerprint(transcript)
+        for transcript in transcripts
+    }
+    if plan.transcript_fingerprints != current_fingerprints:
+        raise StoryPlannerError(
+            "documentary story plan is stale; transcript evidence changed"
+        )
     return plan
