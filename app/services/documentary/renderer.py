@@ -8,10 +8,12 @@ from pathlib import Path
 from app.models.documentary import (
     AudioMode,
     DocumentaryProject,
+    NarrationAudioAsset,
     SceneType,
     SourceAsset,
     VideoMetadata,
 )
+from app.services.documentary.audio import NarrationAudioError, load_narration_audio
 from app.services.documentary.clip_selector import story_plan_fingerprint
 from app.services.documentary.metadata import MediaProbeError, probe_video_metadata
 from app.services.documentary.project import load_project, project_dir, sha256_file
@@ -23,6 +25,7 @@ DEFAULT_RENDER_HEIGHT = 1080
 DEFAULT_RENDER_FPS = 30
 DEFAULT_RENDER_TIMEOUT_SECONDS = 3600
 _SOURCE_RANGE_TOLERANCE_SECONDS = 0.05
+_NARRATION_DURATION_TOLERANCE_SECONDS = 0.05
 
 _SUPPORTED_SCENE_TYPES = {
     SceneType.original_clip,
@@ -31,6 +34,8 @@ _SUPPORTED_SCENE_TYPES = {
 }
 _SUPPORTED_AUDIO_MODES = {
     AudioMode.original,
+    AudioMode.narration,
+    AudioMode.mixed,
     AudioMode.muted,
 }
 
@@ -100,7 +105,7 @@ def _validate_scene(
     *,
     root: str | os.PathLike | None,
     source_cache: dict[str, SourceAsset] | None = None,
-) -> tuple[SourceAsset, float]:
+) -> tuple[SourceAsset, float, NarrationAudioAsset | None]:
     if scene.scene_type not in _SUPPORTED_SCENE_TYPES:
         raise DocumentaryRenderError(
             f"documentary renderer does not support scene type yet: "
@@ -139,7 +144,31 @@ def _validate_scene(
         raise DocumentaryRenderError(
             f"documentary scene has an empty source range: {scene.id}"
         )
-    return source, duration
+
+    narration_asset = None
+    if scene.audio_mode in {AudioMode.narration, AudioMode.mixed}:
+        if scene.audio_mode == AudioMode.mixed and not source.video_metadata.has_audio:
+            raise DocumentaryRenderError(
+                f"mixed documentary audio requires source audio: {scene.id}"
+            )
+        try:
+            narration_asset = load_narration_audio(
+                project.id,
+                scene.id,
+                language=project.master_language,
+                root=root,
+            )
+        except NarrationAudioError as exc:
+            raise DocumentaryRenderError(str(exc)) from exc
+        if (
+            narration_asset.duration_seconds
+            > duration + _NARRATION_DURATION_TOLERANCE_SECONDS
+        ):
+            raise DocumentaryRenderError(
+                f"narration audio exceeds scene duration: {scene.id}"
+            )
+
+    return source, duration, narration_asset
 
 
 def _build_documentary_render_command_and_expectations(
@@ -164,16 +193,18 @@ def _build_documentary_render_command_and_expectations(
                 "documentary timeline is stale; Story Plan changed after clip selection"
             )
 
-    resolved_scenes: list[tuple[object, SourceAsset, float]] = []
+    resolved_scenes: list[
+        tuple[object, SourceAsset, float, NarrationAudioAsset | None]
+    ] = []
     source_cache: dict[str, SourceAsset] = {}
     for scene in project.plan.scenes:
-        source, duration = _validate_scene(
+        source, duration, narration_asset = _validate_scene(
             project,
             scene,
             root=root,
             source_cache=source_cache,
         )
-        resolved_scenes.append((scene, source, duration))
+        resolved_scenes.append((scene, source, duration, narration_asset))
 
     target = (
         Path(output_path).expanduser().resolve()
@@ -182,18 +213,35 @@ def _build_documentary_render_command_and_expectations(
     )
 
     command = [utils.get_ffmpeg_binary(), "-y", "-nostdin"]
-    for _, source, _ in resolved_scenes:
+    input_indices: list[tuple[int, int | None]] = []
+    next_input_index = 0
+    for _, source, _, narration_asset in resolved_scenes:
+        source_input_index = next_input_index
         command.extend(["-i", str(Path(source.local_path).expanduser().resolve())])
+        next_input_index += 1
+
+        narration_input_index = None
+        if narration_asset is not None:
+            narration_input_index = next_input_index
+            command.extend(
+                [
+                    "-i",
+                    str(Path(narration_asset.local_path).expanduser().resolve()),
+                ]
+            )
+            next_input_index += 1
+        input_indices.append((source_input_index, narration_input_index))
 
     filters: list[str] = []
     concat_inputs: list[str] = []
 
-    for index, (scene, source, duration) in enumerate(resolved_scenes):
+    for index, (scene, source, duration, narration_asset) in enumerate(resolved_scenes):
+        source_input_index, narration_input_index = input_indices[index]
         start = float(scene.source_start)
         end = start + duration
 
         filters.append(
-            f"[{index}:v]"
+            f"[{source_input_index}:v]"
             f"trim=start={start:.6f}:end={end:.6f},"
             "setpts=PTS-STARTPTS,"
             f"scale={width}:{height}:force_original_aspect_ratio=increase,"
@@ -201,17 +249,54 @@ def _build_documentary_render_command_and_expectations(
             f"fps={fps},setsar=1,format=yuv420p[v{index}]"
         )
 
-        use_original_audio = (
+        if (
             scene.audio_mode == AudioMode.original
             and bool(source.video_metadata.has_audio)
-        )
-        if use_original_audio:
+        ):
             filters.append(
-                f"[{index}:a]"
+                f"[{source_input_index}:a]"
                 f"atrim=start={start:.6f}:end={end:.6f},"
                 "asetpts=PTS-STARTPTS,"
                 "aresample=48000,"
-                "aformat=sample_fmts=fltp:channel_layouts=stereo"
+                "aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                f"volume={scene.original_volume:.6f}"
+                f"[a{index}]"
+            )
+        elif scene.audio_mode == AudioMode.narration:
+            filters.append(
+                f"[{narration_input_index}:a]"
+                "asetpts=PTS-STARTPTS,"
+                "aresample=48000,"
+                "aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                f"volume={scene.narration_volume:.6f},"
+                f"apad=pad_dur={duration:.6f},"
+                f"atrim=duration={duration:.6f}"
+                f"[a{index}]"
+            )
+        elif scene.audio_mode == AudioMode.mixed:
+            filters.append(
+                f"[{source_input_index}:a]"
+                f"atrim=start={start:.6f}:end={end:.6f},"
+                "asetpts=PTS-STARTPTS,"
+                "aresample=48000,"
+                "aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                f"volume={scene.original_volume:.6f}"
+                f"[ao{index}]"
+            )
+            filters.append(
+                f"[{narration_input_index}:a]"
+                "asetpts=PTS-STARTPTS,"
+                "aresample=48000,"
+                "aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                f"volume={scene.narration_volume:.6f},"
+                f"apad=pad_dur={duration:.6f},"
+                f"atrim=duration={duration:.6f}"
+                f"[an{index}]"
+            )
+            filters.append(
+                f"[ao{index}][an{index}]"
+                "amix=inputs=2:duration=longest:dropout_transition=0:normalize=1,"
+                f"atrim=duration={duration:.6f}"
                 f"[a{index}]"
             )
         else:
@@ -258,7 +343,7 @@ def _build_documentary_render_command_and_expectations(
             str(target),
         ]
     )
-    expected_duration = sum(duration for _, _, duration in resolved_scenes)
+    expected_duration = sum(duration for _, _, duration, _ in resolved_scenes)
     return command, expected_duration, len(resolved_scenes), project.revision
 
 
