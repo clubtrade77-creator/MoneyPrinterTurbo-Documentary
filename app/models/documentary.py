@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -127,6 +127,8 @@ class DocumentaryTranscript(BaseModel):
     source_id: str
     source_checksum_sha256: str = ""
     language: str = ""
+    language_mode: Literal["auto", "forced"] = "auto"
+    requested_language: Optional[str] = None
     language_probability: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     media_duration_seconds: Optional[float] = Field(default=None, gt=0)
     model_size: str = ""
