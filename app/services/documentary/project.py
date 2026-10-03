@@ -20,6 +20,7 @@ from app.models.documentary import (
     utc_now,
 )
 from app.services.documentary.metadata import probe_video_metadata
+from app.utils.utils import storage_dir
 
 PROJECT_SUBDIRS = (
     "sources",
@@ -43,6 +44,9 @@ _VIDEO_SOURCE_TYPES = {
     SourceType.youtube,
     SourceType.bodycam,
     SourceType.cctv,
+    SourceType.court,
+    SourceType.interview,
+    SourceType.news,
     SourceType.broll,
 }
 
@@ -52,7 +56,8 @@ class ProjectConflictError(RuntimeError):
 
 
 def default_documentary_root() -> Path:
-    return Path("storage") / "documentary"
+    """Return a repository-anchored storage root, independent of process cwd."""
+    return Path(storage_dir("documentary")).resolve()
 
 
 def _validate_project_id(project_id: str) -> str:
