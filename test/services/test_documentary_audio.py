@@ -88,6 +88,41 @@ def test_load_narration_audio_rejects_modified_registered_file(
         )
 
 
+def test_load_narration_audio_rejects_stale_scene_text(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project = _project_with_scene(tmp_path)
+    project = load_project(project.id, tmp_path)
+    project.plan.scenes[0].narration_text = "Original narration."
+    save_project(project, tmp_path)
+
+    source = tmp_path / "voice.wav"
+    source.write_bytes(b"original-wave")
+    monkeypatch.setattr(
+        "app.services.documentary.audio._probe_audio",
+        lambda path: (1.5, "pcm_s16le"),
+    )
+
+    attach_narration_audio(
+        project.id,
+        "scene_narration",
+        source,
+        root=tmp_path,
+    )
+
+    changed = load_project(project.id, tmp_path)
+    changed.plan.scenes[0].narration_text = "Updated narration."
+    save_project(changed, tmp_path)
+
+    with pytest.raises(NarrationAudioError, match="narration text changed"):
+        load_narration_audio(
+            project.id,
+            "scene_narration",
+            root=tmp_path,
+        )
+
+
 def test_attach_narration_audio_replaces_previous_scene_language_asset(
     tmp_path: Path,
     monkeypatch,
