@@ -78,9 +78,12 @@ class NarrativePurpose(str, Enum):
     hook = "hook"
     context = "context"
     conflict = "conflict"
+    question = "question"
     escalation = "escalation"
     reveal = "reveal"
+    twist = "twist"
     payoff = "payoff"
+    next_hook = "next_hook"
     transition = "transition"
 
 
@@ -142,6 +145,78 @@ class DocumentaryTranscript(BaseModel):
         if not _SOURCE_ID_RE.fullmatch(value or ""):
             raise ValueError("invalid documentary source id")
         return value
+
+
+class StoryEvidence(BaseModel):
+    source_id: str
+    segment_ids: list[int] = Field(min_length=1)
+    note: str = ""
+
+    @field_validator("source_id")
+    @classmethod
+    def validate_source_id(cls, value: str) -> str:
+        if not _SOURCE_ID_RE.fullmatch(value or ""):
+            raise ValueError("invalid documentary source id")
+        return value
+
+    @field_validator("segment_ids")
+    @classmethod
+    def validate_segment_ids(cls, value: list[int]) -> list[int]:
+        if any(segment_id < 0 for segment_id in value):
+            raise ValueError("story evidence segment ids must be non-negative")
+        if len(value) != len(set(value)):
+            raise ValueError("story evidence segment ids must be unique")
+        return value
+
+
+class StoryBeat(BaseModel):
+    id: str = Field(default_factory=lambda: f"beat_{uuid4().hex[:12]}")
+    purpose: NarrativePurpose
+    title: str
+    summary: str
+    target_duration_seconds: float = Field(gt=0, le=180)
+    narration_goal: str = ""
+    original_audio_priority: bool = False
+    evidence: list[StoryEvidence] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_text(self):
+        self.title = self.title.strip()
+        self.summary = self.summary.strip()
+        self.narration_goal = self.narration_goal.strip()
+        if not self.title:
+            raise ValueError("story beat title is required")
+        if not self.summary:
+            raise ValueError("story beat summary is required")
+        return self
+
+
+class StoryPlan(BaseModel):
+    version: int = 1
+    title: str
+    angle: str
+    hook: str
+    target_duration_seconds: float = Field(default=600, ge=60, le=1800)
+    beats: list[StoryBeat] = Field(min_length=1, max_length=30)
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_story_structure(self):
+        self.title = self.title.strip()
+        self.angle = self.angle.strip()
+        self.hook = self.hook.strip()
+        if not self.title:
+            raise ValueError("story plan title is required")
+        if not self.angle:
+            raise ValueError("story plan angle is required")
+        if not self.hook:
+            raise ValueError("story plan hook is required")
+        if self.beats[0].purpose != NarrativePurpose.hook:
+            raise ValueError("first story beat must be a hook")
+        beat_ids = [beat.id for beat in self.beats]
+        if len(beat_ids) != len(set(beat_ids)):
+            raise ValueError("story plan contains duplicate beat ids")
+        return self
 
 
 class VideoMetadata(BaseModel):
