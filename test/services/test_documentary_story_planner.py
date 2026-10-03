@@ -17,6 +17,7 @@ from app.services.documentary.project import (
     create_project,
 )
 from app.services.documentary.story_planner import (
+    CURRENT_GROUNDING_REVIEW_VERSION,
     MAX_STORY_PROMPT_CHARS,
     StoryPlannerError,
     build_story_grounding_review_prompt,
@@ -282,6 +283,8 @@ def test_plan_story_persists_grounded_plan_and_loads_it(tmp_path: Path):
     )
 
     assert plan.title == "The Traffic Stop"
+    assert plan.grounding_reviewed is True
+    assert plan.grounding_review_version == CURRENT_GROUNDING_REVIEW_VERSION
     assert story_plan_path(project.id, tmp_path).is_file()
     assert source.id in prompts[0]
 
@@ -642,6 +645,18 @@ def test_load_story_plan_rejects_legacy_unreviewed_plan(tmp_path: Path):
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(StoryPlannerError, match="not semantically reviewed"):
+        load_story_plan(project.id, root=tmp_path)
+
+
+def test_load_story_plan_rejects_plan_from_older_grounding_policy(tmp_path: Path):
+    project, source, _ = _register_transcript(tmp_path)
+    payload = _plan_payload(source.id)
+    payload["grounding_reviewed"] = True
+    path = story_plan_path(project.id, tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(StoryPlannerError, match="outdated semantic review policy"):
         load_story_plan(project.id, root=tmp_path)
 
 
