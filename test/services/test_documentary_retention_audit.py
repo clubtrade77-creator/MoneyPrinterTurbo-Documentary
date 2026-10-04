@@ -17,7 +17,6 @@ from app.services.documentary.project import (
     add_source,
     create_project,
     load_project,
-    project_dir,
     save_project,
 )
 from app.services.documentary.retention_audit import (
