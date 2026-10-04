@@ -638,6 +638,10 @@
     "Documentary Retranscribe": "Transcribe again",
     "Documentary Transcribing": "Transcribing source…",
     "Documentary Transcription Failed": "Transcription failed: {error}",
-    "Documentary Transcription Complete": "Transcription complete: {segments} segments."
+    "Documentary Transcription Complete": "Transcription complete: {segments} segments.",
+    "Documentary Whisper Model": "Whisper model",
+    "Documentary Whisper Small": "Fast — small (recommended)",
+    "Documentary Whisper Large": "Maximum quality — large-v3",
+    "Documentary Whisper Model Help": "Small is the practical default for ordinary speech and downloads much faster. large-v3 is for difficult noisy footage and is much heavier on CPU."
   }
 }
