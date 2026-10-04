@@ -199,6 +199,24 @@ def test_attach_local_file_copies_and_registers_source(tmp_path: Path):
     assert loaded.sources[0].id == source.id
 
 
+def test_attach_local_file_can_preserve_original_upload_filename(tmp_path: Path):
+    project = create_project(
+        "Upload provenance", project_id="doc_upload_name", root=tmp_path
+    )
+    staged_file = tmp_path / "temporary-upload.mp4"
+    staged_file.write_bytes(b"test-video-bytes")
+
+    source = attach_local_file(
+        project.id,
+        staged_file,
+        original_filename="../../camera-original.mp4",
+        rights_status=RightsStatus.user_owned,
+        root=tmp_path,
+    )
+
+    assert source.original_filename == "camera-original.mp4"
+
+
 def test_renderability_requires_existing_file_and_publishability_requires_rights(
     tmp_path: Path,
 ):
