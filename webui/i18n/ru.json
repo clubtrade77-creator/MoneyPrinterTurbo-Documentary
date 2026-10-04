@@ -488,6 +488,24 @@
     "Documentary Whisper Model": "Модель Whisper",
     "Documentary Whisper Small": "Быстро — small (рекомендуется)",
     "Documentary Whisper Large": "Максимальное качество — large-v3",
-    "Documentary Whisper Model Help": "Small — практичный вариант по умолчанию для обычной речи и загружается намного быстрее. large-v3 нужна для сложных шумных записей и значительно тяжелее для CPU."
+    "Documentary Whisper Model Help": "Small — практичный вариант по умолчанию для обычной речи и загружается намного быстрее. large-v3 нужна для сложных шумных записей и значительно тяжелее для CPU.",
+    "Documentary Story Planner": "Story Planner",
+    "Documentary Story Transcript Warning": "Некоторые транскрибации устарели и исключены.",
+    "Documentary Story Plan Stale": "Сохранённый план истории устарел или повреждён: {error}",
+    "Documentary Story Angle": "Угол истории",
+    "Documentary Story Hook": "Хук",
+    "Documentary Story Summary": "{beats} блоков · цель {minutes:.1f} мин",
+    "Documentary Story Narration Goal": "Задача закадрового текста",
+    "Documentary Story Original Audio": "Приоритет оригинального звука",
+    "Documentary Story Evidence": "Основание",
+    "Documentary Story Segments": "сегменты",
+    "Documentary Story Sources": "Транскрибации для построения истории",
+    "Documentary Story Target Minutes": "Целевая длина документального ролика, минут",
+    "Documentary Story Target Help": "Для этого короткого теста выбери 1 минуту. Для реальных документальных роликов указывай нужные 8–15 минут.",
+    "Documentary Story Generate": "Построить план истории",
+    "Documentary Story Regenerate": "Построить план заново",
+    "Documentary Story Generating": "Строю и проверяю план истории…",
+    "Documentary Story Failed": "Story Planner не смог построить план: {error}",
+    "Documentary Story Complete": "План истории создан: {beats} блоков."
   }
 }
