@@ -8363,6 +8363,12 @@ def _render_application():
     """按固定顺序渲染顶部栏、弹窗、生成表单和任务结果。"""
     _render_top_bar()
 
+    if st.session_state.get("settings_dialog_open", False):
+        _render_settings_dialog()
+
+    if _apply_pending_settings_preset():
+        st.success(tr("Settings Preset Imported"))
+
     workspace_mode = st.radio(
         tr("Workspace Mode"),
         options=("short_video", "documentary"),
@@ -8379,12 +8385,6 @@ def _render_application():
     if workspace_mode == "documentary":
         documentary_ui.render_documentary_application(tr)
         return
-
-    if st.session_state.get("settings_dialog_open", False):
-        _render_settings_dialog()
-
-    if _apply_pending_settings_preset():
-        st.success(tr("Settings Preset Imported"))
 
     restore_applied = _apply_pending_task_restore()
     restore_candidate_id = st.session_state.get("task_restore_candidate_id")
