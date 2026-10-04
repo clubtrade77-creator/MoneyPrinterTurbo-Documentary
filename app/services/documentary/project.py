@@ -360,6 +360,7 @@ def _copy_local_source(
     source_type: SourceType,
     rights_status: RightsStatus,
     rights_note: str,
+    original_filename: str,
     root: str | os.PathLike | None,
     probe_video: bool,
 ) -> SourceAsset:
@@ -382,7 +383,11 @@ def _copy_local_source(
             source_type=source_type,
             provenance=ProvenanceType.user_provided,
             title=(title or source_path.stem).strip(),
-            original_filename=source_path.name,
+            original_filename=(
+                Path(original_filename).name
+                if original_filename
+                else source_path.name
+            ),
             local_path=str(target_path),
             checksum_sha256=sha256_file(target_path),
             video_metadata=video_metadata,
@@ -404,6 +409,7 @@ def attach_local_file(
     source_type: SourceType = SourceType.local_video,
     rights_status: RightsStatus = RightsStatus.unknown_review_required,
     rights_note: str = "",
+    original_filename: str = "",
     root: str | os.PathLike | None = None,
 ) -> SourceAsset:
     """Copy a generic user-provided file into the project and register it."""
@@ -418,6 +424,7 @@ def attach_local_file(
         source_type=source_type,
         rights_status=rights_status,
         rights_note=rights_note,
+        original_filename=original_filename,
         root=root,
         probe_video=False,
     )
@@ -431,6 +438,7 @@ def attach_local_video(
     source_type: SourceType = SourceType.local_video,
     rights_status: RightsStatus = RightsStatus.unknown_review_required,
     rights_note: str = "",
+    original_filename: str = "",
     root: str | os.PathLike | None = None,
 ) -> SourceAsset:
     """Copy an MP4/MOV into the project and persist verified ffprobe metadata.
@@ -452,6 +460,7 @@ def attach_local_video(
         source_type=source_type,
         rights_status=rights_status,
         rights_note=rights_note,
+        original_filename=original_filename,
         root=root,
         probe_video=True,
     )
