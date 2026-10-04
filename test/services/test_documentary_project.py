@@ -23,6 +23,7 @@ from app.services.documentary.project import (
     create_project,
     default_documentary_root,
     load_project,
+    list_projects,
     project_dir,
     save_project,
 )
@@ -60,6 +61,38 @@ def test_create_documentary_project_layout(tmp_path: Path):
     assert loaded.title == "Test Case"
     assert loaded.sources == []
     assert loaded.revision == 1
+
+
+def test_list_projects_returns_most_recent_first(tmp_path: Path):
+    first = create_project(
+        "First project", project_id="doc_list_first", root=tmp_path
+    )
+    second = create_project(
+        "Second project", project_id="doc_list_second", root=tmp_path
+    )
+
+    first_loaded = load_project(first.id, tmp_path)
+    first_loaded.title = "First project updated"
+    save_project(first_loaded, tmp_path)
+
+    projects = list_projects(tmp_path)
+
+    assert [project.id for project in projects] == [first.id, second.id]
+    assert projects[0].title == "First project updated"
+
+
+def test_list_projects_skips_malformed_project_directories(tmp_path: Path):
+    valid = create_project(
+        "Valid project", project_id="doc_list_valid", root=tmp_path
+    )
+    malformed = tmp_path / "doc_list_broken"
+    malformed.mkdir()
+    (malformed / "project.json").write_text("{not-json", encoding="utf-8")
+    (tmp_path / "unrelated-folder").mkdir()
+
+    projects = list_projects(tmp_path)
+
+    assert [project.id for project in projects] == [valid.id]
 
 
 def test_duplicate_project_creation_does_not_destroy_existing_project(tmp_path: Path):
