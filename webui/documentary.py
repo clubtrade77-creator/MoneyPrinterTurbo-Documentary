@@ -14,6 +14,11 @@ from app.services.documentary.project import (
     list_projects,
     load_project,
 )
+from app.services.documentary.transcription import (
+    TranscriptionError,
+    load_source_transcript,
+    transcribe_source,
+)
 
 Tr = Callable[[str], str]
 
@@ -164,6 +169,121 @@ def _render_project_overview(project, tr: Tr) -> None:
     )
 
 
+def _load_transcript_if_available(project_id: str, source_id: str):
+    try:
+        return load_source_transcript(project_id, source_id)
+    except FileNotFoundError:
+        return None
+
+
+def _render_transcription(project, tr: Tr) -> None:
+    if not project.sources:
+        return
+
+    with st.expander(tr("Documentary Transcription"), expanded=True):
+        candidates = [
+            source
+            for source in project.sources
+            if source.has_local_copy
+            and (
+                source.video_metadata is None
+                or source.video_metadata.has_audio
+            )
+        ]
+        if not candidates:
+            st.info(tr("Documentary No Transcribable Sources"))
+            return
+
+        source_by_id = {source.id: source for source in candidates}
+        selected_source_id = st.selectbox(
+            tr("Documentary Transcription Source"),
+            options=list(source_by_id),
+            key=f"documentary_transcription_source_{project.id}",
+            format_func=lambda source_id: (
+                source_by_id[source_id].title
+                or source_by_id[source_id].original_filename
+                or source_id
+            ),
+        )
+        source = source_by_id[selected_source_id]
+
+        try:
+            transcript = _load_transcript_if_available(project.id, source.id)
+        except TranscriptionError as exc:
+            transcript = None
+            st.warning(
+                tr("Documentary Transcript Stale").format(error=str(exc))
+            )
+
+        if transcript is None:
+            st.caption(tr("Documentary Transcript Missing"))
+        else:
+            cols = st.columns(3)
+            cols[0].metric(
+                tr("Documentary Transcript Language"),
+                (transcript.language or "-").upper(),
+            )
+            cols[1].metric(
+                tr("Documentary Transcript Segments"),
+                len(transcript.segments),
+            )
+            cols[2].metric(
+                tr("Documentary Transcript Model"),
+                transcript.model_size or "-",
+            )
+            if transcript.full_text:
+                st.text_area(
+                    tr("Documentary Transcript Preview"),
+                    value=transcript.full_text,
+                    height=120,
+                    disabled=True,
+                    key=f"documentary_transcript_preview_{project.id}_{source.id}",
+                )
+
+        language_mode = st.selectbox(
+            tr("Documentary Transcription Language"),
+            options=("auto", "en", "ru", "es"),
+            format_func=lambda code: {
+                "auto": tr("Documentary Language Auto"),
+                "en": "English",
+                "ru": "Русский",
+                "es": "Español",
+            }[code],
+            key=f"documentary_transcription_language_{project.id}_{source.id}",
+        )
+
+        button_label = (
+            tr("Documentary Retranscribe")
+            if transcript is not None
+            else tr("Documentary Transcribe")
+        )
+        if st.button(
+            button_label,
+            type="primary",
+            use_container_width=True,
+            key=f"documentary_transcribe_{project.id}_{source.id}",
+        ):
+            requested_language = None if language_mode == "auto" else language_mode
+            try:
+                with st.spinner(tr("Documentary Transcribing")):
+                    result = transcribe_source(
+                        project.id,
+                        source.id,
+                        language=requested_language,
+                    )
+            except (OSError, ValueError, TranscriptionError) as exc:
+                st.error(
+                    tr("Documentary Transcription Failed").format(error=str(exc))
+                )
+            else:
+                st.success(
+                    tr("Documentary Transcription Complete").format(
+                        segments=len(result.segments),
+                    )
+                )
+                st.rerun()
+
+
 def _render_source_upload(project, tr: Tr) -> None:
     with st.expander(tr("Documentary Add Source"), expanded=not project.sources):
         uploaded_file = st.file_uploader(
@@ -263,3 +383,4 @@ def render_documentary_application(tr: Tr) -> None:
 
     _render_project_overview(project, tr)
     _render_source_upload(project, tr)
+    _render_transcription(project, tr)
