@@ -490,6 +490,9 @@ class RetentionAudit(BaseModel):
     audit_version: Literal[1] = 1
     master_plan_fingerprint: str = Field(min_length=64, max_length=64)
     story_plan_fingerprint: str = ""
+    semantic_reviewed: bool = False
+    semantic_review_version: int = Field(default=0, ge=0)
+    reviewed_content_fingerprint: str = ""
     strongest_opening_scene_id: str = Field(min_length=1, max_length=160)
     open_loop: str = Field(default="", max_length=1500)
     reveal_payoff_notes: str = Field(default="", max_length=1500)
@@ -502,6 +505,13 @@ class RetentionAudit(BaseModel):
     def validate_fingerprints(cls, value: str) -> str:
         if value and not re.fullmatch(r"[0-9a-f]{64}", value):
             raise ValueError("invalid retention audit fingerprint")
+        return value
+
+    @field_validator("reviewed_content_fingerprint")
+    @classmethod
+    def validate_reviewed_content_fingerprint(cls, value: str) -> str:
+        if value and not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise ValueError("invalid retention reviewed-content fingerprint")
         return value
 
     @model_validator(mode="after")
