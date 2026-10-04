@@ -139,7 +139,9 @@ def _render_project_overview(project, tr: Tr) -> None:
                 ),
                 tr("Documentary Duration"): _source_duration(source),
                 tr("Documentary Local Copy"): (
-                    tr("Yes") if source.has_local_copy else tr("No")
+                    tr("Documentary Yes")
+                    if source.has_local_copy
+                    else tr("Documentary No")
                 ),
                 tr("Documentary Rights"): tr(
                     _RIGHTS_LABELS.get(
@@ -148,7 +150,9 @@ def _render_project_overview(project, tr: Tr) -> None:
                     )
                 ),
                 tr("Documentary Publishable"): (
-                    tr("Yes") if source.is_publishable else tr("No")
+                    tr("Documentary Yes")
+                    if source.is_publishable
+                    else tr("Documentary No")
                 ),
             }
         )
