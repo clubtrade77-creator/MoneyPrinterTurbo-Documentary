@@ -484,6 +484,10 @@
     "Documentary Retranscribe": "Volver a transcribir",
     "Documentary Transcribing": "Transcribiendo la fuente…",
     "Documentary Transcription Failed": "Error de transcripción: {error}",
-    "Documentary Transcription Complete": "Transcripción completada: {segments} segmentos."
+    "Documentary Transcription Complete": "Transcripción completada: {segments} segmentos.",
+    "Documentary Whisper Model": "Modelo Whisper",
+    "Documentary Whisper Small": "Rápido — small (recomendado)",
+    "Documentary Whisper Large": "Máxima calidad — large-v3",
+    "Documentary Whisper Model Help": "Small es la opción práctica para voz normal y se descarga mucho más rápido. large-v3 está pensada para grabaciones difíciles y ruidosas y exige mucho más a la CPU."
   }
 }
