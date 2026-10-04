@@ -15,6 +15,10 @@ from app.services.documentary.story_planner import load_story_plan
 
 MAX_RETENTION_AUDIT_ATTEMPTS = 3
 MAX_RETENTION_AUDIT_PROMPT_CHARS = 120_000
+MAX_RETENTION_REVIEW_PROMPT_CHARS = 180_000
+CURRENT_RETENTION_REVIEW_VERSION = 1
+MIN_NARRATION_STRETCH_SECONDS = 8.0
+MIN_SOURCE_STAGNATION_SECONDS = 12.0
 
 
 class RetentionAuditError(RuntimeError):
@@ -47,6 +51,29 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
 
 def master_plan_fingerprint(project: DocumentaryProject) -> str:
     payload = project.plan.model_dump(mode="json")
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _audit_content_fingerprint(audit: RetentionAudit) -> str:
+    payload = {
+        "strongest_opening_scene_id": audit.strongest_opening_scene_id,
+        "open_loop": audit.open_loop,
+        "reveal_payoff_notes": audit.reveal_payoff_notes,
+        "diagnostics": [
+            item.model_dump(mode="json")
+            for item in audit.diagnostics
+        ],
+        "short_candidates": [
+            item.model_dump(mode="json")
+            for item in audit.short_candidates
+        ],
+    }
     canonical = json.dumps(
         payload,
         ensure_ascii=False,
@@ -167,8 +194,12 @@ def build_retention_audit_prompt(
         "stretches with too much narration and no new evidence, long stretches without a "
         "source change or new information, reveal/payoff placement, and useful candidate "
         "cut ranges for Shorts. A Shorts candidate must use existing start/end scene ids "
-        "in forward timeline order. It is valid to return no diagnostics or no short "
-        "candidates when the input does not support them. "
+        "in forward timeline order. open_loop and short candidate hook must be natural-language "
+        "editorial text, never a raw scene_id or beat_id. Only flag narration_stretch when the "
+        f"referenced stretch is at least {MIN_NARRATION_STRETCH_SECONDS:g} seconds. Only flag "
+        f"source_stagnation when the same-source stretch is at least "
+        f"{MIN_SOURCE_STAGNATION_SECONDS:g} seconds. It is valid to return no diagnostics or no "
+        "short candidates when the input does not support them. "
         "Return JSON only with exactly these top-level keys: "
         "strongest_opening_scene_id, open_loop, reveal_payoff_notes, diagnostics, "
         "short_candidates. "
@@ -206,6 +237,14 @@ def _validate_references(
         else set()
     )
 
+    known_text_ids = known_scene_ids | known_beat_ids
+    if audit.open_loop and audit.open_loop in known_text_ids:
+        raise RetentionAuditError(
+            "documentary retention open_loop must be editorial text, not a raw id"
+        )
+
+    scenes_by_id = {scene.id: scene for scene in project.plan.scenes}
+
     for diagnostic in audit.diagnostics:
         if any(scene_id not in known_scene_ids for scene_id in diagnostic.scene_ids):
             raise RetentionAuditError(
@@ -220,6 +259,32 @@ def _validate_references(
                 "documentary retention diagnostic references an unknown beat"
             )
 
+        referenced_scenes = [
+            scenes_by_id[scene_id]
+            for scene_id in diagnostic.scene_ids
+        ]
+        referenced_duration = sum(
+            _scene_duration_seconds(scene)
+            for scene in referenced_scenes
+        )
+        if (
+            diagnostic.kind == "narration_stretch"
+            and referenced_duration < MIN_NARRATION_STRETCH_SECONDS
+        ):
+            raise RetentionAuditError(
+                "documentary narration_stretch diagnostic is below minimum duration"
+            )
+        if diagnostic.kind == "source_stagnation":
+            if referenced_duration < MIN_SOURCE_STAGNATION_SECONDS:
+                raise RetentionAuditError(
+                    "documentary source_stagnation diagnostic is below minimum duration"
+                )
+            source_ids = {scene.source_id for scene in referenced_scenes}
+            if len(source_ids) != 1:
+                raise RetentionAuditError(
+                    "documentary source_stagnation diagnostic spans multiple sources"
+                )
+
     for candidate in audit.short_candidates:
         if (
             candidate.start_scene_id not in known_scene_ids
@@ -231,6 +296,10 @@ def _validate_references(
         if scene_index[candidate.start_scene_id] > scene_index[candidate.end_scene_id]:
             raise RetentionAuditError(
                 "documentary short candidate uses reversed scene order"
+            )
+        if candidate.hook in known_text_ids:
+            raise RetentionAuditError(
+                "documentary short candidate hook must be editorial text, not a raw id"
             )
 
 
@@ -287,6 +356,104 @@ def _parse_candidate(
     return audit
 
 
+def build_retention_review_prompt(
+    project: DocumentaryProject,
+    story_plan,
+    audit: RetentionAudit,
+) -> str:
+    payload = {
+        "timeline": timeline_payload(project),
+        "story_plan": (
+            {
+                "title": story_plan.title,
+                "angle": story_plan.angle,
+                "hook": story_plan.hook,
+                "beats": [
+                    {
+                        "id": beat.id,
+                        "purpose": beat.purpose.value,
+                        "title": beat.title,
+                        "summary": beat.summary,
+                    }
+                    for beat in story_plan.beats
+                ],
+            }
+            if story_plan is not None
+            else None
+        ),
+        "audit": {
+            "strongest_opening_scene_id": audit.strongest_opening_scene_id,
+            "open_loop": audit.open_loop,
+            "reveal_payoff_notes": audit.reveal_payoff_notes,
+            "diagnostics": [
+                item.model_dump(mode="json")
+                for item in audit.diagnostics
+            ],
+            "short_candidates": [
+                item.model_dump(mode="json")
+                for item in audit.short_candidates
+            ],
+        },
+    }
+    prompt = (
+        "Review this documentary retention audit for internal consistency and grounding. "
+        "Reject unsupported incident facts, raw ids used as editorial copy, contradictory "
+        "opening recommendations, diagnostics that are not supported by the supplied timeline, "
+        "or Shorts hooks/reasons that merely repeat ids instead of useful editorial text. "
+        "Do not judge stylistic taste unless it creates a factual or logical contradiction. "
+        'Return JSON only: {"supported": true, "issues": []} when acceptable, or '
+        '{"supported": false, "issues": ["specific issue"]} when not.\n\n'
+        + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    )
+    if len(prompt) > MAX_RETENTION_REVIEW_PROMPT_CHARS:
+        raise RetentionAuditError(
+            "documentary retention review prompt exceeds safe size"
+        )
+    return prompt
+
+
+def _parse_review(response_text: str) -> list[str]:
+    raw = _strip_code_fence(response_text)
+    if not raw:
+        raise _NonRetryableRetentionAuditError(
+            "documentary retention reviewer returned an empty response"
+        )
+    if raw.startswith("Error:"):
+        raise _NonRetryableRetentionAuditError(
+            raw.removeprefix("Error:").strip() or raw
+        )
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RetentionAuditError(
+            "documentary retention reviewer did not return valid JSON"
+        ) from exc
+    if not isinstance(payload, dict) or set(payload) != {"supported", "issues"}:
+        raise RetentionAuditError(
+            "documentary retention reviewer response has unexpected fields"
+        )
+    if not isinstance(payload["supported"], bool) or not isinstance(
+        payload["issues"], list
+    ):
+        raise RetentionAuditError(
+            "documentary retention reviewer response has invalid field types"
+        )
+    issues = [
+        str(issue).strip()
+        for issue in payload["issues"]
+        if str(issue).strip()
+    ]
+    if payload["supported"] and issues:
+        raise RetentionAuditError(
+            "documentary retention reviewer approved while reporting issues"
+        )
+    if not payload["supported"] and not issues:
+        raise RetentionAuditError(
+            "documentary retention reviewer rejected without an issue"
+        )
+    return [] if payload["supported"] else issues
+
+
 def _retry_prompt(base_prompt: str, error: Exception, attempt: int) -> str:
     return (
         base_prompt
@@ -301,10 +468,17 @@ def audit_retention(
     *,
     root: str | os.PathLike | None = None,
     generate_fn: Callable[[str], str] | None = None,
+    review_fn: Callable[[str], str] | None = None,
 ) -> RetentionAudit:
     project, story_plan, story_fingerprint = _load_context(project_id, root=root)
     prompt = build_retention_audit_prompt(project, story_plan)
     generator = generate_fn or llm_service.generate_text
+    if generate_fn is not None and review_fn is None:
+        raise ValueError(
+            "review_fn is required when generate_fn is supplied so custom "
+            "retention audits cannot bypass semantic review"
+        )
+    reviewer = review_fn or llm_service.generate_text
 
     current_prompt = prompt
     audit = None
@@ -317,6 +491,23 @@ def audit_retention(
                 project,
                 story_plan,
             )
+            review_issues = _parse_review(
+                reviewer(
+                    build_retention_review_prompt(
+                        project,
+                        story_plan,
+                        audit,
+                    )
+                )
+            )
+            if review_issues:
+                raise RetentionAuditError(
+                    "semantic retention review failed: "
+                    + "; ".join(review_issues)
+                )
+            audit.semantic_reviewed = True
+            audit.semantic_review_version = CURRENT_RETENTION_REVIEW_VERSION
+            audit.reviewed_content_fingerprint = _audit_content_fingerprint(audit)
             break
         except _NonRetryableRetentionAuditError:
             raise
@@ -372,6 +563,19 @@ def load_retention_audit(
         raise RetentionAuditError(
             f"invalid documentary retention audit: {project_id}"
         ) from exc
+
+    if not audit.semantic_reviewed:
+        raise RetentionAuditError(
+            "documentary retention audit has not passed semantic review"
+        )
+    if audit.semantic_review_version != CURRENT_RETENTION_REVIEW_VERSION:
+        raise RetentionAuditError(
+            "documentary retention audit review policy is stale"
+        )
+    if audit.reviewed_content_fingerprint != _audit_content_fingerprint(audit):
+        raise RetentionAuditError(
+            "documentary retention audit changed after semantic review"
+        )
 
     project, story_plan, story_fingerprint = _load_context(
         project_id,
