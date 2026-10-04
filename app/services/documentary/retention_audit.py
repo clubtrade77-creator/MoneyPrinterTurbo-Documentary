@@ -579,6 +579,20 @@ def audit_retention(
                     "semantic retention review failed: "
                     + "; ".join(review_issues)
                 )
+            grounding_issues = _parse_review(
+                reviewer(
+                    build_retention_grounding_review_prompt(
+                        project,
+                        story_plan,
+                        audit,
+                    )
+                )
+            )
+            if grounding_issues:
+                raise RetentionAuditError(
+                    "grounding retention review failed: "
+                    + "; ".join(grounding_issues)
+                )
             audit.semantic_reviewed = True
             audit.semantic_review_version = CURRENT_RETENTION_REVIEW_VERSION
             audit.reviewed_content_fingerprint = _audit_content_fingerprint(audit)
