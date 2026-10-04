@@ -152,6 +152,56 @@ def test_transcribe_media_keeps_text_segment_when_word_alignment_is_missing(
 
 
 
+def test_transcribe_media_retries_without_vad_when_first_pass_is_empty(
+    tmp_path: Path,
+):
+    media_file = tmp_path / "short-speech.mp4"
+    media_file.write_bytes(b"media")
+
+    class RetryWhisperModel:
+        def __init__(self):
+            self.calls = []
+
+        def transcribe(self, path, **kwargs):
+            self.calls.append(kwargs)
+            info = SimpleNamespace(language="en", language_probability=0.99)
+            if kwargs.get("vad_filter"):
+                return iter([]), info
+            return iter([_segment(0.0, 0.8, "Hello there.")]), info
+
+    model = RetryWhisperModel()
+    transcript = transcribe_media(
+        media_file,
+        source_id="source_short_speech",
+        model_override=model,
+        model_name="small",
+    )
+
+    assert transcript.full_text == "Hello there."
+    assert len(model.calls) == 2
+    assert model.calls[0]["vad_filter"] is True
+    assert model.calls[1]["vad_filter"] is False
+    assert "vad_parameters" not in model.calls[1]
+
+
+def test_transcribe_media_rejects_empty_result_after_vad_retry(tmp_path: Path):
+    media_file = tmp_path / "no-speech.mp4"
+    media_file.write_bytes(b"media")
+    model = FakeWhisperModel([])
+
+    with pytest.raises(TranscriptionError, match="no recognizable speech"):
+        transcribe_media(
+            media_file,
+            source_id="source_no_speech",
+            model_override=model,
+            model_name="small",
+        )
+
+    assert len(model.calls) == 2
+    assert model.calls[0][1]["vad_filter"] is True
+    assert model.calls[1][1]["vad_filter"] is False
+
+
 def test_transcribe_media_rejects_malformed_segment_timing(tmp_path: Path):
     media_file = tmp_path / "bad-timing.mp4"
     media_file.write_bytes(b"media")
