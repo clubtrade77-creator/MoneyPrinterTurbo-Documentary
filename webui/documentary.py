@@ -233,13 +233,8 @@ def _render_transcription(project, tr: Tr) -> None:
                 transcript.model_size or "-",
             )
             if transcript.full_text:
-                st.text_area(
-                    tr("Documentary Transcript Preview"),
-                    value=transcript.full_text,
-                    height=120,
-                    disabled=True,
-                    key=f"documentary_transcript_preview_{project.id}_{source.id}",
-                )
+                st.markdown(f"**{tr('Documentary Transcript Preview')}**")
+                st.write(transcript.full_text)
 
         language_mode = st.selectbox(
             tr("Documentary Transcription Language"),
