@@ -77,6 +77,10 @@ def _project_with_timeline(tmp_path: Path):
     return load_project(project.id, tmp_path)
 
 
+def _approved_review(prompt: str) -> str:
+    return json.dumps({"supported": True, "issues": []})
+
+
 def _valid_response() -> str:
     return json.dumps(
         {
