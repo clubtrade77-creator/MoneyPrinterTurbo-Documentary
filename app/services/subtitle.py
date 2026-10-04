@@ -21,6 +21,7 @@ device = config.whisper.get("device", "cpu")
 compute_type = config.whisper.get("compute_type", "int8")
 initial_prompt = config.whisper.get("initial_prompt", "") or None
 model = None
+_named_models = {}
 _model_init_lock = threading.Lock()
 
 
@@ -58,13 +59,53 @@ def _ensure_model_loaded() -> bool:
     return True
 
 
-def get_whisper_model():
-    """Return the shared Faster-Whisper model, loading it once on first use."""
+def _resolve_whisper_model_path(requested_model_size: str) -> str:
+    model_path = f"{utils.root_dir()}/models/whisper-{requested_model_size}"
+    model_bin_file = f"{model_path}/model.bin"
+    if os.path.isdir(model_path) and os.path.isfile(model_bin_file):
+        return model_path
+    return requested_model_size
+
+
+def get_whisper_model(model_size_override: str | None = None):
+    """Return a cached Faster-Whisper model.
+
+    The legacy subtitle pipeline keeps using the configured global model. Documentary
+    workflows may request a smaller named model so a short transcription does not
+    silently trigger a multi-gigabyte large-v3 download on CPU.
+    """
     if WhisperModel is None:
         raise RuntimeError("faster_whisper is not available")
-    if not _ensure_model_loaded() or model is None:
-        raise RuntimeError("failed to load faster_whisper model")
-    return model
+
+    requested_model_size = (model_size_override or "").strip()
+    if not requested_model_size or requested_model_size == str(model_size):
+        if not _ensure_model_loaded() or model is None:
+            raise RuntimeError("failed to load faster_whisper model")
+        return model
+
+    with _model_init_lock:
+        cached_model = _named_models.get(requested_model_size)
+        if cached_model is not None:
+            return cached_model
+
+        model_path = _resolve_whisper_model_path(requested_model_size)
+        logger.info(
+            f"loading model: {model_path}, device: {device}, compute_type: {compute_type}"
+        )
+        try:
+            loaded_model = WhisperModel(
+                model_size_or_path=model_path,
+                device=device,
+                compute_type=compute_type,
+            )
+        except Exception as exc:
+            logger.error(f"failed to load Whisper model {requested_model_size}: {exc}")
+            raise RuntimeError(
+                f"failed to load faster_whisper model: {requested_model_size}"
+            ) from exc
+
+        _named_models[requested_model_size] = loaded_model
+        return loaded_model
 
 
 def create(
