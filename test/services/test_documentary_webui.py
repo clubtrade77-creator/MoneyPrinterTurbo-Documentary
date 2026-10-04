@@ -6,7 +6,9 @@ import webui.documentary as documentary_ui
 from webui.documentary import (
     _format_transcript_segment,
     _format_transcript_time,
+    _load_story_plan_if_available,
     _load_transcript_if_available,
+    _story_evidence_timecode,
     _write_uploaded_video_to_temp,
 )
 
@@ -78,3 +80,52 @@ def test_documentary_transcript_segment_includes_timecodes():
         "[00:03.60–00:06.74] "
         "A few seconds later, the situation changed completely."
     )
+
+
+def test_documentary_story_evidence_timecode_uses_segment_bounds():
+    transcript = type(
+        "Transcript",
+        (),
+        {
+            "segments": [
+                type(
+                    "Segment",
+                    (),
+                    {"id": 0, "start_seconds": 0.0, "end_seconds": 3.36},
+                )(),
+                type(
+                    "Segment",
+                    (),
+                    {"id": 1, "start_seconds": 3.60, "end_seconds": 6.74},
+                )(),
+            ]
+        },
+    )()
+
+    assert _story_evidence_timecode(transcript, [0, 1]) == (
+        "[00:00.00–00:06.74]"
+    )
+    assert _story_evidence_timecode(transcript, [1]) == (
+        "[00:03.60–00:06.74]"
+    )
+    assert _story_evidence_timecode(transcript, [99]) == ""
+
+
+def test_documentary_story_plan_lookup_returns_none_when_missing(monkeypatch):
+    def missing(project_id: str):
+        raise FileNotFoundError(project_id)
+
+    monkeypatch.setattr(documentary_ui, "load_story_plan", missing)
+
+    assert _load_story_plan_if_available("doc_test") is None
+
+
+def test_documentary_story_plan_lookup_returns_existing_plan(monkeypatch):
+    expected = object()
+    monkeypatch.setattr(
+        documentary_ui,
+        "load_story_plan",
+        lambda project_id: expected,
+    )
+
+    assert _load_story_plan_if_available("doc_test") is expected
