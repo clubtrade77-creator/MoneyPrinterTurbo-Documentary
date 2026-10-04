@@ -471,14 +471,34 @@ def localize_project(
             "documentary localization failed without a result"
         )
 
+    source_master_fingerprint = master_plan_fingerprint(project)
+    source_transcript_fingerprints = {
+        source_id: _transcript_fingerprint(transcript)
+        for source_id, transcript in transcripts.items()
+    }
+
+    latest_project, latest_transcripts = _load_localization_context(
+        project_id,
+        root=root,
+    )
+    if master_plan_fingerprint(latest_project) != source_master_fingerprint:
+        raise LocalizationError(
+            "documentary master timeline changed while localization was running"
+        )
+    latest_transcript_fingerprints = {
+        source_id: _transcript_fingerprint(transcript)
+        for source_id, transcript in latest_transcripts.items()
+    }
+    if latest_transcript_fingerprints != source_transcript_fingerprints:
+        raise LocalizationError(
+            "documentary transcript evidence changed while localization was running"
+        )
+
     plan = LocalizationPlan(
         source_language=source_language,
         target_language=target_language,
-        master_plan_fingerprint=master_plan_fingerprint(project),
-        transcript_fingerprints={
-            source_id: _transcript_fingerprint(transcript)
-            for source_id, transcript in transcripts.items()
-        },
+        master_plan_fingerprint=source_master_fingerprint,
+        transcript_fingerprints=source_transcript_fingerprints,
         semantic_reviewed=True,
         semantic_review_version=CURRENT_LOCALIZATION_REVIEW_VERSION,
         reviewed_content_fingerprint=_localized_scenes_fingerprint(
