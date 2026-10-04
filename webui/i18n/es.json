@@ -488,6 +488,24 @@
     "Documentary Whisper Model": "Modelo Whisper",
     "Documentary Whisper Small": "Rápido — small (recomendado)",
     "Documentary Whisper Large": "Máxima calidad — large-v3",
-    "Documentary Whisper Model Help": "Small es la opción práctica para voz normal y se descarga mucho más rápido. large-v3 está pensada para grabaciones difíciles y ruidosas y exige mucho más a la CPU."
+    "Documentary Whisper Model Help": "Small es la opción práctica para voz normal y se descarga mucho más rápido. large-v3 está pensada para grabaciones difíciles y ruidosas y exige mucho más a la CPU.",
+    "Documentary Story Planner": "Story Planner",
+    "Documentary Story Transcript Warning": "Algunas transcripciones están desactualizadas y se excluyeron.",
+    "Documentary Story Plan Stale": "El plan guardado está desactualizado o no es válido: {error}",
+    "Documentary Story Angle": "Enfoque",
+    "Documentary Story Hook": "Gancho",
+    "Documentary Story Summary": "{beats} bloques · objetivo {minutes:.1f} min",
+    "Documentary Story Narration Goal": "Objetivo de narración",
+    "Documentary Story Original Audio": "Prioridad del audio original",
+    "Documentary Story Evidence": "Evidencia",
+    "Documentary Story Segments": "segmentos",
+    "Documentary Story Sources": "Transcripciones para planificar la historia",
+    "Documentary Story Target Minutes": "Duración objetivo del documental, minutos",
+    "Documentary Story Target Help": "Para esta prueba corta usa 1 minuto. Para documentales reales elige la duración prevista de 8–15 minutos.",
+    "Documentary Story Generate": "Crear plan de historia",
+    "Documentary Story Regenerate": "Reconstruir plan de historia",
+    "Documentary Story Generating": "Creando y verificando el plan de historia…",
+    "Documentary Story Failed": "Story Planner falló: {error}",
+    "Documentary Story Complete": "Plan de historia creado: {beats} bloques."
   }
 }
