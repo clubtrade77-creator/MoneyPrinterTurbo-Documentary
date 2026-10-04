@@ -430,6 +430,62 @@ def build_retention_review_prompt(
     return prompt
 
 
+def build_retention_grounding_review_prompt(
+    project: DocumentaryProject,
+    story_plan,
+    audit: RetentionAudit,
+) -> str:
+    payload = {
+        "timeline": timeline_payload(project),
+        "story_plan": (
+            {
+                "title": story_plan.title,
+                "angle": story_plan.angle,
+                "hook": story_plan.hook,
+                "beats": [
+                    {
+                        "id": beat.id,
+                        "purpose": beat.purpose.value,
+                        "title": beat.title,
+                        "summary": beat.summary,
+                    }
+                    for beat in story_plan.beats
+                ],
+            }
+            if story_plan is not None
+            else None
+        ),
+        "audit": {
+            "strongest_opening_scene_id": audit.strongest_opening_scene_id,
+            "open_loop": audit.open_loop,
+            "reveal_payoff_notes": audit.reveal_payoff_notes,
+            "diagnostics": [
+                item.model_dump(mode="json")
+                for item in audit.diagnostics
+            ],
+            "short_candidates": [
+                item.model_dump(mode="json")
+                for item in audit.short_candidates
+            ],
+        },
+    }
+    prompt = (
+        "Review every descriptive claim in this retention audit against the supplied input. "
+        "Timing, scene order, narration presence, source repetition, purpose labels, and the "
+        "supplied text may be used. Reject descriptive claims about imagery, sound, mood, "
+        "camera behavior, or incident details when those claims are not explicit in the input. "
+        "Pay special attention to adjectives and Shorts hooks. "
+        'Return JSON only: {"supported": true, "issues": []} when grounded, or '
+        '{"supported": false, "issues": ["specific issue"]} when not.\n\n'
+        + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    )
+    if len(prompt) > MAX_RETENTION_REVIEW_PROMPT_CHARS:
+        raise RetentionAuditError(
+            "documentary retention grounding review prompt exceeds safe size"
+        )
+    return prompt
+
+
 def _parse_review(response_text: str) -> list[str]:
     raw = _strip_code_fence(response_text)
     if not raw:
