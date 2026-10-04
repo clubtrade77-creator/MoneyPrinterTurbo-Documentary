@@ -214,6 +214,7 @@ def _render_source_upload(project, tr: Tr) -> None:
                 source_type=source_type,
                 rights_status=rights_status,
                 rights_note=rights_note,
+                original_filename=uploaded_file.name,
             )
         except Exception as exc:
             st.error(str(exc))
