@@ -468,6 +468,22 @@
     "Documentary Rights Permission Confirmed": "Permiso confirmado",
     "Documentary Rights Public Domain": "Dominio público",
     "Documentary Yes": "Sí",
-    "Documentary No": "No"
+    "Documentary No": "No",
+    "Documentary Transcription": "Transcripción",
+    "Documentary No Transcribable Sources": "No hay una fuente con una pista de audio local utilizable para transcribir.",
+    "Documentary Transcription Source": "Fuente para transcribir",
+    "Documentary Transcript Stale": "La transcripción guardada ya no está actualizada: {error}",
+    "Documentary Transcript Missing": "Todavía no se ha creado una transcripción para esta fuente.",
+    "Documentary Transcript Language": "Idioma detectado",
+    "Documentary Transcript Segments": "Segmentos",
+    "Documentary Transcript Model": "Modelo Whisper",
+    "Documentary Transcript Preview": "Vista previa de la transcripción",
+    "Documentary Transcription Language": "Idioma de transcripción",
+    "Documentary Language Auto": "Detectar automáticamente",
+    "Documentary Transcribe": "Transcribir fuente",
+    "Documentary Retranscribe": "Volver a transcribir",
+    "Documentary Transcribing": "Transcribiendo la fuente…",
+    "Documentary Transcription Failed": "Error de transcripción: {error}",
+    "Documentary Transcription Complete": "Transcripción completada: {segments} segmentos."
   }
 }
