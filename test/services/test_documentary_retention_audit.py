@@ -115,6 +115,7 @@ def test_audit_retention_persists_and_loads_grounded_diagnostics(tmp_path: Path)
         project.id,
         root=tmp_path,
         generate_fn=lambda prompt: _valid_response(),
+        review_fn=_approved_review,
     )
 
     assert audit.strongest_opening_scene_id == "scene_reveal"
@@ -140,6 +141,7 @@ def test_audit_retention_retries_unknown_opening_scene(tmp_path: Path):
             project.id,
             root=tmp_path,
             generate_fn=generate,
+            review_fn=_approved_review,
         )
 
     assert len(calls) == 3
@@ -156,6 +158,7 @@ def test_audit_retention_rejects_unknown_diagnostic_scene(tmp_path: Path):
             project.id,
             root=tmp_path,
             generate_fn=lambda prompt: json.dumps(payload),
+            review_fn=_approved_review,
         )
 
 
@@ -170,6 +173,7 @@ def test_audit_retention_rejects_reversed_short_range(tmp_path: Path):
             project.id,
             root=tmp_path,
             generate_fn=lambda prompt: json.dumps(payload),
+            review_fn=_approved_review,
         )
 
 
@@ -183,6 +187,7 @@ def test_audit_retention_rejects_numerical_score_field(tmp_path: Path):
             project.id,
             root=tmp_path,
             generate_fn=lambda prompt: json.dumps(payload),
+            review_fn=_approved_review,
         )
 
 
@@ -199,6 +204,7 @@ def test_audit_retention_does_not_retry_provider_error(tmp_path: Path):
             project.id,
             root=tmp_path,
             generate_fn=generate,
+            review_fn=_approved_review,
         )
 
     assert len(calls) == 1
@@ -210,6 +216,7 @@ def test_load_retention_audit_rejects_changed_timeline(tmp_path: Path):
         project.id,
         root=tmp_path,
         generate_fn=lambda prompt: _valid_response(),
+        review_fn=_approved_review,
     )
 
     changed = load_project(project.id, tmp_path)
@@ -239,6 +246,7 @@ def test_audit_retention_discards_result_if_timeline_changes_during_run(
             project.id,
             root=tmp_path,
             generate_fn=generate,
+            review_fn=_approved_review,
         )
 
     assert not retention_audit_path(project.id, tmp_path).exists()
@@ -256,4 +264,5 @@ def test_audit_retention_requires_timeline_scenes(tmp_path: Path):
             project.id,
             root=tmp_path,
             generate_fn=lambda prompt: _valid_response(),
+            review_fn=_approved_review,
         )
