@@ -247,6 +247,10 @@ def _validate_references(
 
     scenes_by_id = {scene.id: scene for scene in project.plan.scenes}
 
+    def referenced_scenes_are_contiguous(scene_ids_to_check: list[str]) -> bool:
+        positions = [scene_index[scene_id] for scene_id in scene_ids_to_check]
+        return positions == list(range(positions[0], positions[0] + len(positions)))
+
     for diagnostic in audit.diagnostics:
         if any(scene_id not in known_scene_ids for scene_id in diagnostic.scene_ids):
             raise RetentionAuditError(
@@ -269,14 +273,24 @@ def _validate_references(
             _scene_duration_seconds(scene)
             for scene in referenced_scenes
         )
-        if (
-            diagnostic.kind == "narration_stretch"
-            and referenced_duration < MIN_NARRATION_STRETCH_SECONDS
-        ):
-            raise RetentionAuditError(
-                "documentary narration_stretch diagnostic is below minimum duration"
-            )
+        if diagnostic.kind == "narration_stretch":
+            if not referenced_scenes_are_contiguous(diagnostic.scene_ids):
+                raise RetentionAuditError(
+                    "documentary narration_stretch diagnostic must reference contiguous scenes"
+                )
+            if referenced_duration < MIN_NARRATION_STRETCH_SECONDS:
+                raise RetentionAuditError(
+                    "documentary narration_stretch diagnostic is below minimum duration"
+                )
+            if any(not scene.narration_text.strip() for scene in referenced_scenes):
+                raise RetentionAuditError(
+                    "documentary narration_stretch diagnostic includes a scene without narration"
+                )
         if diagnostic.kind == "source_stagnation":
+            if not referenced_scenes_are_contiguous(diagnostic.scene_ids):
+                raise RetentionAuditError(
+                    "documentary source_stagnation diagnostic must reference contiguous scenes"
+                )
             if referenced_duration < MIN_SOURCE_STAGNATION_SECONDS:
                 raise RetentionAuditError(
                     "documentary source_stagnation diagnostic is below minimum duration"
