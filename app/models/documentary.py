@@ -325,6 +325,101 @@ class ClipPlan(BaseModel):
         return value
 
 
+class LocalizedSubtitleSegment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str
+    segment_id: int = Field(ge=0)
+    text: str = Field(max_length=4000)
+
+    @field_validator("source_id")
+    @classmethod
+    def validate_source_id(cls, value: str) -> str:
+        if not _SOURCE_ID_RE.fullmatch(value or ""):
+            raise ValueError("invalid documentary source id")
+        return value
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("localized subtitle text is required")
+        return value
+
+
+class LocalizedSceneText(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scene_id: str = Field(min_length=1, max_length=160)
+    narration_text: str = Field(default="", max_length=8000)
+    on_screen_text: str = Field(default="", max_length=2000)
+    subtitle_segments: list[LocalizedSubtitleSegment] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_subtitle_refs(self):
+        refs = [
+            (segment.source_id, segment.segment_id)
+            for segment in self.subtitle_segments
+        ]
+        if len(refs) != len(set(refs)):
+            raise ValueError("localized scene contains duplicate subtitle segment refs")
+        self.narration_text = self.narration_text.strip()
+        self.on_screen_text = self.on_screen_text.strip()
+        return self
+
+
+class LocalizationPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal[1] = 1
+    source_language: str = Field(min_length=2, max_length=32)
+    target_language: str = Field(min_length=2, max_length=32)
+    master_plan_fingerprint: str = Field(min_length=64, max_length=64)
+    transcript_fingerprints: dict[str, str] = Field(default_factory=dict)
+    scenes: list[LocalizedSceneText] = Field(min_length=1)
+    created_at: datetime = Field(default_factory=utc_now)
+
+    @field_validator("source_language", "target_language")
+    @classmethod
+    def validate_language(cls, value: str) -> str:
+        value = value.strip().lower()
+        parts = value.split("-")
+        if not 1 <= len(parts) <= 4:
+            raise ValueError("invalid documentary localization language")
+        if not (2 <= len(parts[0]) <= 8 and parts[0].isalpha()):
+            raise ValueError("invalid documentary localization language")
+        if any(not (1 <= len(part) <= 8 and part.isalnum()) for part in parts[1:]):
+            raise ValueError("invalid documentary localization language")
+        return value
+
+    @field_validator("master_plan_fingerprint")
+    @classmethod
+    def validate_master_plan_fingerprint(cls, value: str) -> str:
+        if not re.fullmatch(r"[0-9a-f]{64}", value or ""):
+            raise ValueError("invalid documentary master plan fingerprint")
+        return value
+
+    @field_validator("transcript_fingerprints")
+    @classmethod
+    def validate_transcript_fingerprints(cls, value: dict[str, str]) -> dict[str, str]:
+        for source_id, fingerprint in value.items():
+            if not _SOURCE_ID_RE.fullmatch(source_id or ""):
+                raise ValueError("invalid documentary source id")
+            if not re.fullmatch(r"[0-9a-f]{64}", fingerprint or ""):
+                raise ValueError("invalid transcript fingerprint")
+        return value
+
+    @model_validator(mode="after")
+    def validate_scene_ids(self):
+        scene_ids = [scene.scene_id for scene in self.scenes]
+        if len(scene_ids) != len(set(scene_ids)):
+            raise ValueError("localization plan contains duplicate scene ids")
+        if self.source_language == self.target_language:
+            raise ValueError("localization target language must differ from source language")
+        return self
+
+
 class VideoMetadata(BaseModel):
     """Technical metadata needed by transcription, clip selection, and rendering."""
 
