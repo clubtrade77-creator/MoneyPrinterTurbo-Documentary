@@ -134,9 +134,9 @@ def transcribe_media(
     if subtitle_service.initial_prompt:
         transcribe_kwargs["initial_prompt"] = subtitle_service.initial_prompt
 
-    try:
-        raw_segments, info = model.transcribe(str(path), **transcribe_kwargs)
-        segments: list[TranscriptSegment] = []
+    def run_transcription(kwargs: dict[str, Any]):
+        raw_segments, info = model.transcribe(str(path), **kwargs)
+        parsed_segments: list[TranscriptSegment] = []
         for index, raw_segment in enumerate(raw_segments):
             timing = _time_range(
                 getattr(raw_segment, "start", None),
@@ -163,7 +163,7 @@ def transcribe_media(
                 if word is not None:
                     words.append(word)
 
-            segments.append(
+            parsed_segments.append(
                 TranscriptSegment(
                     id=index,
                     start_seconds=timing[0],
@@ -178,10 +178,25 @@ def transcribe_media(
                     ),
                 )
             )
+        return parsed_segments, info
+
+    try:
+        segments, info = run_transcription(transcribe_kwargs)
+        if not segments and transcribe_kwargs.get("vad_filter"):
+            retry_kwargs = dict(transcribe_kwargs)
+            retry_kwargs["vad_filter"] = False
+            retry_kwargs.pop("vad_parameters", None)
+            segments, info = run_transcription(retry_kwargs)
+        if not segments:
+            raise TranscriptionError(
+                f"Whisper detected no recognizable speech in {path.name}"
+            )
     except TranscriptionError:
         raise
     except Exception as exc:
-        raise TranscriptionError(f"Whisper transcription failed for {path.name}: {exc}") from exc
+        raise TranscriptionError(
+            f"Whisper transcription failed for {path.name}: {exc}"
+        ) from exc
 
     detected_language = str(getattr(info, "language", "") or "")
     language_mode = "forced" if requested_language else "auto"
@@ -281,6 +296,11 @@ def load_source_transcript(
     if transcript.source_id != source.id:
         raise TranscriptionError(
             f"transcript source mismatch: expected {source.id}, got {transcript.source_id}"
+        )
+
+    if not transcript.segments or not transcript.full_text.strip():
+        raise TranscriptionError(
+            f"transcript contains no recognized speech: {source.id}"
         )
 
     if source.has_local_copy:
