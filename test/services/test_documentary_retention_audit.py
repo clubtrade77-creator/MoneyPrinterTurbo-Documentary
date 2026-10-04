@@ -288,9 +288,36 @@ def test_audit_retention_retries_semantic_review_rejection(tmp_path: Path):
     )
 
     assert audit.semantic_reviewed is True
-    assert audit.semantic_review_version == 1
+    assert audit.semantic_review_version == 2
     assert len(audit.reviewed_content_fingerprint) == 64
-    assert len(review_calls) == 2
+    assert len(review_calls) == 3
+
+
+def test_audit_retention_retries_grounding_review_rejection(tmp_path: Path):
+    project = _project_with_timeline(tmp_path)
+    review_calls = []
+
+    def review(prompt: str) -> str:
+        review_calls.append(prompt)
+        if len(review_calls) == 2:
+            return json.dumps(
+                {
+                    "supported": False,
+                    "issues": ["A descriptive claim is not explicit in the supplied input."],
+                }
+            )
+        return json.dumps({"supported": True, "issues": []})
+
+    audit = audit_retention(
+        project.id,
+        root=tmp_path,
+        generate_fn=lambda prompt: _valid_response(),
+        review_fn=review,
+    )
+
+    assert audit.semantic_reviewed is True
+    assert audit.semantic_review_version == 2
+    assert len(review_calls) == 4
 
 
 def test_audit_retention_does_not_retry_provider_error(tmp_path: Path):
