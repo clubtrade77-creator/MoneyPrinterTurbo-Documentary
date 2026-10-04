@@ -642,6 +642,24 @@
     "Documentary Whisper Model": "Whisper model",
     "Documentary Whisper Small": "Fast — small (recommended)",
     "Documentary Whisper Large": "Maximum quality — large-v3",
-    "Documentary Whisper Model Help": "Small is the practical default for ordinary speech and downloads much faster. large-v3 is for difficult noisy footage and is much heavier on CPU."
+    "Documentary Whisper Model Help": "Small is the practical default for ordinary speech and downloads much faster. large-v3 is for difficult noisy footage and is much heavier on CPU.",
+    "Documentary Story Planner": "Story Planner",
+    "Documentary Story Transcript Warning": "Some transcripts are stale and were excluded.",
+    "Documentary Story Plan Stale": "The saved story plan is stale or invalid: {error}",
+    "Documentary Story Angle": "Angle",
+    "Documentary Story Hook": "Hook",
+    "Documentary Story Summary": "{beats} beats · target {minutes:.1f} min",
+    "Documentary Story Narration Goal": "Narration goal",
+    "Documentary Story Original Audio": "Original audio priority",
+    "Documentary Story Evidence": "Evidence",
+    "Documentary Story Segments": "segments",
+    "Documentary Story Sources": "Transcript sources for story planning",
+    "Documentary Story Target Minutes": "Target documentary length, minutes",
+    "Documentary Story Target Help": "For this short smoke test use 1 minute. For real documentaries choose the intended 8–15 minute length.",
+    "Documentary Story Generate": "Build story plan",
+    "Documentary Story Regenerate": "Rebuild story plan",
+    "Documentary Story Generating": "Building and fact-checking the story plan…",
+    "Documentary Story Failed": "Story Planner failed: {error}",
+    "Documentary Story Complete": "Story plan created: {beats} beats."
   }
 }
