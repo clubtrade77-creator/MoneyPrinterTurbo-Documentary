@@ -190,6 +190,8 @@ def build_retention_audit_prompt(
         "Do not produce a numerical score. Return concrete editorial diagnostics only. "
         "Use only scene_id and beat_id values present in the input. "
         "Do not invent incident facts or claims about what unseen footage contains. "
+        "Do not infer qualities of imagery, sound, mood, or camera behavior unless those "
+        "qualities are explicit in the supplied text or metadata. "
         "Identify the strongest candidate opening scene, any unresolved question/open loop, "
         "stretches with too much narration and no new evidence, long stretches without a "
         "source change or new information, reveal/payoff placement, and useful candidate "
