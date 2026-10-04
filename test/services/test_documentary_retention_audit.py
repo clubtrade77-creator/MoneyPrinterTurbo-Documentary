@@ -241,6 +241,58 @@ def test_audit_retention_rejects_short_narration_stretch(tmp_path: Path):
         )
 
 
+def test_audit_retention_rejects_short_source_stagnation(tmp_path: Path):
+    project = _project_with_timeline(tmp_path)
+    payload = json.loads(_valid_response())
+    payload["diagnostics"] = [
+        {
+            "kind": "source_stagnation",
+            "scene_ids": ["scene_open", "scene_reveal"],
+            "beat_ids": [],
+            "explanation": "The same source persists.",
+            "recommendation": "Introduce another source only if the story supports it.",
+        }
+    ]
+
+    with pytest.raises(RetentionAuditError, match="below minimum duration"):
+        audit_retention(
+            project.id,
+            root=tmp_path,
+            generate_fn=lambda prompt: json.dumps(payload),
+            review_fn=_approved_review,
+        )
+
+
+def test_audit_retention_retries_semantic_review_rejection(tmp_path: Path):
+    project = _project_with_timeline(tmp_path)
+    review_calls = []
+
+    def review(prompt: str) -> str:
+        review_calls.append(prompt)
+        if len(review_calls) == 1:
+            return json.dumps(
+                {
+                    "supported": False,
+                    "issues": [
+                        "The opening recommendation contradicts the selected opening."
+                    ],
+                }
+            )
+        return json.dumps({"supported": True, "issues": []})
+
+    audit = audit_retention(
+        project.id,
+        root=tmp_path,
+        generate_fn=lambda prompt: _valid_response(),
+        review_fn=review,
+    )
+
+    assert audit.semantic_reviewed is True
+    assert audit.semantic_review_version == 1
+    assert len(audit.reviewed_content_fingerprint) == 64
+    assert len(review_calls) == 2
+
+
 def test_audit_retention_does_not_retry_provider_error(tmp_path: Path):
     project = _project_with_timeline(tmp_path)
     calls = []
