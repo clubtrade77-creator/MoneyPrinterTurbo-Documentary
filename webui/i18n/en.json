@@ -622,6 +622,22 @@
     "Documentary Rights Permission Confirmed": "Permission confirmed",
     "Documentary Rights Public Domain": "Public domain",
     "Documentary Yes": "Yes",
-    "Documentary No": "No"
+    "Documentary No": "No",
+    "Documentary Transcription": "Transcription",
+    "Documentary No Transcribable Sources": "No source with a usable local audio track is available for transcription.",
+    "Documentary Transcription Source": "Source to transcribe",
+    "Documentary Transcript Stale": "The saved transcript is no longer current: {error}",
+    "Documentary Transcript Missing": "No transcript has been created for this source yet.",
+    "Documentary Transcript Language": "Detected language",
+    "Documentary Transcript Segments": "Segments",
+    "Documentary Transcript Model": "Whisper model",
+    "Documentary Transcript Preview": "Transcript preview",
+    "Documentary Transcription Language": "Transcription language",
+    "Documentary Language Auto": "Detect automatically",
+    "Documentary Transcribe": "Transcribe source",
+    "Documentary Retranscribe": "Transcribe again",
+    "Documentary Transcribing": "Transcribing source…",
+    "Documentary Transcription Failed": "Transcription failed: {error}",
+    "Documentary Transcription Complete": "Transcription complete: {segments} segments."
   }
 }
