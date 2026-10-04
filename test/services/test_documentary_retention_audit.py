@@ -191,6 +191,56 @@ def test_audit_retention_rejects_numerical_score_field(tmp_path: Path):
         )
 
 
+def test_audit_retention_rejects_raw_scene_id_as_open_loop(tmp_path: Path):
+    project = _project_with_timeline(tmp_path)
+    payload = json.loads(_valid_response())
+    payload["open_loop"] = "scene_open"
+
+    with pytest.raises(RetentionAuditError, match="open_loop must be editorial text"):
+        audit_retention(
+            project.id,
+            root=tmp_path,
+            generate_fn=lambda prompt: json.dumps(payload),
+            review_fn=_approved_review,
+        )
+
+
+def test_audit_retention_rejects_raw_scene_id_as_short_hook(tmp_path: Path):
+    project = _project_with_timeline(tmp_path)
+    payload = json.loads(_valid_response())
+    payload["short_candidates"][0]["hook"] = "scene_open"
+
+    with pytest.raises(RetentionAuditError, match="hook must be editorial text"):
+        audit_retention(
+            project.id,
+            root=tmp_path,
+            generate_fn=lambda prompt: json.dumps(payload),
+            review_fn=_approved_review,
+        )
+
+
+def test_audit_retention_rejects_short_narration_stretch(tmp_path: Path):
+    project = _project_with_timeline(tmp_path)
+    payload = json.loads(_valid_response())
+    payload["diagnostics"] = [
+        {
+            "kind": "narration_stretch",
+            "scene_ids": ["scene_open"],
+            "beat_ids": [],
+            "explanation": "Too much narration.",
+            "recommendation": "Tighten the narration.",
+        }
+    ]
+
+    with pytest.raises(RetentionAuditError, match="below minimum duration"):
+        audit_retention(
+            project.id,
+            root=tmp_path,
+            generate_fn=lambda prompt: json.dumps(payload),
+            review_fn=_approved_review,
+        )
+
+
 def test_audit_retention_does_not_retry_provider_error(tmp_path: Path):
     project = _project_with_timeline(tmp_path)
     calls = []
