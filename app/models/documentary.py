@@ -314,6 +314,13 @@ class ClipPlan(BaseModel):
             raise ValueError("invalid story plan fingerprint")
         return value
 
+    @field_validator("reviewed_content_fingerprint")
+    @classmethod
+    def validate_reviewed_content_fingerprint(cls, value: str) -> str:
+        if value and not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise ValueError("invalid localization reviewed-content fingerprint")
+        return value
+
     @field_validator("transcript_fingerprints")
     @classmethod
     def validate_transcript_fingerprints(cls, value: dict[str, str]) -> dict[str, str]:
@@ -377,6 +384,9 @@ class LocalizationPlan(BaseModel):
     target_language: str = Field(min_length=2, max_length=32)
     master_plan_fingerprint: str = Field(min_length=64, max_length=64)
     transcript_fingerprints: dict[str, str] = Field(default_factory=dict)
+    semantic_reviewed: bool = False
+    semantic_review_version: int = Field(default=0, ge=0)
+    reviewed_content_fingerprint: str = ""
     scenes: list[LocalizedSceneText] = Field(min_length=1)
     created_at: datetime = Field(default_factory=utc_now)
 
