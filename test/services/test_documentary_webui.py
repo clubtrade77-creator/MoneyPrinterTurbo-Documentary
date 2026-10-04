@@ -4,6 +4,8 @@ import pytest
 
 import webui.documentary as documentary_ui
 from webui.documentary import (
+    _format_transcript_segment,
+    _format_transcript_time,
     _load_transcript_if_available,
     _write_uploaded_video_to_temp,
 )
@@ -52,3 +54,27 @@ def test_documentary_transcript_lookup_returns_existing_transcript(monkeypatch):
     )
 
     assert _load_transcript_if_available("doc_test", "source_test") is expected
+
+
+def test_documentary_transcript_time_formatting():
+    assert _format_transcript_time(0.0) == "00:00.00"
+    assert _format_transcript_time(3.36) == "00:03.36"
+    assert _format_transcript_time(65.27) == "01:05.27"
+    assert _format_transcript_time(3661.04) == "01:01:01.04"
+
+
+def test_documentary_transcript_segment_includes_timecodes():
+    segment = type(
+        "Segment",
+        (),
+        {
+            "start_seconds": 3.6,
+            "end_seconds": 6.74,
+            "text": " A few seconds later, the situation changed completely. ",
+        },
+    )()
+
+    assert _format_transcript_segment(segment) == (
+        "[00:03.60–00:06.74] "
+        "A few seconds later, the situation changed completely."
+    )
