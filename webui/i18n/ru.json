@@ -484,6 +484,10 @@
     "Documentary Retranscribe": "Транскрибировать заново",
     "Documentary Transcribing": "Идёт транскрибация…",
     "Documentary Transcription Failed": "Ошибка транскрибации: {error}",
-    "Documentary Transcription Complete": "Транскрибация готова: {segments} сегментов."
+    "Documentary Transcription Complete": "Транскрибация готова: {segments} сегментов.",
+    "Documentary Whisper Model": "Модель Whisper",
+    "Documentary Whisper Small": "Быстро — small (рекомендуется)",
+    "Documentary Whisper Large": "Максимальное качество — large-v3",
+    "Documentary Whisper Model Help": "Small — практичный вариант по умолчанию для обычной речи и загружается намного быстрее. large-v3 нужна для сложных шумных записей и значительно тяжелее для CPU."
   }
 }
