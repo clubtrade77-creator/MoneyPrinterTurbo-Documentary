@@ -15,6 +15,7 @@ from app.models.documentary import (
     VideoMetadata,
 )
 from app.services.documentary.localization import (
+    CURRENT_LOCALIZATION_REVIEW_VERSION,
     LocalizationError,
     load_localization_plan,
     localization_plan_path,
@@ -163,6 +164,9 @@ def test_localize_project_persists_grounded_scene_text_and_subtitle_refs(
 
     assert plan.source_language == "en"
     assert plan.target_language == "ru"
+    assert plan.semantic_reviewed is True
+    assert plan.semantic_review_version == CURRENT_LOCALIZATION_REVIEW_VERSION
+    assert len(plan.reviewed_content_fingerprint) == 64
     assert len(plan.master_plan_fingerprint) == 64
     assert list(plan.transcript_fingerprints) == [source.id]
     assert plan.scenes[0].scene_id == "scene_localize"
@@ -305,6 +309,52 @@ def test_load_localization_plan_rejects_changed_transcript_evidence(tmp_path: Pa
     )
 
     with pytest.raises(LocalizationError, match="transcript evidence changed"):
+        load_localization_plan(project.id, "ru", root=tmp_path)
+
+
+def test_load_localization_plan_rejects_text_changed_after_review(
+    tmp_path: Path,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=_approved_review,
+    )
+
+    path = localization_plan_path(project.id, "ru", tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["scenes"][0]["narration_text"] = "Подменённый перевод."
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LocalizationError, match="changed after semantic review"):
+        load_localization_plan(project.id, "ru", root=tmp_path)
+
+
+def test_load_localization_plan_rejects_old_review_policy(tmp_path: Path):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=_approved_review,
+    )
+
+    path = localization_plan_path(project.id, "ru", tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["semantic_review_version"] = 0
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(LocalizationError, match="review policy is stale"):
         load_localization_plan(project.id, "ru", root=tmp_path)
 
 
