@@ -416,7 +416,9 @@ def build_retention_review_prompt(
         "Reject unsupported incident facts, raw ids used as editorial copy, contradictory "
         "opening recommendations, diagnostics that are not supported by the supplied timeline, "
         "or Shorts hooks/reasons that merely repeat ids instead of useful editorial text. "
-        "Do not judge stylistic taste unless it creates a factual or logical contradiction. "
+        "Also reject claims about imagery, sound, mood, or camera behavior that are not explicit "
+        "in the supplied text or metadata. Do not judge stylistic taste unless it creates a "
+        "factual or logical contradiction. "
         'Return JSON only: {"supported": true, "issues": []} when acceptable, or '
         '{"supported": false, "issues": ["specific issue"]} when not.\n\n'
         + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
