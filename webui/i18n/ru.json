@@ -466,6 +466,8 @@
     "Documentary Rights User Owned": "Принадлежит пользователю",
     "Documentary Rights Licensed": "Есть лицензия",
     "Documentary Rights Permission Confirmed": "Разрешение подтверждено",
-    "Documentary Rights Public Domain": "Общественное достояние"
+    "Documentary Rights Public Domain": "Общественное достояние",
+    "Documentary Yes": "Да",
+    "Documentary No": "Нет"
   }
 }
