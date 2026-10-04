@@ -15,6 +15,11 @@ from app.services.documentary.project import (
     list_projects,
     load_project,
 )
+from app.services.documentary.story_planner import (
+    StoryPlannerError,
+    load_story_plan,
+    plan_story,
+)
 from app.services.documentary.transcription import (
     TranscriptionError,
     load_source_transcript,
@@ -79,6 +84,27 @@ def _format_transcript_segment(segment) -> str:
     start = _format_transcript_time(segment.start_seconds)
     end = _format_transcript_time(segment.end_seconds)
     return f"[{start}–{end}] {segment.text.strip()}"
+
+
+def _story_evidence_timecode(transcript, segment_ids: list[int]) -> str:
+    segments_by_id = {segment.id: segment for segment in transcript.segments}
+    selected = [
+        segments_by_id[segment_id]
+        for segment_id in segment_ids
+        if segment_id in segments_by_id
+    ]
+    if not selected:
+        return ""
+    start = min(segment.start_seconds for segment in selected)
+    end = max(segment.end_seconds for segment in selected)
+    return f"[{_format_transcript_time(start)}–{_format_transcript_time(end)}]"
+
+
+def _load_story_plan_if_available(project_id: str):
+    try:
+        return load_story_plan(project_id)
+    except FileNotFoundError:
+        return None
 
 
 def _write_uploaded_video_to_temp(uploaded_file) -> Path:
@@ -312,6 +338,165 @@ def _render_transcription(project, tr: Tr) -> None:
                 st.rerun()
 
 
+def _render_story_planner(project, tr: Tr) -> None:
+    if not project.sources:
+        return
+
+    transcripts = {}
+    stale_transcript_errors = []
+    for source in project.sources:
+        try:
+            transcript = _load_transcript_if_available(project.id, source.id)
+        except TranscriptionError as exc:
+            stale_transcript_errors.append(str(exc))
+            continue
+        if transcript is not None and transcript.segments:
+            transcripts[source.id] = transcript
+
+    if not transcripts:
+        return
+
+    source_by_id = {source.id: source for source in project.sources}
+    with st.expander(tr("Documentary Story Planner"), expanded=True):
+        if stale_transcript_errors:
+            st.warning(tr("Documentary Story Transcript Warning"))
+
+        try:
+            story_plan = _load_story_plan_if_available(project.id)
+        except StoryPlannerError as exc:
+            story_plan = None
+            st.warning(
+                tr("Documentary Story Plan Stale").format(error=str(exc))
+            )
+
+        if story_plan is not None:
+            st.markdown(f"### {story_plan.title}")
+            st.markdown(
+                f"**{tr('Documentary Story Angle')}:** {story_plan.angle}"
+            )
+            st.markdown(
+                f"**{tr('Documentary Story Hook')}:** {story_plan.hook}"
+            )
+            st.caption(
+                tr("Documentary Story Summary").format(
+                    beats=len(story_plan.beats),
+                    minutes=story_plan.target_duration_seconds / 60,
+                )
+            )
+
+            for index, beat in enumerate(story_plan.beats, start=1):
+                purpose = getattr(beat.purpose, "value", str(beat.purpose))
+                with st.expander(
+                    f"{index}. {beat.title} · {purpose} · "
+                    f"{beat.target_duration_seconds:.0f}s",
+                    expanded=index == 1,
+                ):
+                    st.write(beat.summary)
+                    if beat.narration_goal:
+                        st.markdown(
+                            f"**{tr('Documentary Story Narration Goal')}:** "
+                            f"{beat.narration_goal}"
+                        )
+                    st.markdown(
+                        f"**{tr('Documentary Story Original Audio')}:** "
+                        + (
+                            tr("Documentary Yes")
+                            if beat.original_audio_priority
+                            else tr("Documentary No")
+                        )
+                    )
+                    st.markdown(f"**{tr('Documentary Story Evidence')}:**")
+                    for evidence in beat.evidence:
+                        transcript = transcripts.get(evidence.source_id)
+                        timecode = (
+                            _story_evidence_timecode(
+                                transcript,
+                                evidence.segment_ids,
+                            )
+                            if transcript is not None
+                            else ""
+                        )
+                        source = source_by_id.get(evidence.source_id)
+                        source_label = (
+                            source.title
+                            if source is not None and source.title
+                            else (
+                                source.original_filename
+                                if source is not None
+                                else evidence.source_id
+                            )
+                        )
+                        segment_label = ", ".join(
+                            str(segment_id)
+                            for segment_id in evidence.segment_ids
+                        )
+                        st.write(
+                            f"{timecode} {source_label} · "
+                            f"{tr('Documentary Story Segments')} {segment_label}"
+                        )
+                        if evidence.note:
+                            st.caption(evidence.note)
+
+        source_ids = list(transcripts)
+        selected_source_ids = st.multiselect(
+            tr("Documentary Story Sources"),
+            options=source_ids,
+            default=source_ids,
+            format_func=lambda source_id: (
+                source_by_id[source_id].title
+                or source_by_id[source_id].original_filename
+                or source_id
+            ),
+            key=f"documentary_story_sources_{project.id}",
+        )
+
+        total_media_seconds = sum(
+            transcript.media_duration_seconds or 0
+            for transcript in transcripts.values()
+        )
+        default_minutes = 1 if total_media_seconds < 120 else 10
+        target_minutes = st.number_input(
+            tr("Documentary Story Target Minutes"),
+            min_value=1,
+            max_value=30,
+            value=default_minutes,
+            step=1,
+            key=f"documentary_story_target_minutes_{project.id}",
+            help=tr("Documentary Story Target Help"),
+        )
+
+        button_label = (
+            tr("Documentary Story Regenerate")
+            if story_plan is not None
+            else tr("Documentary Story Generate")
+        )
+        if st.button(
+            button_label,
+            type="primary",
+            width="stretch",
+            disabled=not selected_source_ids,
+            key=f"documentary_story_generate_{project.id}",
+        ):
+            try:
+                with st.spinner(tr("Documentary Story Generating")):
+                    result = plan_story(
+                        project.id,
+                        source_ids=selected_source_ids,
+                        target_duration_seconds=float(target_minutes) * 60,
+                    )
+            except (OSError, ValueError, StoryPlannerError) as exc:
+                st.error(
+                    tr("Documentary Story Failed").format(error=str(exc))
+                )
+            else:
+                st.success(
+                    tr("Documentary Story Complete").format(
+                        beats=len(result.beats)
+                    )
+                )
+                st.rerun()
+
+
 def _render_source_upload(project, tr: Tr) -> None:
     with st.expander(tr("Documentary Add Source"), expanded=not project.sources):
         upload_nonce_key = f"documentary_upload_nonce_{project.id}"
@@ -415,3 +600,4 @@ def render_documentary_application(tr: Tr) -> None:
     _render_project_overview(project, tr)
     _render_source_upload(project, tr)
     _render_transcription(project, tr)
+    _render_story_planner(project, tr)
