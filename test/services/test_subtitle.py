@@ -56,6 +56,25 @@ class TestSubtitleService(unittest.TestCase):
         self.assertFalse(duplicate_load, "Whisper was loaded twice")
         self.assertEqual(len(constructor_calls), 1)
 
+    def test_get_whisper_model_caches_named_documentary_model(self):
+        constructor_calls = []
+
+        class FakeWhisperModel:
+            def __init__(self, **kwargs):
+                constructor_calls.append(kwargs)
+
+        with (
+            patch.object(subtitle, "_named_models", {}),
+            patch.object(subtitle, "WhisperModel", FakeWhisperModel),
+            patch.object(subtitle, "_resolve_whisper_model_path", return_value="small"),
+        ):
+            first = subtitle.get_whisper_model("small")
+            second = subtitle.get_whisper_model("small")
+
+        self.assertIs(first, second)
+        self.assertEqual(len(constructor_calls), 1)
+        self.assertEqual(constructor_calls[0]["model_size_or_path"], "small")
+
     def test_file_to_subtitles_returns_empty_for_missing_input(self):
         """空路径和不存在的文件都应安全返回空列表。"""
         self.assertEqual(subtitle.file_to_subtitles(""), [])
