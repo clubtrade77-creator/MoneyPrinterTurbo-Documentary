@@ -19,6 +19,8 @@ from app.services.documentary.transcription import load_source_transcript
 
 MAX_LOCALIZATION_ATTEMPTS = 3
 MAX_LOCALIZATION_PROMPT_CHARS = 120_000
+MAX_LOCALIZATION_REVIEW_PROMPT_CHARS = 180_000
+CURRENT_LOCALIZATION_REVIEW_VERSION = 1
 
 
 class LocalizationError(RuntimeError):
@@ -77,6 +79,22 @@ def _model_fingerprint(model) -> str:
 
 def _transcript_fingerprint(transcript: DocumentaryTranscript) -> str:
     return _model_fingerprint(transcript)
+
+
+def _localized_scenes_fingerprint(
+    scenes: list[LocalizedSceneText],
+) -> str:
+    payload = [
+        scene.model_dump(mode="json")
+        for scene in scenes
+    ]
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def master_plan_fingerprint(project: DocumentaryProject) -> str:
@@ -314,14 +332,21 @@ def build_localization_review_prompt(
             ]
         },
     }
-    return (
-        "Review this documentary translation for factual fidelity. "
-        "Reject additions, omissions, changed attribution, changed uncertainty, "
-        "changed names/numbers/dates, or meaning changes. Do not critique style. "
+    prompt = (
+        "Review this documentary translation for factual fidelity and target-language "
+        "completeness. Reject additions, omissions, changed attribution, changed "
+        "uncertainty, changed names/numbers/dates, meaning changes, or untranslated "
+        "source-language prose that should have been translated. Proper names and "
+        "conventional identical forms may remain unchanged. Do not critique style. "
         'Return JSON only: {"supported": true, "issues": []} when faithful, or '
         '{"supported": false, "issues": ["specific issue"]} when not.\n\n'
         + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     )
+    if len(prompt) > MAX_LOCALIZATION_REVIEW_PROMPT_CHARS:
+        raise LocalizationError(
+            "documentary localization review prompt exceeds safe size; split the project"
+        )
+    return prompt
 
 
 def _parse_review(response_text: str) -> list[str]:
@@ -454,6 +479,11 @@ def localize_project(
             source_id: _transcript_fingerprint(transcript)
             for source_id, transcript in transcripts.items()
         },
+        semantic_reviewed=True,
+        semantic_review_version=CURRENT_LOCALIZATION_REVIEW_VERSION,
+        reviewed_content_fingerprint=_localized_scenes_fingerprint(
+            localized_scenes
+        ),
         scenes=localized_scenes,
     )
     _atomic_write_json(
@@ -488,6 +518,21 @@ def load_localization_plan(
     if plan.target_language != requested_language:
         raise LocalizationError(
             "documentary localization target language does not match requested language"
+        )
+    if not plan.semantic_reviewed:
+        raise LocalizationError(
+            "documentary localization has not passed semantic review"
+        )
+    if plan.semantic_review_version != CURRENT_LOCALIZATION_REVIEW_VERSION:
+        raise LocalizationError(
+            "documentary localization review policy is stale"
+        )
+    if (
+        plan.reviewed_content_fingerprint
+        != _localized_scenes_fingerprint(plan.scenes)
+    ):
+        raise LocalizationError(
+            "documentary localization changed after semantic review"
         )
 
     project, transcripts = _load_localization_context(project_id, root=root)
