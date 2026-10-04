@@ -286,11 +286,13 @@ def _render_transcription(project, tr: Tr) -> None:
 
 def _render_source_upload(project, tr: Tr) -> None:
     with st.expander(tr("Documentary Add Source"), expanded=not project.sources):
+        upload_nonce_key = f"documentary_upload_nonce_{project.id}"
+        upload_nonce = int(st.session_state.get(upload_nonce_key, 0) or 0)
         uploaded_file = st.file_uploader(
             tr("Documentary Upload Video"),
             type=["mp4", "mov"],
             accept_multiple_files=False,
-            key=f"documentary_upload_{project.id}",
+            key=f"documentary_upload_{project.id}_{upload_nonce}",
             help=tr("Documentary Upload Video Help"),
         )
         title = st.text_input(
@@ -343,6 +345,7 @@ def _render_source_upload(project, tr: Tr) -> None:
         except Exception as exc:
             st.error(str(exc))
         else:
+            st.session_state[upload_nonce_key] = upload_nonce + 1
             st.success(
                 tr("Documentary Source Attached").format(
                     source_id=source.id,
