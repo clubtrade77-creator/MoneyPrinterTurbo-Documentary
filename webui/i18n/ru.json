@@ -468,6 +468,22 @@
     "Documentary Rights Permission Confirmed": "Разрешение подтверждено",
     "Documentary Rights Public Domain": "Общественное достояние",
     "Documentary Yes": "Да",
-    "Documentary No": "Нет"
+    "Documentary No": "Нет",
+    "Documentary Transcription": "Транскрибация",
+    "Documentary No Transcribable Sources": "Нет источника с доступной локальной аудиодорожкой для транскрибации.",
+    "Documentary Transcription Source": "Источник для транскрибации",
+    "Documentary Transcript Stale": "Сохранённая транскрибация устарела: {error}",
+    "Documentary Transcript Missing": "Для этого источника транскрибация ещё не создана.",
+    "Documentary Transcript Language": "Определённый язык",
+    "Documentary Transcript Segments": "Сегменты",
+    "Documentary Transcript Model": "Модель Whisper",
+    "Documentary Transcript Preview": "Предпросмотр транскрибации",
+    "Documentary Transcription Language": "Язык транскрибации",
+    "Documentary Language Auto": "Определить автоматически",
+    "Documentary Transcribe": "Сделать транскрибацию",
+    "Documentary Retranscribe": "Транскрибировать заново",
+    "Documentary Transcribing": "Идёт транскрибация…",
+    "Documentary Transcription Failed": "Ошибка транскрибации: {error}",
+    "Documentary Transcription Complete": "Транскрибация готова: {segments} сегментов."
   }
 }
