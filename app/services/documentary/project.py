@@ -298,6 +298,36 @@ def load_project(
     return _load_project_unlocked(project_id, root)
 
 
+def list_projects(
+    root: str | os.PathLike | None = None,
+) -> list[DocumentaryProject]:
+    """Return valid documentary projects sorted by most recently updated first.
+
+    Unknown directories and malformed manifests are ignored so one abandoned or
+    partially copied folder cannot make the Documentary UI unusable.
+    """
+    base = Path(root) if root is not None else default_documentary_root()
+    if not base.is_dir():
+        return []
+
+    projects: list[DocumentaryProject] = []
+    for candidate in base.iterdir():
+        if not candidate.is_dir() or not _PROJECT_ID_RE.fullmatch(candidate.name):
+            continue
+        if not (candidate / "project.json").is_file():
+            continue
+        try:
+            projects.append(_load_project_unlocked(candidate.name, root))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+
+    return sorted(
+        projects,
+        key=lambda project: (project.updated_at, project.id),
+        reverse=True,
+    )
+
+
 def add_source(
     project_id: str,
     source: SourceAsset,
