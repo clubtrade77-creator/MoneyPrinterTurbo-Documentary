@@ -8,6 +8,7 @@ from typing import Callable
 import streamlit as st
 
 from app.models.documentary import RightsStatus, SourceType
+from app.services import subtitle as subtitle_service
 from app.services.documentary.project import (
     attach_local_video,
     create_project,
@@ -251,6 +252,18 @@ def _render_transcription(project, tr: Tr) -> None:
             }[code],
             key=f"documentary_transcription_language_{project.id}_{source.id}",
         )
+        whisper_model = st.selectbox(
+            tr("Documentary Whisper Model"),
+            options=("small", "large-v3"),
+            index=0,
+            format_func=lambda value: (
+                tr("Documentary Whisper Small")
+                if value == "small"
+                else tr("Documentary Whisper Large")
+            ),
+            key=f"documentary_whisper_model_{project.id}_{source.id}",
+            help=tr("Documentary Whisper Model Help"),
+        )
 
         button_label = (
             tr("Documentary Retranscribe")
@@ -266,10 +279,13 @@ def _render_transcription(project, tr: Tr) -> None:
             requested_language = None if language_mode == "auto" else language_mode
             try:
                 with st.spinner(tr("Documentary Transcribing")):
+                    model = subtitle_service.get_whisper_model(whisper_model)
                     result = transcribe_source(
                         project.id,
                         source.id,
                         language=requested_language,
+                        model_override=model,
+                        model_name=whisper_model,
                     )
             except (OSError, ValueError, TranscriptionError) as exc:
                 st.error(
