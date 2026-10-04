@@ -312,6 +312,63 @@ def test_load_localization_plan_rejects_changed_transcript_evidence(tmp_path: Pa
         load_localization_plan(project.id, "ru", root=tmp_path)
 
 
+def test_localize_project_discards_result_if_master_changes_during_run(
+    tmp_path: Path,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+
+    def review(prompt: str) -> str:
+        changed = load_project(project.id, tmp_path)
+        changed.plan.scenes[0].on_screen_text = "Changed during localization"
+        save_project(changed, tmp_path)
+        return json.dumps({"supported": True, "issues": []})
+
+    with pytest.raises(
+        LocalizationError,
+        match="master timeline changed while localization was running",
+    ):
+        localize_project(
+            project.id,
+            "ru",
+            root=tmp_path,
+            generate_fn=lambda prompt: _russian_response(),
+            review_fn=review,
+        )
+
+    assert not localization_plan_path(project.id, "ru", tmp_path).exists()
+
+
+def test_localize_project_discards_result_if_transcript_changes_during_run(
+    tmp_path: Path,
+):
+    project, source = _project_with_localizable_scene(tmp_path)
+
+    def review(prompt: str) -> str:
+        path = transcript_path(project.id, source.id, tmp_path)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["segments"][0]["text"] = "Changed during localization."
+        payload["full_text"] = "Changed during localization. Everything changed."
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return json.dumps({"supported": True, "issues": []})
+
+    with pytest.raises(
+        LocalizationError,
+        match="transcript evidence changed while localization was running",
+    ):
+        localize_project(
+            project.id,
+            "ru",
+            root=tmp_path,
+            generate_fn=lambda prompt: _russian_response(),
+            review_fn=review,
+        )
+
+    assert not localization_plan_path(project.id, "ru", tmp_path).exists()
+
+
 def test_load_localization_plan_rejects_text_changed_after_review(
     tmp_path: Path,
 ):
