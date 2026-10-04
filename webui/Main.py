@@ -67,6 +67,7 @@ from app.services import task as tm
 from app.services import version_checker
 from app.utils.logging_utils import configure_terminal_logger
 from app.utils import utils
+from webui import documentary as documentary_ui
 
 st.set_page_config(
     page_title="MoneyPrinterTurbo",
@@ -8361,6 +8362,23 @@ def _render_generation_controls(
 def _render_application():
     """按固定顺序渲染顶部栏、弹窗、生成表单和任务结果。"""
     _render_top_bar()
+
+    workspace_mode = st.radio(
+        tr("Workspace Mode"),
+        options=("short_video", "documentary"),
+        format_func=lambda value: (
+            tr("Short Video Mode")
+            if value == "short_video"
+            else tr("Documentary Mode")
+        ),
+        key="workspace_mode",
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+
+    if workspace_mode == "documentary":
+        documentary_ui.render_documentary_application(tr)
+        return
 
     if st.session_state.get("settings_dialog_open", False):
         _render_settings_dialog()
