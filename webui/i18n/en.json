@@ -620,6 +620,8 @@
     "Documentary Rights User Owned": "User owned",
     "Documentary Rights Licensed": "Licensed",
     "Documentary Rights Permission Confirmed": "Permission confirmed",
-    "Documentary Rights Public Domain": "Public domain"
+    "Documentary Rights Public Domain": "Public domain",
+    "Documentary Yes": "Yes",
+    "Documentary No": "No"
   }
 }
