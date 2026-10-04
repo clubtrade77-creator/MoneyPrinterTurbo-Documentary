@@ -65,6 +65,22 @@ def _source_duration(source) -> str:
     return f"{metadata.duration_seconds:.1f}s"
 
 
+def _format_transcript_time(seconds: float) -> str:
+    total_centiseconds = max(0, round(float(seconds) * 100))
+    hours, remainder = divmod(total_centiseconds, 360000)
+    minutes, remainder = divmod(remainder, 6000)
+    whole_seconds, centiseconds = divmod(remainder, 100)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{whole_seconds:02d}.{centiseconds:02d}"
+    return f"{minutes:02d}:{whole_seconds:02d}.{centiseconds:02d}"
+
+
+def _format_transcript_segment(segment) -> str:
+    start = _format_transcript_time(segment.start_seconds)
+    end = _format_transcript_time(segment.end_seconds)
+    return f"[{start}–{end}] {segment.text.strip()}"
+
+
 def _write_uploaded_video_to_temp(uploaded_file) -> Path:
     suffix = Path(uploaded_file.name or "").suffix.lower()
     if suffix not in {".mp4", ".mov"}:
@@ -234,7 +250,8 @@ def _render_transcription(project, tr: Tr) -> None:
             )
             if transcript.full_text:
                 st.markdown(f"**{tr('Documentary Transcript Preview')}**")
-                st.write(transcript.full_text)
+                for segment in transcript.segments:
+                    st.write(_format_transcript_segment(segment))
 
         language_mode = st.selectbox(
             tr("Documentary Transcription Language"),
