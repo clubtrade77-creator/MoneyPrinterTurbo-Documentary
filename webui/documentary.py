@@ -397,12 +397,20 @@ def _render_story_planner(project, tr: Tr) -> None:
             st.markdown(
                 f"**{tr('Documentary Story Hook')}:** {story_plan.hook}"
             )
-            st.caption(
-                tr("Documentary Story Summary").format(
-                    beats=len(story_plan.beats),
-                    minutes=story_plan.target_duration_seconds / 60,
+            if story_plan.target_duration_seconds < 60:
+                st.caption(
+                    tr("Documentary Story Summary Seconds").format(
+                        beats=len(story_plan.beats),
+                        seconds=story_plan.target_duration_seconds,
+                    )
                 )
-            )
+            else:
+                st.caption(
+                    tr("Documentary Story Summary").format(
+                        beats=len(story_plan.beats),
+                        minutes=story_plan.target_duration_seconds / 60,
+                    )
+                )
 
             for index, beat in enumerate(story_plan.beats, start=1):
                 purpose = getattr(beat.purpose, "value", str(beat.purpose))
