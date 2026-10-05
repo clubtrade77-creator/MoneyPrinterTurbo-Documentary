@@ -660,6 +660,8 @@
     "Documentary Story Regenerate": "Rebuild story plan",
     "Documentary Story Generating": "Building and fact-checking the story plan…",
     "Documentary Story Failed": "Story Planner failed: {error}",
-    "Documentary Story Complete": "Story plan created: {beats} beats."
+    "Documentary Story Complete": "Story plan created: {beats} beats.",
+    "Documentary Story Target Seconds": "Target story length, seconds",
+    "Documentary Story Target Seconds Help": "For very short source material, keep the target close to the available evidence instead of stretching a few seconds into a full minute."
   }
 }
