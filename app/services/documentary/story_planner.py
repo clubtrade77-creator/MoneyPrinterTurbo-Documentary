@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
-from app.models.documentary import DocumentaryTranscript, StoryPlan
+from app.models.documentary import (
+    DocumentaryTranscript,
+    NarrativePurpose,
+    StoryBeat,
+    StoryEvidence,
+    StoryPlan,
+)
 from app.services import llm as llm_service
 from app.services.documentary.project import load_project, project_dir
 from app.services.documentary.transcription import (
@@ -509,6 +515,105 @@ def _retry_prompt(base_prompt: str, error: StoryPlannerError, attempt: int) -> s
     )
 
 
+def _clip_grounded_text(text: str, max_length: int) -> str:
+    value = " ".join((text or "").split()).strip()
+    if len(value) <= max_length:
+        return value
+    return value[:max_length].rstrip()
+
+
+def _build_sparse_story_plan(
+    transcripts: list[DocumentaryTranscript],
+    *,
+    target_duration_seconds: float,
+) -> StoryPlan:
+    grounded_segments = [
+        (transcript, segment)
+        for transcript in transcripts
+        for segment in transcript.segments
+        if segment.text.strip()
+    ]
+    if not grounded_segments:
+        raise StoryPlannerError("available transcripts contain no usable segments")
+
+    first_text = grounded_segments[0][1].text.strip()
+    full_text = " ".join(segment.text.strip() for _, segment in grounded_segments)
+    evidence = [
+        StoryEvidence(
+            source_id=transcript.source_id,
+            segment_ids=[
+                segment.id
+                for segment in transcript.segments
+                if segment.text.strip()
+            ],
+        )
+        for transcript in transcripts
+        if any(segment.text.strip() for segment in transcript.segments)
+    ]
+
+    return StoryPlan(
+        title=_clip_grounded_text(first_text, 250),
+        angle=_clip_grounded_text(full_text, 1500),
+        hook=_clip_grounded_text(first_text, 1500),
+        target_duration_seconds=target_duration_seconds,
+        beats=[
+            StoryBeat(
+                id="beat_01",
+                purpose=NarrativePurpose.hook,
+                title=_clip_grounded_text(first_text, 200),
+                summary=_clip_grounded_text(full_text, 1500),
+                target_duration_seconds=target_duration_seconds,
+                narration_goal=_clip_grounded_text(first_text, 1500),
+                original_audio_priority=True,
+                evidence=evidence,
+            )
+        ],
+    )
+
+
+def _review_story_plan(
+    candidate: StoryPlan,
+    *,
+    transcripts: list[DocumentaryTranscript],
+    reviewer: Callable[[str], str],
+) -> None:
+    review_response = reviewer(
+        build_story_grounding_review_prompt(
+            transcripts=transcripts,
+            plan=candidate,
+        )
+    )
+    if review_response.strip().startswith("Error:"):
+        raw_error = review_response.strip()
+        raise _NonRetryableStoryPlannerError(
+            raw_error.removeprefix("Error:").strip() or raw_error
+        )
+    grounding_issues = parse_story_grounding_review_response(review_response)
+    if grounding_issues:
+        raise StoryPlannerError(
+            "semantic grounding review failed: " + "; ".join(grounding_issues)
+        )
+
+    specificity_response = reviewer(
+        build_story_specificity_review_prompt(
+            transcripts=transcripts,
+            plan=candidate,
+        )
+    )
+    if specificity_response.strip().startswith("Error:"):
+        raw_error = specificity_response.strip()
+        raise _NonRetryableStoryPlannerError(
+            raw_error.removeprefix("Error:").strip() or raw_error
+        )
+    specificity_issues = parse_story_grounding_review_response(
+        specificity_response
+    )
+    if specificity_issues:
+        raise StoryPlannerError(
+            "semantic specificity review failed: " + "; ".join(specificity_issues)
+        )
+
+
 def plan_story(
     project_id: str,
     *,
@@ -525,11 +630,6 @@ def plan_story(
         source_ids=source_ids,
         root=root,
     )
-    prompt = build_story_planner_prompt(
-        project_title=project.title,
-        transcripts=transcripts,
-        target_duration_seconds=target_duration_seconds,
-    )
 
     generator = generate_fn or llm_service.generate_text
     if generate_fn is not None and review_fn is None:
@@ -539,80 +639,73 @@ def plan_story(
         )
     reviewer = review_fn or llm_service.generate_text
 
-    current_prompt = prompt
+    total_segments = sum(len(transcript.segments) for transcript in transcripts)
     plan = None
-    last_error = None
 
-    for attempt in range(1, MAX_STORY_PLAN_ATTEMPTS + 1):
-        response = generator(current_prompt)
-        if response.strip().startswith("Error:"):
-            raw_error = response.strip()
-            raise StoryPlannerError(
-                raw_error.removeprefix("Error:").strip() or raw_error
-            )
+    if total_segments <= 2 and target_duration_seconds <= 180:
+        candidate = _build_sparse_story_plan(
+            transcripts,
+            target_duration_seconds=target_duration_seconds,
+        )
+        _validate_generated_plan(
+            candidate,
+            target_duration_seconds=target_duration_seconds,
+            transcripts=transcripts,
+        )
+        _review_story_plan(
+            candidate,
+            transcripts=transcripts,
+            reviewer=reviewer,
+        )
+        candidate.grounding_reviewed = True
+        candidate.grounding_review_version = CURRENT_GROUNDING_REVIEW_VERSION
+        plan = candidate
+    else:
+        prompt = build_story_planner_prompt(
+            project_title=project.title,
+            transcripts=transcripts,
+            target_duration_seconds=target_duration_seconds,
+        )
+        current_prompt = prompt
+        last_error = None
 
-        try:
-            candidate = parse_story_plan_response(response)
-            _validate_generated_plan(
-                candidate,
-                target_duration_seconds=target_duration_seconds,
-                transcripts=transcripts,
-            )
-
-            review_response = reviewer(
-                build_story_grounding_review_prompt(
-                    transcripts=transcripts,
-                    plan=candidate,
-                )
-            )
-            if review_response.strip().startswith("Error:"):
-                raw_error = review_response.strip()
-                raise _NonRetryableStoryPlannerError(
+        for attempt in range(1, MAX_STORY_PLAN_ATTEMPTS + 1):
+            response = generator(current_prompt)
+            if response.strip().startswith("Error:"):
+                raw_error = response.strip()
+                raise StoryPlannerError(
                     raw_error.removeprefix("Error:").strip() or raw_error
                 )
-            grounding_issues = parse_story_grounding_review_response(
-                review_response
-            )
-            if grounding_issues:
-                raise StoryPlannerError(
-                    "semantic grounding review failed: "
-                    + "; ".join(grounding_issues)
-                )
 
-            specificity_response = reviewer(
-                build_story_specificity_review_prompt(
+            try:
+                candidate = parse_story_plan_response(response)
+                _validate_generated_plan(
+                    candidate,
+                    target_duration_seconds=target_duration_seconds,
                     transcripts=transcripts,
-                    plan=candidate,
                 )
-            )
-            if specificity_response.strip().startswith("Error:"):
-                raw_error = specificity_response.strip()
-                raise _NonRetryableStoryPlannerError(
-                    raw_error.removeprefix("Error:").strip() or raw_error
-                )
-            specificity_issues = parse_story_grounding_review_response(
-                specificity_response
-            )
-            if specificity_issues:
-                raise StoryPlannerError(
-                    "semantic specificity review failed: "
-                    + "; ".join(specificity_issues)
+                _review_story_plan(
+                    candidate,
+                    transcripts=transcripts,
+                    reviewer=reviewer,
                 )
 
-            candidate.grounding_reviewed = True
-            candidate.grounding_review_version = CURRENT_GROUNDING_REVIEW_VERSION
-            plan = candidate
-            break
-        except _NonRetryableStoryPlannerError:
-            raise
-        except StoryPlannerError as exc:
-            last_error = exc
-            if attempt >= MAX_STORY_PLAN_ATTEMPTS:
+                candidate.grounding_reviewed = True
+                candidate.grounding_review_version = CURRENT_GROUNDING_REVIEW_VERSION
+                plan = candidate
+                break
+            except _NonRetryableStoryPlannerError:
                 raise
-            current_prompt = _retry_prompt(prompt, exc, attempt)
+            except StoryPlannerError as exc:
+                last_error = exc
+                if attempt >= MAX_STORY_PLAN_ATTEMPTS:
+                    raise
+                current_prompt = _retry_prompt(prompt, exc, attempt)
 
-    if plan is None:
-        raise last_error or StoryPlannerError("story planner failed without a result")
+        if plan is None:
+            raise last_error or StoryPlannerError(
+                "story planner failed without a result"
+            )
 
     referenced_source_ids = {
         evidence.source_id
@@ -630,7 +723,6 @@ def plan_story(
         plan.model_dump(mode="json"),
     )
     return plan
-
 
 def load_story_plan(
     project_id: str,
