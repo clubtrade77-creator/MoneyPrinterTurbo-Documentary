@@ -516,6 +516,7 @@
     "Documentary Clip Rebuild": "Seleccionar fragmentos de nuevo",
     "Documentary Clip Selecting": "Seleccionando rangos exactos de la fuente según los tiempos de la transcripción…",
     "Documentary Clip Failed": "Clip Selector falló: {error}",
-    "Documentary Clip Complete": "Plan de clips creado y aplicado: {clips} clips."
+    "Documentary Clip Complete": "Plan de clips creado y aplicado: {clips} clips.",
+    "Documentary Story Summary Seconds": "{beats} bloques · objetivo {seconds:.0f}s"
   }
 }
