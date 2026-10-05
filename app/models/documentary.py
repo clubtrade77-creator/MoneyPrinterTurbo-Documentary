@@ -213,7 +213,7 @@ class StoryPlan(BaseModel):
     title: str = Field(max_length=250)
     angle: str = Field(max_length=1500)
     hook: str = Field(max_length=1500)
-    target_duration_seconds: float = Field(default=600, ge=60, le=1800)
+    target_duration_seconds: float = Field(default=600, ge=5, le=1800)
     transcript_fingerprints: dict[str, str] = Field(default_factory=dict)
     grounding_reviewed: bool = False
     grounding_review_version: int = Field(default=0, ge=0)
