@@ -526,6 +526,22 @@
     "Documentary Render Again": "Собрать мастер-видео заново",
     "Documentary Rendering": "Собираю мастер-видео через FFmpeg…",
     "Documentary Render Failed": "Не удалось собрать мастер-видео: {error}",
-    "Documentary Render Complete": "Мастер-видео создано: {filename}"
+    "Documentary Render Complete": "Мастер-видео создано: {filename}",
+    "Documentary Narration": "Закадровый рассказчик",
+    "Documentary Narration Original": "Сцена {index}: приоритет оригинального звука — рассказчик не нужен.",
+    "Documentary Narration Scene": "Текст рассказчика для сцены {index}",
+    "Documentary Narration Missing": "Сцена {index}: нужен текст рассказчика.",
+    "Documentary Narration Generate": "Написать закадровый текст",
+    "Documentary Narration Generating": "Пишу и проверяю закадровый текст…",
+    "Documentary Narration Failed": "Не удалось подготовить закадровый текст: {error}",
+    "Documentary Narration Complete": "Закадровый текст создан для сцен: {scenes}.",
+    "Documentary Narration Not Needed": "В текущей истории сохраняется оригинальный звук; для этих сцен рассказчик не нужен.",
+    "Documentary Voice Preview": "Прослушивание голоса рассказчика",
+    "Documentary Voice": "Голос",
+    "Documentary Voice Help": "Если настроен качественный облачный TTS, такие голоса показываются первыми. Edge остаётся бесплатным запасным вариантом. Прослушивание облачного голоса может расходовать кредиты провайдера.",
+    "Documentary Voice Preview Text": "Текст для прослушивания",
+    "Documentary Voice Preview Button": "Прослушать голос",
+    "Documentary Voice Preview Generating": "Генерирую пример голоса…",
+    "Documentary Voice Preview Failed": "Не удалось создать пример голоса: {error}"
   }
 }
