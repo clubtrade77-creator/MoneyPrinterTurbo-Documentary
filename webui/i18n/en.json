@@ -670,6 +670,7 @@
     "Documentary Clip Rebuild": "Select clips again",
     "Documentary Clip Selecting": "Selecting exact source ranges from transcript evidence…",
     "Documentary Clip Failed": "Clip Selector failed: {error}",
-    "Documentary Clip Complete": "Clip plan created and applied: {clips} clips."
+    "Documentary Clip Complete": "Clip plan created and applied: {clips} clips.",
+    "Documentary Story Summary Seconds": "{beats} beats · target {seconds:.0f}s"
   }
 }
