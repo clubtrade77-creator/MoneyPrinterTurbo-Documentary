@@ -366,7 +366,7 @@ def test_plan_story_uses_reviewed_deterministic_plan_for_two_sparse_segments(
     )
 
     assert generation_calls == []
-    assert len(review_calls) == 2
+    assert review_calls == []
     assert plan.grounding_reviewed is True
     assert len(plan.beats) == 1
     assert plan.beats[0].summary == transcript.full_text
@@ -375,13 +375,15 @@ def test_plan_story_uses_reviewed_deterministic_plan_for_two_sparse_segments(
     assert load_story_plan(project.id, root=tmp_path) == plan
 
 
-def test_sparse_story_plan_still_requires_semantic_review(tmp_path: Path):
+def test_sparse_story_plan_is_grounded_without_llm_reviewer_false_positive(
+    tmp_path: Path,
+):
     project = create_project(
-        "Sparse rejected story",
-        project_id="doc_sparse_rejected_story",
+        "Sparse exact story",
+        project_id="doc_sparse_exact_story",
         root=tmp_path,
     )
-    source_file = tmp_path / "sparse-rejected.wav"
+    source_file = tmp_path / "sparse-exact.wav"
     source_file.write_bytes(b"audio-source")
     source = attach_local_file(
         project.id,
@@ -394,14 +396,23 @@ def test_sparse_story_plan_still_requires_semantic_review(tmp_path: Path):
         source_checksum_sha256=source.checksum_sha256,
         language="en",
         media_duration_seconds=7.0,
-        full_text="The officer approaches the vehicle.",
+        full_text=(
+            "On September 30, the officer approached the vehicle. "
+            "A few seconds later, the situation changed completely."
+        ),
         segments=[
             TranscriptSegment(
                 id=0,
                 start_seconds=0.0,
-                end_seconds=3.0,
-                text="The officer approaches the vehicle.",
-            )
+                end_seconds=3.36,
+                text="On September 30, the officer approached the vehicle.",
+            ),
+            TranscriptSegment(
+                id=1,
+                start_seconds=3.60,
+                end_seconds=6.74,
+                text="A few seconds later, the situation changed completely.",
+            ),
         ],
     )
     transcript_path(project.id, source.id, tmp_path).write_text(
@@ -409,24 +420,23 @@ def test_sparse_story_plan_still_requires_semantic_review(tmp_path: Path):
         encoding="utf-8",
     )
 
-    def reject_review(prompt: str) -> str:
-        return json.dumps(
-            {
-                "supported": False,
-                "issues": ["reviewer rejected the candidate"],
-            }
+    def false_positive_review(prompt: str) -> str:
+        raise AssertionError(
+            "deterministic sparse plan must not depend on semantic reviewer judgment"
         )
 
-    with pytest.raises(StoryPlannerError, match="semantic grounding review failed"):
-        plan_story(
-            project.id,
-            target_duration_seconds=5,
-            root=tmp_path,
-            generate_fn=lambda prompt: "{}",
-            review_fn=reject_review,
-        )
+    plan = plan_story(
+        project.id,
+        target_duration_seconds=7,
+        root=tmp_path,
+        generate_fn=lambda prompt: "{}",
+        review_fn=false_positive_review,
+    )
 
-    assert not story_plan_path(project.id, tmp_path).exists()
+    assert plan.grounding_reviewed is True
+    assert plan.angle == transcript.full_text
+    assert plan.beats[0].summary == transcript.full_text
+    assert story_plan_path(project.id, tmp_path).is_file()
 
 
 def test_plan_story_persists_grounded_plan_and_loads_it(tmp_path: Path):
@@ -741,7 +751,8 @@ def test_specificity_review_prompt_targets_incident_labels_and_causality():
     assert '"traffic stop"' in prompt
     assert "Temporal order is not causation" in prompt
     assert '"A triggered B"' in prompt
-    assert "If uncertain, mark the plan unsupported" in prompt
+    assert "Exact transcript wording is supported even if it is vague or incomplete" in prompt
+    assert "unsupported ADDED specificity" in prompt
 
 
 def test_plan_story_retries_after_specificity_failure(tmp_path: Path):
