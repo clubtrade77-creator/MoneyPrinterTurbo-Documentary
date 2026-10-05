@@ -5,6 +5,7 @@ import pytest
 import webui.documentary as documentary_ui
 from webui.documentary import (
     _default_story_target_seconds,
+    _documentary_voice_preview_text,
     _format_transcript_segment,
     _format_transcript_time,
     _load_clip_plan_if_available,
@@ -214,3 +215,9 @@ def test_documentary_render_currentness_requires_output(tmp_path, monkeypatch):
     )
 
     assert _render_output_is_current("doc_test") is False
+
+
+def test_documentary_voice_preview_text_uses_project_language():
+    assert "documentary" in _documentary_voice_preview_text("en").lower()
+    assert "документального" in _documentary_voice_preview_text("ru").lower()
+    assert "documental" in _documentary_voice_preview_text("es").lower()
