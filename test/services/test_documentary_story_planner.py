@@ -172,6 +172,42 @@ def test_build_story_planner_prompt_keeps_evidence_ids_and_injection_boundary():
     assert "Do not pad weak evidence with invented facts" in prompt
 
 
+def test_build_story_planner_prompt_accepts_short_grounded_smoke_target():
+    transcript = DocumentaryTranscript(
+        source_id="source_short_story",
+        source_checksum_sha256="checksum",
+        language="en",
+        full_text=(
+            "On September 30, the officer approached the vehicle. "
+            "A few seconds later, the situation changed completely."
+        ),
+        segments=[
+            TranscriptSegment(
+                id=0,
+                start_seconds=0.0,
+                end_seconds=3.36,
+                text="On September 30, the officer approached the vehicle.",
+            ),
+            TranscriptSegment(
+                id=1,
+                start_seconds=3.60,
+                end_seconds=6.74,
+                text="A few seconds later, the situation changed completely.",
+            ),
+        ],
+    )
+
+    prompt = build_story_planner_prompt(
+        project_title="Short evidence",
+        transcripts=[transcript],
+        target_duration_seconds=7,
+    )
+
+    assert "TARGET LENGTH:\n7 seconds." in prompt
+    assert "prefer one compact beat" in prompt
+    assert "routine, ordinary, abrupt, sudden, pivotal" in prompt
+
+
 def test_parse_story_plan_response_accepts_json_code_fence():
     payload = _plan_payload()
     response = f"{chr(96) * 3}json\n{json.dumps(payload)}\n{chr(96) * 3}"
@@ -560,6 +596,8 @@ def test_plan_story_retries_after_semantic_grounding_failure(tmp_path: Path):
     assert len(review_prompts) == 3
     assert "semantic grounding review failed" in generation_prompts[1]
     assert "danger or high stakes" in generation_prompts[1]
+    assert "neutral near-verbatim wording" in generation_prompts[1]
+    assert "Do not invent framing to fill the target duration" in generation_prompts[1]
 
 
 def test_specificity_review_prompt_targets_incident_labels_and_causality():
