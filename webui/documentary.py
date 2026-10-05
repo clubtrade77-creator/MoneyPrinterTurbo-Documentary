@@ -107,6 +107,14 @@ def _load_story_plan_if_available(project_id: str):
         return None
 
 
+def _default_story_target_seconds(total_media_seconds: float) -> int:
+    if total_media_seconds <= 0:
+        return 60
+    if total_media_seconds < 60:
+        return max(5, min(60, round(total_media_seconds)))
+    return 600
+
+
 def _write_uploaded_video_to_temp(uploaded_file) -> Path:
     suffix = Path(uploaded_file.name or "").suffix.lower()
     if suffix not in {".mp4", ".mov"}:
@@ -454,16 +462,29 @@ def _render_story_planner(project, tr: Tr) -> None:
             transcript.media_duration_seconds or 0
             for transcript in transcripts.values()
         )
-        default_minutes = 1 if total_media_seconds < 120 else 10
-        target_minutes = st.number_input(
-            tr("Documentary Story Target Minutes"),
-            min_value=1,
-            max_value=30,
-            value=default_minutes,
-            step=1,
-            key=f"documentary_story_target_minutes_{project.id}",
-            help=tr("Documentary Story Target Help"),
-        )
+        if total_media_seconds < 60:
+            target_duration_seconds = float(
+                st.number_input(
+                    tr("Documentary Story Target Seconds"),
+                    min_value=5,
+                    max_value=60,
+                    value=_default_story_target_seconds(total_media_seconds),
+                    step=1,
+                    key=f"documentary_story_target_seconds_{project.id}",
+                    help=tr("Documentary Story Target Seconds Help"),
+                )
+            )
+        else:
+            target_minutes = st.number_input(
+                tr("Documentary Story Target Minutes"),
+                min_value=1,
+                max_value=30,
+                value=10,
+                step=1,
+                key=f"documentary_story_target_minutes_{project.id}",
+                help=tr("Documentary Story Target Help"),
+            )
+            target_duration_seconds = float(target_minutes) * 60
 
         button_label = (
             tr("Documentary Story Regenerate")
@@ -482,7 +503,7 @@ def _render_story_planner(project, tr: Tr) -> None:
                     result = plan_story(
                         project.id,
                         source_ids=selected_source_ids,
-                        target_duration_seconds=float(target_minutes) * 60,
+                        target_duration_seconds=target_duration_seconds,
                     )
             except (OSError, ValueError, StoryPlannerError) as exc:
                 st.error(
