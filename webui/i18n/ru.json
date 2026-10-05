@@ -506,6 +506,8 @@
     "Documentary Story Regenerate": "Построить план заново",
     "Documentary Story Generating": "Строю и проверяю план истории…",
     "Documentary Story Failed": "Story Planner не смог построить план: {error}",
-    "Documentary Story Complete": "План истории создан: {beats} блоков."
+    "Documentary Story Complete": "План истории создан: {beats} блоков.",
+    "Documentary Story Target Seconds": "Целевая длина плана истории, секунд",
+    "Documentary Story Target Seconds Help": "Для очень короткого исходника держим цель близко к длительности доступных доказательств, а не растягиваем несколько секунд до целой минуты."
   }
 }
