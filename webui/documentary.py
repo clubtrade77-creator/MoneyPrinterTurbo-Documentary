@@ -7,8 +7,10 @@ from typing import Callable
 
 import streamlit as st
 
-from app.models.documentary import RightsStatus, SourceType
+from app.config import config
+from app.models.documentary import AudioMode, RightsStatus, SourceType
 from app.services import subtitle as subtitle_service
+from app.services import voice as voice_service
 from app.services.documentary.clip_selector import (
     ClipSelectorError,
     clip_plan_path,
@@ -20,7 +22,12 @@ from app.services.documentary.project import (
     create_project,
     list_projects,
     load_project,
+    project_dir,
     project_manifest_path,
+)
+from app.services.documentary.narration import (
+    NarrationWriterError,
+    write_narration,
 )
 from app.services.documentary.story_planner import (
     StoryPlannerError,
@@ -150,6 +157,93 @@ def _default_story_target_seconds(total_media_seconds: float) -> int:
     if total_media_seconds < 60:
         return max(5, min(60, round(total_media_seconds)))
     return 600
+
+
+def _documentary_voice_options(language: str) -> list[tuple[str, str]]:
+    language = (language or "en").lower()
+    edge_by_language = {
+        "en": [
+            ("en-US-ChristopherNeural-Male", "Edge · Christopher"),
+            ("en-US-JennyNeural-Female", "Edge · Jenny"),
+        ],
+        "ru": [
+            ("ru-RU-DmitryNeural-Male", "Edge · Dmitry"),
+            ("ru-RU-SvetlanaNeural-Female", "Edge · Svetlana"),
+        ],
+        "es": [
+            ("es-US-AlonsoNeural-Male", "Edge · Alonso"),
+            ("es-US-PalomaNeural-Female", "Edge · Paloma"),
+        ],
+    }
+    options: list[tuple[str, str]] = []
+
+    if config.app.get("gemini_api_key", ""):
+        options.extend(
+            [
+                ("gemini:Charon-Informative", "Gemini · Charon · Informative"),
+                ("gemini:Gacrux-Mature", "Gemini · Gacrux · Mature"),
+                ("gemini:Sulafat-Warm", "Gemini · Sulafat · Warm"),
+            ]
+        )
+    if voice_service.get_minimax_tts_api_key():
+        options.append(
+            ("minimax:English_expressive_narrator", "MiniMax · Expressive Narrator")
+        )
+    if voice_service.get_fish_audio_api_key():
+        options.extend(
+            [
+                (
+                    "fish_audio:7b6131ba75ba47c98a46c847db729ab6:Clear Male-Male",
+                    "Fish Audio · Clear Male",
+                ),
+                (
+                    "fish_audio:2324c907b9a94c64ab4afb941e5b3408:Clear Female-Female",
+                    "Fish Audio · Clear Female",
+                ),
+            ]
+        )
+
+    options.extend(edge_by_language.get(language, edge_by_language["en"]))
+    return options
+
+
+def _documentary_voice_preview_text(language: str) -> str:
+    return {
+        "ru": "Это пример голоса рассказчика для документального видео.",
+        "es": "Esta es una muestra de la voz del narrador para un documental.",
+    }.get(
+        (language or "en").lower(),
+        "This is a sample of the narrator voice for a documentary.",
+    )
+
+
+def _generate_documentary_voice_preview(
+    project_id: str,
+    *,
+    voice_name: str,
+    text: str,
+) -> Path:
+    preview_dir = project_dir(project_id) / "audio" / "previews"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    fd, preview_name = tempfile.mkstemp(
+        prefix="voice-preview-",
+        suffix=".mp3",
+        dir=preview_dir,
+    )
+    os.close(fd)
+    preview_path = Path(preview_name)
+    preview_path.unlink(missing_ok=True)
+    result = voice_service.tts(
+        text=text,
+        voice_name=voice_name,
+        voice_rate=1.0,
+        voice_file=str(preview_path),
+        voice_volume=1.0,
+    )
+    if result is None or not preview_path.is_file() or preview_path.stat().st_size <= 0:
+        preview_path.unlink(missing_ok=True)
+        raise RuntimeError("voice preview generation failed")
+    return preview_path
 
 
 def _write_uploaded_video_to_temp(uploaded_file) -> Path:
@@ -642,6 +736,111 @@ def _render_clip_selector(project, tr: Tr) -> None:
                 st.rerun()
 
 
+def _render_narration_writer(project, tr: Tr) -> None:
+    if not project.plan.scenes:
+        return
+
+    try:
+        story_plan = _load_story_plan_if_available(project.id)
+    except StoryPlannerError:
+        return
+    if story_plan is None:
+        return
+
+    beats = {beat.id: beat for beat in story_plan.beats}
+    with st.expander(tr("Documentary Narration"), expanded=True):
+        narration_needed = 0
+        for index, scene in enumerate(project.plan.scenes, start=1):
+            beat = beats.get(scene.story_beat_id)
+            preserve_original = (
+                beat is not None
+                and beat.original_audio_priority
+                and scene.audio_mode == AudioMode.original
+            )
+            if preserve_original:
+                st.write(
+                    tr("Documentary Narration Original").format(index=index)
+                )
+                continue
+
+            if scene.narration_text:
+                st.markdown(
+                    f"**{tr('Documentary Narration Scene').format(index=index)}**"
+                )
+                st.write(scene.narration_text)
+            else:
+                narration_needed += 1
+                st.write(
+                    tr("Documentary Narration Missing").format(index=index)
+                )
+
+        if narration_needed:
+            if st.button(
+                tr("Documentary Narration Generate"),
+                type="primary",
+                width="stretch",
+                key=f"documentary_narration_generate_{project.id}",
+            ):
+                try:
+                    with st.spinner(tr("Documentary Narration Generating")):
+                        result = write_narration(project.id)
+                except (OSError, ValueError, NarrationWriterError) as exc:
+                    st.error(
+                        tr("Documentary Narration Failed").format(error=str(exc))
+                    )
+                else:
+                    generated = sum(
+                        1 for scene in result.plan.scenes if scene.narration_text
+                    )
+                    st.success(
+                        tr("Documentary Narration Complete").format(
+                            scenes=generated
+                        )
+                    )
+                    st.rerun()
+        else:
+            st.success(tr("Documentary Narration Not Needed"))
+
+        st.markdown(f"**{tr('Documentary Voice Preview')}**")
+        voice_options = _documentary_voice_options(project.master_language)
+        voice_by_id = dict(voice_options)
+        selected_voice = st.selectbox(
+            tr("Documentary Voice"),
+            options=list(voice_by_id),
+            format_func=lambda value: voice_by_id[value],
+            key=f"documentary_voice_preview_voice_{project.id}",
+            help=tr("Documentary Voice Help"),
+        )
+        preview_text = st.text_input(
+            tr("Documentary Voice Preview Text"),
+            value=_documentary_voice_preview_text(project.master_language),
+            key=f"documentary_voice_preview_text_{project.id}",
+        )
+
+        preview_state_key = f"documentary_voice_preview_path_{project.id}"
+        if st.button(
+            tr("Documentary Voice Preview Button"),
+            key=f"documentary_voice_preview_button_{project.id}",
+        ):
+            try:
+                with st.spinner(tr("Documentary Voice Preview Generating")):
+                    preview_path = _generate_documentary_voice_preview(
+                        project.id,
+                        voice_name=selected_voice,
+                        text=preview_text,
+                    )
+            except Exception as exc:
+                st.error(
+                    tr("Documentary Voice Preview Failed").format(error=str(exc))
+                )
+            else:
+                st.session_state[preview_state_key] = str(preview_path)
+
+        preview_value = st.session_state.get(preview_state_key)
+        if preview_value and Path(preview_value).is_file():
+            st.audio(preview_value)
+
+
 def _render_master_video(project, tr: Tr) -> None:
     if not project.plan.scenes:
         return
@@ -798,5 +997,7 @@ def render_documentary_application(tr: Tr) -> None:
     _render_transcription(project, tr)
     _render_story_planner(project, tr)
     _render_clip_selector(project, tr)
+    project = load_project(selected_project_id)
+    _render_narration_writer(project, tr)
     project = load_project(selected_project_id)
     _render_master_video(project, tr)
