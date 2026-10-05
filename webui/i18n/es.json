@@ -517,6 +517,15 @@
     "Documentary Clip Selecting": "Seleccionando rangos exactos de la fuente según los tiempos de la transcripción…",
     "Documentary Clip Failed": "Clip Selector falló: {error}",
     "Documentary Clip Complete": "Plan de clips creado y aplicado: {clips} clips.",
-    "Documentary Story Summary Seconds": "{beats} bloques · objetivo {seconds:.0f}s"
+    "Documentary Story Summary Seconds": "{beats} bloques · objetivo {seconds:.0f}s",
+    "Documentary Render": "Render maestro",
+    "Documentary Render Current": "El render maestro actual está listo.",
+    "Documentary Render Stale": "Existe un render anterior, pero el proyecto cambió. Vuelve a renderizar antes de usarlo.",
+    "Documentary Render Settings": "1920×1080 · {fps} fps · {scenes} escenas",
+    "Documentary Render Build": "Renderizar video maestro",
+    "Documentary Render Again": "Renderizar video maestro de nuevo",
+    "Documentary Rendering": "Renderizando el documental maestro con FFmpeg…",
+    "Documentary Render Failed": "Falló el render del documental: {error}",
+    "Documentary Render Complete": "Render maestro creado: {filename}"
   }
 }
