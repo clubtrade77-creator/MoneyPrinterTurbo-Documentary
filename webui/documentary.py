@@ -11,6 +11,7 @@ from app.models.documentary import RightsStatus, SourceType
 from app.services import subtitle as subtitle_service
 from app.services.documentary.clip_selector import (
     ClipSelectorError,
+    clip_plan_path,
     load_clip_plan,
     select_clips,
 )
@@ -19,11 +20,18 @@ from app.services.documentary.project import (
     create_project,
     list_projects,
     load_project,
+    project_manifest_path,
 )
 from app.services.documentary.story_planner import (
     StoryPlannerError,
     load_story_plan,
     plan_story,
+    story_plan_path,
+)
+from app.services.documentary.renderer import (
+    DocumentaryRenderError,
+    documentary_render_path,
+    render_documentary,
 )
 from app.services.documentary.transcription import (
     TranscriptionError,
@@ -117,6 +125,23 @@ def _load_clip_plan_if_available(project_id: str):
         return load_clip_plan(project_id)
     except FileNotFoundError:
         return None
+
+
+def _render_output_is_current(project_id: str) -> bool:
+    output = documentary_render_path(project_id)
+    if not output.is_file():
+        return False
+
+    dependencies = [
+        project_manifest_path(project_id),
+        story_plan_path(project_id),
+        clip_plan_path(project_id),
+    ]
+    output_mtime = output.stat().st_mtime
+    return all(
+        not dependency.is_file() or output_mtime >= dependency.stat().st_mtime
+        for dependency in dependencies
+    )
 
 
 def _default_story_target_seconds(total_media_seconds: float) -> int:
@@ -617,6 +642,57 @@ def _render_clip_selector(project, tr: Tr) -> None:
                 st.rerun()
 
 
+def _render_master_video(project, tr: Tr) -> None:
+    if not project.plan.scenes:
+        return
+
+    with st.expander(tr("Documentary Render"), expanded=True):
+        output_path = documentary_render_path(project.id)
+        current_render = _render_output_is_current(project.id)
+
+        if output_path.is_file():
+            if current_render:
+                st.success(tr("Documentary Render Current"))
+                st.video(str(output_path))
+            else:
+                st.warning(tr("Documentary Render Stale"))
+
+        st.caption(
+            tr("Documentary Render Settings").format(
+                width=1920,
+                height=1080,
+                fps=30,
+                scenes=len(project.plan.scenes),
+            )
+        )
+
+        button_label = (
+            tr("Documentary Render Again")
+            if output_path.is_file()
+            else tr("Documentary Render Build")
+        )
+        if st.button(
+            button_label,
+            type="primary",
+            width="stretch",
+            key=f"documentary_render_{project.id}",
+        ):
+            try:
+                with st.spinner(tr("Documentary Rendering")):
+                    result = render_documentary(project.id)
+            except (OSError, ValueError, DocumentaryRenderError) as exc:
+                st.error(
+                    tr("Documentary Render Failed").format(error=str(exc))
+                )
+            else:
+                st.success(
+                    tr("Documentary Render Complete").format(
+                        filename=result.name
+                    )
+                )
+                st.rerun()
+
+
 def _render_source_upload(project, tr: Tr) -> None:
     with st.expander(tr("Documentary Add Source"), expanded=not project.sources):
         upload_nonce_key = f"documentary_upload_nonce_{project.id}"
@@ -722,3 +798,5 @@ def render_documentary_application(tr: Tr) -> None:
     _render_transcription(project, tr)
     _render_story_planner(project, tr)
     _render_clip_selector(project, tr)
+    project = load_project(selected_project_id)
+    _render_master_video(project, tr)
