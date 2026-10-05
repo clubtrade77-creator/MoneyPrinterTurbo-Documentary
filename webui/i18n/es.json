@@ -508,6 +508,14 @@
     "Documentary Story Failed": "Story Planner falló: {error}",
     "Documentary Story Complete": "Plan de historia creado: {beats} bloques.",
     "Documentary Story Target Seconds": "Duración objetivo de la historia, segundos",
-    "Documentary Story Target Seconds Help": "Para fuentes muy cortas, mantén el objetivo cerca de la evidencia disponible en lugar de estirar unos segundos hasta un minuto completo."
+    "Documentary Story Target Seconds Help": "Para fuentes muy cortas, mantén el objetivo cerca de la evidencia disponible en lugar de estirar unos segundos hasta un minuto completo.",
+    "Documentary Clip Selector": "Clip Selector",
+    "Documentary Clip Plan Stale": "El plan de clips guardado está desactualizado o no es válido: {error}",
+    "Documentary Clip Summary": "{clips} clips · margen {padding:.2f}s · unión hasta {gap:.2f}s",
+    "Documentary Clip Build": "Seleccionar fragmentos",
+    "Documentary Clip Rebuild": "Seleccionar fragmentos de nuevo",
+    "Documentary Clip Selecting": "Seleccionando rangos exactos de la fuente según los tiempos de la transcripción…",
+    "Documentary Clip Failed": "Clip Selector falló: {error}",
+    "Documentary Clip Complete": "Plan de clips creado y aplicado: {clips} clips."
   }
 }
