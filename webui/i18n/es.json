@@ -526,6 +526,22 @@
     "Documentary Render Again": "Renderizar video maestro de nuevo",
     "Documentary Rendering": "Renderizando el documental maestro con FFmpeg…",
     "Documentary Render Failed": "Falló el render del documental: {error}",
-    "Documentary Render Complete": "Render maestro creado: {filename}"
+    "Documentary Render Complete": "Render maestro creado: {filename}",
+    "Documentary Narration": "Narrador",
+    "Documentary Narration Original": "Escena {index}: prioridad del audio original — no se necesita narrador.",
+    "Documentary Narration Scene": "Narración de la escena {index}",
+    "Documentary Narration Missing": "Escena {index}: se necesita narración.",
+    "Documentary Narration Generate": "Escribir narración",
+    "Documentary Narration Generating": "Escribiendo y verificando la narración…",
+    "Documentary Narration Failed": "Narration Writer falló: {error}",
+    "Documentary Narration Complete": "Narración creada para {scenes} escenas.",
+    "Documentary Narration Not Needed": "Esta historia conserva el audio original; no se necesita narrador para estas escenas.",
+    "Documentary Voice Preview": "Vista previa de la voz del narrador",
+    "Documentary Voice": "Voz",
+    "Documentary Voice Help": "Las voces de mayor calidad aparecen primero cuando su proveedor está configurado. Edge queda como alternativa gratuita. La vista previa puede consumir créditos del proveedor.",
+    "Documentary Voice Preview Text": "Texto de prueba",
+    "Documentary Voice Preview Button": "Generar muestra de voz",
+    "Documentary Voice Preview Generating": "Generando muestra de voz…",
+    "Documentary Voice Preview Failed": "No se pudo generar la muestra de voz: {error}"
   }
 }
