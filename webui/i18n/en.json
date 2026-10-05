@@ -680,6 +680,22 @@
     "Documentary Render Again": "Render master video again",
     "Documentary Rendering": "Rendering the documentary master with FFmpeg…",
     "Documentary Render Failed": "Documentary render failed: {error}",
-    "Documentary Render Complete": "Master render created: {filename}"
+    "Documentary Render Complete": "Master render created: {filename}",
+    "Documentary Narration": "Narration",
+    "Documentary Narration Original": "Scene {index}: original audio priority — narrator not needed.",
+    "Documentary Narration Scene": "Scene {index} narration",
+    "Documentary Narration Missing": "Scene {index}: narration is required.",
+    "Documentary Narration Generate": "Write narration",
+    "Documentary Narration Generating": "Writing and fact-checking narration…",
+    "Documentary Narration Failed": "Narration Writer failed: {error}",
+    "Documentary Narration Complete": "Narration created for {scenes} scenes.",
+    "Documentary Narration Not Needed": "This story currently preserves original audio; no narrator is needed for these scenes.",
+    "Documentary Voice Preview": "Narrator voice preview",
+    "Documentary Voice": "Voice",
+    "Documentary Voice Help": "Higher-quality cloud voices appear first when their provider is configured. Edge voices remain available as a free fallback. A preview may use provider credits.",
+    "Documentary Voice Preview Text": "Preview text",
+    "Documentary Voice Preview Button": "Generate voice preview",
+    "Documentary Voice Preview Generating": "Generating voice preview…",
+    "Documentary Voice Preview Failed": "Voice preview failed: {error}"
   }
 }
