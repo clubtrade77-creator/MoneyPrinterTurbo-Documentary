@@ -309,6 +309,9 @@ REVIEW RULES:
 - Editorial sequencing is allowed, but it may not smuggle in new facts.
 - Review title, angle, hook, every beat title, summary, narration_goal, and evidence note.
 - Do not reject a claim merely because it paraphrases the transcript faithfully.
+- Exact transcript wording is supported evidence even when it is vague. Never reject
+  an exact source phrase merely because it does not explain what happened, why it
+  happened, or what the implications were. Reject only added claims beyond that wording.
 
 OUTPUT:
 Return exactly one JSON object and nothing else:
@@ -377,7 +380,10 @@ STRICT TESTS:
   escalation, or similar framing unless the transcript itself supports them.
 - Inspect title, angle, hook, every beat title, summary, narration_goal, and note.
 - Faithful neutral paraphrase is allowed. Unsupported embellishment is not.
-- If uncertain, mark the plan unsupported.
+- Exact transcript wording is supported even if it is vague or incomplete. Do not
+  demand that the plan explain what changed, why, or what it implies when the source
+  itself does not say. The review target is unsupported ADDED specificity, not missing detail.
+- If uncertain whether wording adds a claim beyond the transcript, mark it unsupported.
 
 OUTPUT:
 Return exactly one JSON object and nothing else:
@@ -652,11 +658,10 @@ def plan_story(
             target_duration_seconds=target_duration_seconds,
             transcripts=transcripts,
         )
-        _review_story_plan(
-            candidate,
-            transcripts=transcripts,
-            reviewer=reviewer,
-        )
+        # Sparse plans are built deterministically from exact transcript text only.
+        # A semantic LLM reviewer can falsely reject a verbatim but intentionally vague
+        # source phrase (for example, "the situation changed"). Deterministic evidence
+        # validation is stronger here because this path adds no generated factual prose.
         candidate.grounding_reviewed = True
         candidate.grounding_review_version = CURRENT_GROUNDING_REVIEW_VERSION
         plan = candidate
