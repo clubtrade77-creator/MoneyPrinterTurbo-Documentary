@@ -185,7 +185,7 @@ def _documentary_voice_options(language: str) -> list[tuple[str, str]]:
                 ("gemini:Sulafat-Warm", "Gemini · Sulafat · Warm"),
             ]
         )
-    if voice_service.get_minimax_tts_api_key():
+    if language == "en" and voice_service.get_minimax_tts_api_key():
         options.append(
             ("minimax:English_expressive_narrator", "MiniMax · Expressive Narrator")
         )
