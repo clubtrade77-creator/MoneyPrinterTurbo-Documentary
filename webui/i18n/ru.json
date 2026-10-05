@@ -508,6 +508,14 @@
     "Documentary Story Failed": "Story Planner не смог построить план: {error}",
     "Documentary Story Complete": "План истории создан: {beats} блоков.",
     "Documentary Story Target Seconds": "Целевая длина плана истории, секунд",
-    "Documentary Story Target Seconds Help": "Для очень короткого исходника держим цель близко к длительности доступных доказательств, а не растягиваем несколько секунд до целой минуты."
+    "Documentary Story Target Seconds Help": "Для очень короткого исходника держим цель близко к длительности доступных доказательств, а не растягиваем несколько секунд до целой минуты.",
+    "Documentary Clip Selector": "Clip Selector",
+    "Documentary Clip Plan Stale": "Сохранённый план клипов устарел или повреждён: {error}",
+    "Documentary Clip Summary": "Клипов: {clips} · запас по краям {padding:.2f}с · объединение до {gap:.2f}с",
+    "Documentary Clip Build": "Выбрать фрагменты",
+    "Documentary Clip Rebuild": "Выбрать фрагменты заново",
+    "Documentary Clip Selecting": "Выбираю точные фрагменты исходника по таймкодам транскрибации…",
+    "Documentary Clip Failed": "Clip Selector не смог выбрать фрагменты: {error}",
+    "Documentary Clip Complete": "План клипов создан и применён: {clips} клипов."
   }
 }
