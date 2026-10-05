@@ -147,8 +147,8 @@ def build_story_planner_prompt(
 ) -> str:
     if not transcripts:
         raise StoryPlannerError("story planning requires at least one transcript")
-    if target_duration_seconds < 60 or target_duration_seconds > 1800:
-        raise ValueError("target_duration_seconds must be between 60 and 1800")
+    if target_duration_seconds < 5 or target_duration_seconds > 1800:
+        raise ValueError("target_duration_seconds must be between 5 and 1800")
 
     evidence_payload = []
     for transcript in transcripts:
@@ -213,6 +213,10 @@ The requested total length is exactly {target_duration_seconds:.0f} seconds.
 The sum of all beat "target_duration_seconds" values MUST stay between {target_duration_seconds * 0.65:.0f} and {target_duration_seconds * 1.35:.0f} seconds;
 aim as close as practical to {target_duration_seconds:.0f} seconds.
 Do not pad weak evidence with invented facts just to fill time.
+For sparse evidence or very short targets, prefer one compact beat and wording
+that stays close to the transcript instead of adding dramatic framing.
+Do not describe a moment as routine, ordinary, abrupt, sudden, pivotal, tense,
+dramatic, or similar unless the transcript itself supports that descriptor.
 Each beat "target_duration_seconds" must be greater than 0 and at most 180.
 
 OUTPUT:
@@ -497,7 +501,10 @@ def _retry_prompt(base_prompt: str, error: StoryPlannerError, attempt: int) -> s
         f"{base_prompt}\n\n"
         "CORRECTION REQUIRED:\n"
         f"Your previous attempt failed validation on attempt {attempt}: {error}\n"
-        "Return a completely new JSON object that fixes this validation error. "
+        "Return a completely new JSON object that fixes every issue above. "
+        "Remove rejected descriptors instead of replacing them with synonyms. "
+        "When evidence is sparse, use neutral near-verbatim wording and fewer beats. "
+        "Do not invent framing to fill the target duration. "
         "Do not explain the correction and do not output markdown."
     )
 
