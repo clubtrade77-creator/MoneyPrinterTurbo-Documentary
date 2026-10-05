@@ -9,6 +9,11 @@ import streamlit as st
 
 from app.models.documentary import RightsStatus, SourceType
 from app.services import subtitle as subtitle_service
+from app.services.documentary.clip_selector import (
+    ClipSelectorError,
+    load_clip_plan,
+    select_clips,
+)
 from app.services.documentary.project import (
     attach_local_video,
     create_project,
@@ -103,6 +108,13 @@ def _story_evidence_timecode(transcript, segment_ids: list[int]) -> str:
 def _load_story_plan_if_available(project_id: str):
     try:
         return load_story_plan(project_id)
+    except FileNotFoundError:
+        return None
+
+
+def _load_clip_plan_if_available(project_id: str):
+    try:
+        return load_clip_plan(project_id)
     except FileNotFoundError:
         return None
 
@@ -518,6 +530,85 @@ def _render_story_planner(project, tr: Tr) -> None:
                 st.rerun()
 
 
+def _render_clip_selector(project, tr: Tr) -> None:
+    try:
+        story_plan = _load_story_plan_if_available(project.id)
+    except StoryPlannerError:
+        return
+    if story_plan is None:
+        return
+
+    with st.expander(tr("Documentary Clip Selector"), expanded=True):
+        try:
+            clip_plan = _load_clip_plan_if_available(project.id)
+        except (ClipSelectorError, StoryPlannerError, TranscriptionError) as exc:
+            clip_plan = None
+            st.warning(
+                tr("Documentary Clip Plan Stale").format(error=str(exc))
+            )
+
+        if clip_plan is not None:
+            st.caption(
+                tr("Documentary Clip Summary").format(
+                    clips=len(clip_plan.clips),
+                    padding=clip_plan.padding_seconds,
+                    gap=clip_plan.max_merge_gap_seconds,
+                )
+            )
+            source_by_id = {source.id: source for source in project.sources}
+            for index, clip in enumerate(clip_plan.clips, start=1):
+                source = source_by_id.get(clip.source_id)
+                source_label = (
+                    source.title
+                    if source is not None and source.title
+                    else (
+                        source.original_filename
+                        if source is not None
+                        else clip.source_id
+                    )
+                )
+                start = _format_transcript_time(clip.source_start_seconds)
+                end = _format_transcript_time(clip.source_end_seconds)
+                purpose = getattr(clip.purpose, "value", str(clip.purpose))
+                audio_mode = getattr(clip.audio_mode, "value", str(clip.audio_mode))
+                st.write(
+                    f"{index}. [{start}–{end}] {source_label} · "
+                    f"{purpose} · {audio_mode}"
+                )
+
+        button_label = (
+            tr("Documentary Clip Rebuild")
+            if clip_plan is not None
+            else tr("Documentary Clip Build")
+        )
+        if st.button(
+            button_label,
+            type="primary",
+            width="stretch",
+            key=f"documentary_clip_select_{project.id}",
+        ):
+            try:
+                with st.spinner(tr("Documentary Clip Selecting")):
+                    result = select_clips(project.id)
+            except (
+                OSError,
+                ValueError,
+                ClipSelectorError,
+                StoryPlannerError,
+                TranscriptionError,
+            ) as exc:
+                st.error(
+                    tr("Documentary Clip Failed").format(error=str(exc))
+                )
+            else:
+                st.success(
+                    tr("Documentary Clip Complete").format(
+                        clips=len(result.clips)
+                    )
+                )
+                st.rerun()
+
+
 def _render_source_upload(project, tr: Tr) -> None:
     with st.expander(tr("Documentary Add Source"), expanded=not project.sources):
         upload_nonce_key = f"documentary_upload_nonce_{project.id}"
@@ -622,3 +713,4 @@ def render_documentary_application(tr: Tr) -> None:
     _render_source_upload(project, tr)
     _render_transcription(project, tr)
     _render_story_planner(project, tr)
+    _render_clip_selector(project, tr)
