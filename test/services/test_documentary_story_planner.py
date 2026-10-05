@@ -301,6 +301,134 @@ def test_validate_story_plan_evidence_rejects_unknown_segment():
         validate_story_plan_evidence(plan, [transcript])
 
 
+def test_plan_story_uses_reviewed_deterministic_plan_for_two_sparse_segments(
+    tmp_path: Path,
+):
+    project = create_project(
+        "Sparse story",
+        project_id="doc_sparse_story",
+        root=tmp_path,
+    )
+    source_file = tmp_path / "sparse.wav"
+    source_file.write_bytes(b"audio-source")
+    source = attach_local_file(
+        project.id,
+        source_file,
+        source_type=SourceType.audio,
+        root=tmp_path,
+    )
+    transcript = DocumentaryTranscript(
+        source_id=source.id,
+        source_checksum_sha256=source.checksum_sha256,
+        language="en",
+        media_duration_seconds=7.0,
+        full_text=(
+            "On September 30, the officer approached the vehicle. "
+            "A few seconds later, the situation changed completely."
+        ),
+        segments=[
+            TranscriptSegment(
+                id=0,
+                start_seconds=0.0,
+                end_seconds=3.36,
+                text="On September 30, the officer approached the vehicle.",
+            ),
+            TranscriptSegment(
+                id=1,
+                start_seconds=3.60,
+                end_seconds=6.74,
+                text="A few seconds later, the situation changed completely.",
+            ),
+        ],
+    )
+    transcript_path(project.id, source.id, tmp_path).write_text(
+        json.dumps(transcript.model_dump(mode="json"), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    generation_calls = []
+    review_calls = []
+
+    def generate(prompt: str) -> str:
+        generation_calls.append(prompt)
+        raise AssertionError("sparse plan must not ask the generator to invent framing")
+
+    def review(prompt: str) -> str:
+        review_calls.append(prompt)
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = plan_story(
+        project.id,
+        target_duration_seconds=7,
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=review,
+    )
+
+    assert generation_calls == []
+    assert len(review_calls) == 2
+    assert plan.grounding_reviewed is True
+    assert len(plan.beats) == 1
+    assert plan.beats[0].summary == transcript.full_text
+    assert plan.hook == transcript.segments[0].text
+    assert plan.beats[0].evidence[0].segment_ids == [0, 1]
+    assert load_story_plan(project.id, root=tmp_path) == plan
+
+
+def test_sparse_story_plan_still_requires_semantic_review(tmp_path: Path):
+    project = create_project(
+        "Sparse rejected story",
+        project_id="doc_sparse_rejected_story",
+        root=tmp_path,
+    )
+    source_file = tmp_path / "sparse-rejected.wav"
+    source_file.write_bytes(b"audio-source")
+    source = attach_local_file(
+        project.id,
+        source_file,
+        source_type=SourceType.audio,
+        root=tmp_path,
+    )
+    transcript = DocumentaryTranscript(
+        source_id=source.id,
+        source_checksum_sha256=source.checksum_sha256,
+        language="en",
+        media_duration_seconds=7.0,
+        full_text="The officer approaches the vehicle.",
+        segments=[
+            TranscriptSegment(
+                id=0,
+                start_seconds=0.0,
+                end_seconds=3.0,
+                text="The officer approaches the vehicle.",
+            )
+        ],
+    )
+    transcript_path(project.id, source.id, tmp_path).write_text(
+        json.dumps(transcript.model_dump(mode="json"), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    def reject_review(prompt: str) -> str:
+        return json.dumps(
+            {
+                "supported": False,
+                "issues": ["reviewer rejected the candidate"],
+            }
+        )
+
+    with pytest.raises(StoryPlannerError, match="semantic grounding review failed"):
+        plan_story(
+            project.id,
+            target_duration_seconds=5,
+            root=tmp_path,
+            generate_fn=lambda prompt: "{}",
+            review_fn=reject_review,
+        )
+
+    assert not story_plan_path(project.id, tmp_path).exists()
+
+
 def test_plan_story_persists_grounded_plan_and_loads_it(tmp_path: Path):
     project, source, _ = _register_transcript(tmp_path)
     payload = _plan_payload(source.id)
