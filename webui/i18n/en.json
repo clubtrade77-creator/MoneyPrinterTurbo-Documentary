@@ -662,6 +662,14 @@
     "Documentary Story Failed": "Story Planner failed: {error}",
     "Documentary Story Complete": "Story plan created: {beats} beats.",
     "Documentary Story Target Seconds": "Target story length, seconds",
-    "Documentary Story Target Seconds Help": "For very short source material, keep the target close to the available evidence instead of stretching a few seconds into a full minute."
+    "Documentary Story Target Seconds Help": "For very short source material, keep the target close to the available evidence instead of stretching a few seconds into a full minute.",
+    "Documentary Clip Selector": "Clip Selector",
+    "Documentary Clip Plan Stale": "The saved clip plan is stale or invalid: {error}",
+    "Documentary Clip Summary": "{clips} clips · padding {padding:.2f}s · merge gap {gap:.2f}s",
+    "Documentary Clip Build": "Select clips",
+    "Documentary Clip Rebuild": "Select clips again",
+    "Documentary Clip Selecting": "Selecting exact source ranges from transcript evidence…",
+    "Documentary Clip Failed": "Clip Selector failed: {error}",
+    "Documentary Clip Complete": "Clip plan created and applied: {clips} clips."
   }
 }
