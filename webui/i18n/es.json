@@ -506,6 +506,8 @@
     "Documentary Story Regenerate": "Reconstruir plan de historia",
     "Documentary Story Generating": "Creando y verificando el plan de historia…",
     "Documentary Story Failed": "Story Planner falló: {error}",
-    "Documentary Story Complete": "Plan de historia creado: {beats} bloques."
+    "Documentary Story Complete": "Plan de historia creado: {beats} bloques.",
+    "Documentary Story Target Seconds": "Duración objetivo de la historia, segundos",
+    "Documentary Story Target Seconds Help": "Para fuentes muy cortas, mantén el objetivo cerca de la evidencia disponible en lugar de estirar unos segundos hasta un minuto completo."
   }
 }
