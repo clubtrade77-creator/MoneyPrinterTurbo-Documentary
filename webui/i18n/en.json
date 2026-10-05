@@ -671,6 +671,15 @@
     "Documentary Clip Selecting": "Selecting exact source ranges from transcript evidence…",
     "Documentary Clip Failed": "Clip Selector failed: {error}",
     "Documentary Clip Complete": "Clip plan created and applied: {clips} clips.",
-    "Documentary Story Summary Seconds": "{beats} beats · target {seconds:.0f}s"
+    "Documentary Story Summary Seconds": "{beats} beats · target {seconds:.0f}s",
+    "Documentary Render": "Master render",
+    "Documentary Render Current": "Current master render is ready.",
+    "Documentary Render Stale": "A previous master render exists, but the project changed. Render again before using it.",
+    "Documentary Render Settings": "1920×1080 · {fps} fps · {scenes} scenes",
+    "Documentary Render Build": "Render master video",
+    "Documentary Render Again": "Render master video again",
+    "Documentary Rendering": "Rendering the documentary master with FFmpeg…",
+    "Documentary Render Failed": "Documentary render failed: {error}",
+    "Documentary Render Complete": "Master render created: {filename}"
   }
 }
