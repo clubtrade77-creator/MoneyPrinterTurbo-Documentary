@@ -489,12 +489,12 @@
     "Documentary Whisper Small": "Быстро — small (рекомендуется)",
     "Documentary Whisper Large": "Максимальное качество — large-v3",
     "Documentary Whisper Model Help": "Small — практичный вариант по умолчанию для обычной речи и загружается намного быстрее. large-v3 нужна для сложных шумных записей и значительно тяжелее для CPU.",
-    "Documentary Story Planner": "Story Planner",
+    "Documentary Story Planner": "План истории",
     "Documentary Story Transcript Warning": "Некоторые транскрибации устарели и исключены.",
     "Documentary Story Plan Stale": "Сохранённый план истории устарел или повреждён: {error}",
     "Documentary Story Angle": "Угол истории",
     "Documentary Story Hook": "Хук",
-    "Documentary Story Summary": "{beats} блоков · цель {minutes:.1f} мин",
+    "Documentary Story Summary": "Блоков: {beats} · цель {minutes:.1f} мин",
     "Documentary Story Narration Goal": "Задача закадрового текста",
     "Documentary Story Original Audio": "Приоритет оригинального звука",
     "Documentary Story Evidence": "Основание",
@@ -509,13 +509,14 @@
     "Documentary Story Complete": "План истории создан: {beats} блоков.",
     "Documentary Story Target Seconds": "Целевая длина плана истории, секунд",
     "Documentary Story Target Seconds Help": "Для очень короткого исходника держим цель близко к длительности доступных доказательств, а не растягиваем несколько секунд до целой минуты.",
-    "Documentary Clip Selector": "Clip Selector",
+    "Documentary Clip Selector": "Выбор фрагментов",
     "Documentary Clip Plan Stale": "Сохранённый план клипов устарел или повреждён: {error}",
     "Documentary Clip Summary": "Клипов: {clips} · запас по краям {padding:.2f}с · объединение до {gap:.2f}с",
     "Documentary Clip Build": "Выбрать фрагменты",
     "Documentary Clip Rebuild": "Выбрать фрагменты заново",
     "Documentary Clip Selecting": "Выбираю точные фрагменты исходника по таймкодам транскрибации…",
     "Documentary Clip Failed": "Clip Selector не смог выбрать фрагменты: {error}",
-    "Documentary Clip Complete": "План клипов создан и применён: {clips} клипов."
+    "Documentary Clip Complete": "План клипов создан и применён: {clips} клипов.",
+    "Documentary Story Summary Seconds": "Блоков: {beats} · цель {seconds:.0f} сек"
   }
 }
