@@ -75,14 +75,30 @@ def _setup_case(tmp_path: Path, *, original_audio_priority: bool):
         requested_language="en",
         media_duration_seconds=8.0,
         model_size="small",
-        full_text="The officer approaches the vehicle.",
+        full_text=(
+            "The officer approaches the vehicle. "
+            "The driver looks toward the officer. "
+            "The officer remains beside the vehicle."
+        ),
         segments=[
             TranscriptSegment(
                 id=0,
                 start_seconds=0.5,
-                end_seconds=4.0,
+                end_seconds=1.5,
                 text="The officer approaches the vehicle.",
-            )
+            ),
+            TranscriptSegment(
+                id=1,
+                start_seconds=1.8,
+                end_seconds=2.8,
+                text="The driver looks toward the officer.",
+            ),
+            TranscriptSegment(
+                id=2,
+                start_seconds=3.1,
+                end_seconds=4.0,
+                text="The officer remains beside the vehicle.",
+            ),
         ],
     )
     transcript_path(project.id, source.id, tmp_path).write_text(
@@ -108,7 +124,7 @@ def _setup_case(tmp_path: Path, *, original_audio_priority: bool):
                 "evidence": [
                     {
                         "source_id": source.id,
-                        "segment_ids": [0],
+                        "segment_ids": [0, 1, 2],
                         "note": "Direct transcript evidence.",
                     }
                 ],
