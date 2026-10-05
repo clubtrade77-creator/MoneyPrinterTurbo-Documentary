@@ -4,6 +4,7 @@ import pytest
 
 import webui.documentary as documentary_ui
 from webui.documentary import (
+    _default_story_target_seconds,
     _format_transcript_segment,
     _format_transcript_time,
     _load_story_plan_if_available,
@@ -129,3 +130,10 @@ def test_documentary_story_plan_lookup_returns_existing_plan(monkeypatch):
     )
 
     assert _load_story_plan_if_available("doc_test") is expected
+
+
+def test_documentary_short_story_target_tracks_available_evidence():
+    assert _default_story_target_seconds(7.04) == 7
+    assert _default_story_target_seconds(2.0) == 5
+    assert _default_story_target_seconds(59.6) == 60
+    assert _default_story_target_seconds(120.0) == 600
