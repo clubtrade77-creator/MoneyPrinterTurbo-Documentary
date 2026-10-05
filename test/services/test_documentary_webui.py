@@ -7,6 +7,7 @@ from webui.documentary import (
     _default_story_target_seconds,
     _format_transcript_segment,
     _format_transcript_time,
+    _load_clip_plan_if_available,
     _load_story_plan_if_available,
     _load_transcript_if_available,
     _story_evidence_timecode,
@@ -137,3 +138,23 @@ def test_documentary_short_story_target_tracks_available_evidence():
     assert _default_story_target_seconds(2.0) == 5
     assert _default_story_target_seconds(59.6) == 60
     assert _default_story_target_seconds(120.0) == 600
+
+
+def test_documentary_clip_plan_lookup_returns_none_when_missing(monkeypatch):
+    def missing(project_id: str):
+        raise FileNotFoundError(project_id)
+
+    monkeypatch.setattr(documentary_ui, "load_clip_plan", missing)
+
+    assert _load_clip_plan_if_available("doc_test") is None
+
+
+def test_documentary_clip_plan_lookup_returns_existing_plan(monkeypatch):
+    expected = object()
+    monkeypatch.setattr(
+        documentary_ui,
+        "load_clip_plan",
+        lambda project_id: expected,
+    )
+
+    assert _load_clip_plan_if_available("doc_test") is expected
