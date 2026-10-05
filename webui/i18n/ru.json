@@ -517,6 +517,15 @@
     "Documentary Clip Selecting": "Выбираю точные фрагменты исходника по таймкодам транскрибации…",
     "Documentary Clip Failed": "Clip Selector не смог выбрать фрагменты: {error}",
     "Documentary Clip Complete": "План клипов создан и применён: {clips} клипов.",
-    "Documentary Story Summary Seconds": "Блоков: {beats} · цель {seconds:.0f} сек"
+    "Documentary Story Summary Seconds": "Блоков: {beats} · цель {seconds:.0f} сек",
+    "Documentary Render": "Рендер мастер-видео",
+    "Documentary Render Current": "Актуальное мастер-видео готово.",
+    "Documentary Render Stale": "Есть старый рендер, но проект после него изменился. Перед использованием нужно отрендерить заново.",
+    "Documentary Render Settings": "1920×1080 · {fps} fps · сцен: {scenes}",
+    "Documentary Render Build": "Собрать мастер-видео",
+    "Documentary Render Again": "Собрать мастер-видео заново",
+    "Documentary Rendering": "Собираю мастер-видео через FFmpeg…",
+    "Documentary Render Failed": "Не удалось собрать мастер-видео: {error}",
+    "Documentary Render Complete": "Мастер-видео создано: {filename}"
   }
 }
