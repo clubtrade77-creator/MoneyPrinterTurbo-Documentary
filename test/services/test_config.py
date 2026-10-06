@@ -88,6 +88,13 @@ class TestConfigPersistence:
             "music_model_id": "music_v2",
             "music_timeout": 600,
         }
+        assert example_config["cartesia"] == {
+            "api_key": "",
+            "model_id": "sonic-3.6",
+            "voice_id": "6ccbfb76-1fc6-48f7-b71d-91ac6298247b",
+            "language": "en",
+            "sample_rate": 44100,
+        }
         assert example_config["whisper"]["device"] == "cpu"
 
     def test_example_config_covers_llm_provider_registry(self):
