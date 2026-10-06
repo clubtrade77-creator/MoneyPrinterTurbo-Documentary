@@ -5,6 +5,7 @@ import pytest
 import webui.documentary as documentary_ui
 from webui.documentary import (
     _default_story_target_seconds,
+    _documentary_voice_options,
     _documentary_voice_preview_text,
     _format_transcript_segment,
     _format_transcript_time,
@@ -221,3 +222,42 @@ def test_documentary_voice_preview_text_uses_project_language():
     assert "documentary" in _documentary_voice_preview_text("en").lower()
     assert "документального" in _documentary_voice_preview_text("ru").lower()
     assert "documental" in _documentary_voice_preview_text("es").lower()
+
+
+
+def test_documentary_voice_options_prefers_cartesia_when_configured(monkeypatch):
+    monkeypatch.setattr(
+        documentary_ui.voice_service,
+        "get_cartesia_api_key",
+        lambda: "cartesia-key",
+    )
+    monkeypatch.setattr(
+        documentary_ui.config,
+        "cartesia",
+        {
+            "voice_id": "voice-123",
+            "model_id": "sonic-3.6",
+        },
+    )
+    monkeypatch.setattr(
+        documentary_ui.config,
+        "app",
+        {"gemini_api_key": ""},
+    )
+    monkeypatch.setattr(
+        documentary_ui.voice_service,
+        "get_minimax_tts_api_key",
+        lambda: "",
+    )
+    monkeypatch.setattr(
+        documentary_ui.voice_service,
+        "get_fish_audio_api_key",
+        lambda: "",
+    )
+
+    options = _documentary_voice_options("en")
+
+    assert options[0] == (
+        "cartesia:voice-123:en",
+        "Cartesia · sonic-3.6",
+    )
