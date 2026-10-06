@@ -2504,3 +2504,140 @@ if __name__ == "__main__":
     # python -m unittest test.services.test_voice.TestVoiceService.test_azure_tts_v1
     # python -m unittest test.services.test_voice.TestVoiceService.test_azure_tts_v2
     unittest.main()
+
+
+
+class TestCartesiaVoice(unittest.TestCase):
+    def test_cartesia_api_key_prefers_config_and_supports_env_fallback(self):
+        with (
+            patch.object(vs.config, "cartesia", {"api_key": "config-key"}),
+            patch.dict(os.environ, {"CARTESIA_API_KEY": "env-key"}),
+        ):
+            self.assertEqual(vs.get_cartesia_api_key(), "config-key")
+
+        with (
+            patch.object(vs.config, "cartesia", {"api_key": ""}),
+            patch.dict(os.environ, {"CARTESIA_API_KEY": " env-key "}),
+        ):
+            self.assertEqual(vs.get_cartesia_api_key(), "env-key")
+
+    def test_cartesia_voice_helpers_and_dispatch(self):
+        with patch.object(
+            vs.config,
+            "cartesia",
+            {"voice_id": "voice-123", "language": "en"},
+        ):
+            self.assertEqual(
+                vs.get_cartesia_voices(),
+                ["cartesia:voice-123:en"],
+            )
+        self.assertTrue(vs.is_cartesia_voice("cartesia:voice-123:en"))
+        self.assertFalse(vs.is_cartesia_voice("elevenlabs:voice-123:Name"))
+
+        sentinel = object()
+        with patch.object(vs, "cartesia_tts", return_value=sentinel) as implementation:
+            result = vs.tts(
+                "test",
+                "cartesia:voice-123:en",
+                1.0,
+                "voice.mp3",
+                1.0,
+            )
+
+        self.assertIs(result, sentinel)
+        implementation.assert_called_once_with(
+            "test",
+            "voice-123",
+            "voice.mp3",
+            voice_rate=1.0,
+            voice_volume=1.0,
+            language="en",
+        )
+
+    def test_cartesia_tts_posts_current_sonic_payload_and_publishes_wav(self):
+        class _Response:
+            status_code = 200
+            text = ""
+
+            def iter_content(self, chunk_size):
+                yield b"RIFF" + b"x" * 100
+
+            def close(self):
+                pass
+
+        class _Clip:
+            duration = 2.75
+
+            def close(self):
+                pass
+
+        captured = {}
+
+        def _post(url, json=None, headers=None, timeout=None, stream=None, allow_redirects=None):
+            captured.update(
+                url=url,
+                json=json,
+                headers=headers,
+                timeout=timeout,
+                stream=stream,
+                allow_redirects=allow_redirects,
+            )
+            return _Response()
+
+        settings = {
+            "api_key": "test-key",
+            "model_id": "sonic-3.6",
+            "voice_id": "voice-123",
+            "language": "en",
+            "sample_rate": 44100,
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(
+            vs.config, "cartesia", settings
+        ), patch.object(
+            vs.requests, "post", side_effect=_post
+        ), patch.object(
+            vs, "AudioFileClip", return_value=_Clip()
+        ):
+            output = Path(tmp_dir) / "cartesia.wav"
+            result = vs.cartesia_tts(
+                "Documentary narration test.",
+                "voice-123",
+                str(output),
+                language="en",
+            )
+            generated = output.read_bytes()
+
+        self.assertIsNotNone(result)
+        self.assertEqual(generated, b"RIFF" + b"x" * 100)
+        self.assertEqual(captured["url"], "https://api.cartesia.ai/tts/bytes")
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer test-key")
+        self.assertEqual(captured["headers"]["Cartesia-Version"], "2026-08-14")
+        self.assertEqual(captured["json"]["model_id"], "sonic-3.6")
+        self.assertEqual(captured["json"]["voice"], "voice-123")
+        self.assertEqual(captured["json"]["language"], "en")
+        self.assertEqual(
+            captured["json"]["output_format"],
+            {
+                "container": "wav",
+                "encoding": "pcm_s16le",
+                "sample_rate": 44100,
+            },
+        )
+        self.assertEqual(captured["timeout"], (10, 120))
+        self.assertTrue(captured["stream"])
+        self.assertFalse(captured["allow_redirects"])
+
+    def test_cartesia_tts_missing_key_stops_before_network(self):
+        with (
+            patch.object(vs.config, "cartesia", {"api_key": ""}),
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(vs.requests, "post") as post,
+        ):
+            result = vs.cartesia_tts(
+                "Hello",
+                "voice-123",
+                "/tmp/cartesia-test.wav",
+            )
+
+        self.assertIsNone(result)
+        post.assert_not_called()
