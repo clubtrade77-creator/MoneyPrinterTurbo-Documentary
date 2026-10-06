@@ -78,6 +78,11 @@ GEMINI_TTS_VOICES = (
 )
 _MINIMAX_TTS_MAX_AUDIO_HEX_CHARS = 100 * 1024 * 1024
 _ELEVENLABS_TTS_MAX_AUDIO_BYTES = 50 * 1024 * 1024
+_CARTESIA_TTS_MAX_AUDIO_BYTES = 50 * 1024 * 1024
+_CARTESIA_API_URL = "https://api.cartesia.ai/tts/bytes"
+_CARTESIA_API_VERSION = "2026-08-14"
+_CARTESIA_DEFAULT_MODEL = "sonic-3.6"
+_CARTESIA_DEFAULT_VOICE = "6ccbfb76-1fc6-48f7-b71d-91ac6298247b"
 _ELEVENLABS_TTS_MAX_ERROR_BYTES = 4096
 VOXCPM_DEFAULT_BASE_URL = "https://api.modelbest.cn/v1"
 VOXCPM_DEFAULT_VOICE = "default"
@@ -434,6 +439,36 @@ def get_elevenlabs_api_key() -> str:
     return configured_key or os.getenv("ELEVENLABS_API_KEY", "").strip()
 
 
+def get_cartesia_api_key() -> str:
+    configured_key = str(
+        config.cartesia.get("api_key", "")
+        if hasattr(config, "cartesia")
+        else ""
+    ).strip()
+    return configured_key or os.getenv("CARTESIA_API_KEY", "").strip()
+
+
+def is_cartesia_voice(voice_name: str | None) -> bool:
+    return (voice_name or "").startswith("cartesia:")
+
+
+def get_cartesia_voices(
+    voice_id: str | None = None,
+    language: str | None = None,
+) -> list[str]:
+    voice_id = str(
+        voice_id
+        or config.cartesia.get("voice_id", _CARTESIA_DEFAULT_VOICE)
+        or _CARTESIA_DEFAULT_VOICE
+    ).strip()
+    language = str(
+        language
+        or config.cartesia.get("language", "en")
+        or "en"
+    ).strip()
+    return [f"cartesia:{voice_id}:{language}"]
+
+
 def is_chatterbox_voice(voice_name: str) -> bool:
     return (voice_name or "").startswith("chatterbox:")
 
@@ -489,6 +524,8 @@ def is_azure_v1_voice(voice_name: str | None) -> bool:
     if is_minimax_voice(name):
         return False
     if is_elevenlabs_voice(name):
+        return False
+    if is_cartesia_voice(name):
         return False
     if is_chatterbox_voice(name):
         return False
@@ -667,6 +704,21 @@ def _single_tts(
         else:
             logger.error(f"Invalid elevenlabs voice name format: {voice_name}")
             return None
+    elif is_cartesia_voice(voice_name):
+        parts = voice_name.split(":")
+        if len(parts) >= 2 and parts[1].strip():
+            voice_id = parts[1].strip()
+            language = parts[2].strip() if len(parts) >= 3 and parts[2].strip() else "en"
+            return cartesia_tts(
+                text,
+                voice_id,
+                voice_file,
+                voice_rate=voice_rate,
+                voice_volume=voice_volume,
+                language=language,
+            )
+        logger.error(f"Invalid Cartesia voice name format: {voice_name}")
+        return None
     elif is_chatterbox_voice(voice_name):
         # 格式: chatterbox:<voice>，voice 可带显示用的 -Female/-Male 后缀
         parts = voice_name.split(":", 1)
@@ -2314,6 +2366,178 @@ def minimax_tts(text: str, voice_id: str, voice_rate: float, voice_file: str, vo
                 # or local file publication failed. Never regenerate it here.
                 return None
     return None
+
+
+def cartesia_tts(
+    text: str,
+    voice_id: str,
+    voice_file: str,
+    voice_rate: float = 1.0,
+    voice_volume: float = 1.0,
+    *,
+    language: str = "en",
+    model_id: str = "",
+) -> Union[SubMaker, None]:
+    text = (text or "").strip()
+    if not text:
+        logger.error("Cartesia TTS text is empty")
+        return None
+
+    api_key = get_cartesia_api_key()
+    if not api_key:
+        logger.error("Cartesia API key is not set")
+        return None
+
+    model_id = str(
+        model_id
+        or config.cartesia.get("model_id", _CARTESIA_DEFAULT_MODEL)
+        or _CARTESIA_DEFAULT_MODEL
+    ).strip()
+    language = str(language or "en").strip() or "en"
+    try:
+        sample_rate = int(config.cartesia.get("sample_rate", 44100) or 44100)
+    except (TypeError, ValueError):
+        sample_rate = 44100
+    if sample_rate not in {8000, 16000, 22050, 24000, 32000, 44100, 48000}:
+        logger.error(f"Unsupported Cartesia sample rate: {sample_rate}")
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Cartesia-Version": _CARTESIA_API_VERSION,
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model_id": model_id,
+        "transcript": text,
+        "voice": voice_id,
+        "output_format": {
+            "container": "wav",
+            "encoding": "pcm_s16le",
+            "sample_rate": sample_rate,
+        },
+        "language": language,
+    }
+
+    ensure_file_path_exists(voice_file)
+    response = None
+    temp_wav = None
+    try:
+        logger.info(
+            f"start Cartesia TTS, model: {model_id}, language: {language}, voice_id: {voice_id}"
+        )
+        response = requests.post(
+            _CARTESIA_API_URL,
+            json=payload,
+            headers=headers,
+            timeout=(10, 120),
+            stream=True,
+            allow_redirects=False,
+        )
+        if 300 <= response.status_code < 400:
+            logger.error("Cartesia TTS returned a redirect; stop paid request")
+            return None
+        if response.status_code != 200:
+            error_bytes = bytearray()
+            try:
+                for chunk in response.iter_content(chunk_size=4096):
+                    error_bytes.extend(
+                        chunk[: 16 * 1024 - len(error_bytes)]
+                    )
+                    if len(error_bytes) >= 16 * 1024:
+                        break
+            except requests.RequestException:
+                pass
+            error_text = error_bytes.decode("utf-8", errors="replace")[:300]
+            logger.error(
+                f"Cartesia TTS failed with status {response.status_code}: {error_text}"
+            )
+            return None
+
+        output_dir = os.path.dirname(os.path.abspath(voice_file)) or "."
+        descriptor, temp_wav = tempfile.mkstemp(
+            prefix=".cartesia-tts-",
+            suffix=".wav",
+            dir=output_dir,
+        )
+        audio_bytes = 0
+        with os.fdopen(descriptor, "wb") as output:
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                audio_bytes += len(chunk)
+                if audio_bytes > _CARTESIA_TTS_MAX_AUDIO_BYTES:
+                    logger.error("Cartesia TTS returned oversized audio")
+                    return None
+                output.write(chunk)
+
+        if audio_bytes <= 44:
+            logger.error("Cartesia TTS returned empty audio")
+            return None
+
+        clip = AudioFileClip(temp_wav)
+        try:
+            duration = float(clip.duration)
+        finally:
+            clip.close()
+        if not math.isfinite(duration) or duration <= 0:
+            logger.error("Cartesia TTS returned invalid audio duration")
+            return None
+
+        if voice_file.lower().endswith(".wav"):
+            os.replace(temp_wav, voice_file)
+            temp_wav = None
+        else:
+            ffmpeg_binary = utils.get_ffmpeg_binary()
+            command = [
+                ffmpeg_binary,
+                "-nostdin",
+                "-v",
+                "error",
+                "-y",
+                "-i",
+                temp_wav,
+                "-codec:a",
+                "libmp3lame",
+                "-q:a",
+                "3",
+            ]
+            if not _publish_tts_ffmpeg_output(
+                command,
+                voice_file,
+                "Cartesia narration encode",
+            ):
+                return None
+
+        logger.success(f"Cartesia TTS succeeded: {voice_file}")
+        return populate_legacy_submaker_with_full_text(
+            ensure_legacy_submaker_fields(SubMaker()),
+            text,
+            duration,
+        )
+    except requests.exceptions.ConnectTimeout as exc:
+        logger.error(f"Cartesia TTS could not connect: {exc}")
+        return None
+    except requests.exceptions.RequestException as exc:
+        logger.error(
+            "Cartesia TTS result is unconfirmed after a transport error; "
+            f"stop paid retry: {type(exc).__name__}"
+        )
+        return None
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        logger.error(f"Cartesia TTS failed: {exc}")
+        return None
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+        if temp_wav:
+            try:
+                os.remove(temp_wav)
+            except FileNotFoundError:
+                pass
 
 
 def elevenlabs_tts(
