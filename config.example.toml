@@ -590,6 +590,17 @@ music_base_url = "https://api.elevenlabs.io"
 music_model_id = "music_v2"
 music_timeout = 600
 
+[cartesia]
+# API key: https://play.cartesia.ai
+# Sonic 3.6 is Cartesia's current public TTS model.
+api_key = ""
+model_id = "sonic-3.6"
+# Default voice used for the first documentary narrator smoke test.
+# Replace this with any Cartesia Voice Library ID later.
+voice_id = "6ccbfb76-1fc6-48f7-b71d-91ac6298247b"
+language = "en"
+sample_rate = 44100
+
 [chatterbox]
 # OpenAI-compatible Chatterbox TTS server. The defaults target
 # travisvn/chatterbox-tts-api running locally on port 4123.
