@@ -177,6 +177,22 @@ def _documentary_voice_options(language: str) -> list[tuple[str, str]]:
     }
     options: list[tuple[str, str]] = []
 
+    if voice_service.get_cartesia_api_key():
+        cartesia_voice_id = str(
+            config.cartesia.get("voice_id", "")
+            or voice_service._CARTESIA_DEFAULT_VOICE
+        ).strip()
+        cartesia_model = str(
+            config.cartesia.get("model_id", "")
+            or voice_service._CARTESIA_DEFAULT_MODEL
+        ).strip()
+        options.append(
+            (
+                f"cartesia:{cartesia_voice_id}:{language}",
+                f"Cartesia · {cartesia_model}",
+            )
+        )
+
     if config.app.get("gemini_api_key", ""):
         options.extend(
             [
