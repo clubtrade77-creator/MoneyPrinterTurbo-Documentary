@@ -186,12 +186,42 @@ def _documentary_voice_options(language: str) -> list[tuple[str, str]]:
             config.cartesia.get("model_id", "")
             or voice_service._CARTESIA_DEFAULT_MODEL
         ).strip()
-        options.append(
-            (
-                f"cartesia:{cartesia_voice_id}:{language}",
-                f"Cartesia · {cartesia_model}",
-            )
+        cartesia_catalog = voice_service.list_cartesia_voices(
+            language=language,
+            limit=100,
         )
+        if cartesia_catalog:
+            ordered_catalog = sorted(
+                cartesia_catalog,
+                key=lambda item: (
+                    str(item.get("id") or "").strip() != cartesia_voice_id,
+                    str(item.get("name") or "").lower(),
+                ),
+            )
+            seen_voice_ids = set()
+            for item in ordered_catalog:
+                voice_id = str(item.get("id") or "").strip()
+                voice_label = str(item.get("name") or "").strip()
+                if not voice_id or not voice_label or voice_id in seen_voice_ids:
+                    continue
+                seen_voice_ids.add(voice_id)
+                gender = str(item.get("gender") or "").strip()
+                label = f"Cartesia · {voice_label}"
+                if gender:
+                    label += f" · {gender}"
+                options.append(
+                    (
+                        f"cartesia:{voice_id}:{language}",
+                        label,
+                    )
+                )
+        else:
+            options.append(
+                (
+                    f"cartesia:{cartesia_voice_id}:{language}",
+                    f"Cartesia · {cartesia_model}",
+                )
+            )
 
     if config.app.get("gemini_api_key", ""):
         options.extend(
