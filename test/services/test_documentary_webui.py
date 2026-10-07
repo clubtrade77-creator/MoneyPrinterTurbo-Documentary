@@ -225,7 +225,7 @@ def test_documentary_voice_preview_text_uses_project_language():
 
 
 
-def test_documentary_voice_options_prefers_cartesia_when_configured(monkeypatch):
+def test_documentary_voice_options_prefers_configured_cartesia_voice(monkeypatch):
     monkeypatch.setattr(
         documentary_ui.voice_service,
         "get_cartesia_api_key",
@@ -238,6 +238,71 @@ def test_documentary_voice_options_prefers_cartesia_when_configured(monkeypatch)
             "voice_id": "voice-123",
             "model_id": "sonic-3.6",
         },
+    )
+    monkeypatch.setattr(
+        documentary_ui.voice_service,
+        "list_cartesia_voices",
+        lambda language, limit: [
+            {
+                "id": "voice-999",
+                "name": "Sergei",
+                "gender": "masculine",
+            },
+            {
+                "id": "voice-123",
+                "name": "Alexei",
+                "gender": "masculine",
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        documentary_ui.config,
+        "app",
+        {"gemini_api_key": ""},
+    )
+    monkeypatch.setattr(
+        documentary_ui.voice_service,
+        "get_minimax_tts_api_key",
+        lambda: "",
+    )
+    monkeypatch.setattr(
+        documentary_ui.voice_service,
+        "get_fish_audio_api_key",
+        lambda: "",
+    )
+
+    options = _documentary_voice_options("ru")
+
+    assert options[:2] == [
+        (
+            "cartesia:voice-123:ru",
+            "Cartesia · Alexei · masculine",
+        ),
+        (
+            "cartesia:voice-999:ru",
+            "Cartesia · Sergei · masculine",
+        ),
+    ]
+
+
+def test_documentary_voice_options_falls_back_to_configured_cartesia_voice(monkeypatch):
+    monkeypatch.setattr(
+        documentary_ui.voice_service,
+        "get_cartesia_api_key",
+        lambda: "cartesia-key",
+    )
+    monkeypatch.setattr(
+        documentary_ui.config,
+        "cartesia",
+        {
+            "voice_id": "voice-123",
+            "model_id": "sonic-3.6",
+        },
+    )
+    monkeypatch.setattr(
+        documentary_ui.voice_service,
+        "list_cartesia_voices",
+        lambda language, limit: [],
     )
     monkeypatch.setattr(
         documentary_ui.config,
