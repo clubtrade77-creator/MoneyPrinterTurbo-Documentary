@@ -80,6 +80,7 @@ _MINIMAX_TTS_MAX_AUDIO_HEX_CHARS = 100 * 1024 * 1024
 _ELEVENLABS_TTS_MAX_AUDIO_BYTES = 50 * 1024 * 1024
 _CARTESIA_TTS_MAX_AUDIO_BYTES = 50 * 1024 * 1024
 _CARTESIA_API_URL = "https://api.cartesia.ai/tts/bytes"
+_CARTESIA_VOICES_URL = "https://api.cartesia.ai/voices"
 _CARTESIA_API_VERSION = "2026-08-14"
 _CARTESIA_DEFAULT_MODEL = "sonic-3.6"
 _CARTESIA_DEFAULT_VOICE = "6ccbfb76-1fc6-48f7-b71d-91ac6298247b"
@@ -467,6 +468,79 @@ def get_cartesia_voices(
         or "en"
     ).strip()
     return [f"cartesia:{voice_id}:{language}"]
+
+
+def list_cartesia_voices(
+    language: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    """Return Cartesia Voice Library entries, optionally filtered by language.
+
+    Voice discovery is best-effort: TTS must remain usable with the configured
+    voice_id even if the catalog endpoint is temporarily unavailable.
+    """
+    api_key = get_cartesia_api_key()
+    if not api_key:
+        return []
+
+    try:
+        normalized_limit = max(1, min(int(limit), 100))
+    except (TypeError, ValueError):
+        normalized_limit = 100
+
+    params = {"limit": normalized_limit}
+    normalized_language = str(language or "").strip().lower()
+    if normalized_language:
+        params["language"] = normalized_language
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Cartesia-Version": _CARTESIA_API_VERSION,
+    }
+
+    try:
+        response = requests.get(
+            _CARTESIA_VOICES_URL,
+            headers=headers,
+            params=params,
+            timeout=10,
+            allow_redirects=False,
+        )
+        if 300 <= response.status_code < 400:
+            logger.warning("Cartesia voices returned a redirect")
+            return []
+        if response.status_code != 200:
+            logger.warning(
+                f"Cartesia voices fetch failed with status {response.status_code}"
+            )
+            return []
+
+        payload = response.json()
+        voices = payload.get("data", []) if isinstance(payload, dict) else payload
+        if not isinstance(voices, list):
+            return []
+
+        result = []
+        for item in voices:
+            if not isinstance(item, dict):
+                continue
+            voice_id = str(item.get("id") or "").strip()
+            name = str(item.get("name") or "").strip()
+            if not voice_id or not name:
+                continue
+            result.append(
+                {
+                    "id": voice_id,
+                    "name": name,
+                    "gender": str(item.get("gender") or "").strip(),
+                    "language": str(item.get("language") or "").strip(),
+                    "description": str(item.get("description") or "").strip(),
+                }
+            )
+        return result
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        logger.warning(f"Cartesia voices fetch failed: {str(exc)}")
+        return []
 
 
 def is_chatterbox_voice(voice_name: str) -> bool:
