@@ -254,13 +254,13 @@ def test_source_hunter_understands_short_youtube_age_labels():
                 [
                     _renderer(
                         "abcdefghijk",
-                        "Bodycam footage released after K9 shooting",
+                        "Portland bodycam footage released after K9 shooting",
                         "Local News",
                         "2w ago",
                     ),
                     _renderer(
                         "lmnopqrstuv",
-                        "Bodycam footage released after K9 shooting update",
+                        "Portland bodycam footage released after K9 shooting update",
                         "Local News",
                         "9d ago",
                     ),
@@ -419,6 +419,78 @@ def test_source_hunter_filters_irrelevant_web_results():
 
     assert len(results) == 1
     assert results[0].domain == "agency.gov"
+
+
+def test_source_hunter_aggregates_providers_and_prefers_official_result():
+    ddg_html = """
+    <html><body>
+      <div class="result">
+        <a class="result__a" href="https://localnews.example/portland-k9">
+          Portland K9 shooting bodycam footage released
+        </a>
+        <a class="result__snippet">
+          News report with bodycam footage from the Portland shooting.
+        </a>
+      </div>
+    </body></html>
+    """
+    bing_rss = """<?xml version="1.0"?>
+    <rss><channel>
+      <item>
+        <title>Portland Police Bureau releases bodycam video in K9 shooting</title>
+        <link>https://www.portland.gov/police/news/k9-shooting-video</link>
+        <description>Official police page with released body camera footage.</description>
+      </item>
+    </channel></rss>
+    """
+    session = _SequenceSession(
+        [
+            _Response(ddg_html, status_code=200),
+            _Response(bing_rss, status_code=200),
+        ]
+    )
+
+    results = find_web_sources(
+        "Bodycam footage shows Portland police shooting that left suspect, K9 officer dead",
+        session=session,
+    )
+
+    assert len(results) == 2
+    assert results[0].domain == "portland.gov"
+    assert results[0].official_score == 35
+    assert results[0].score > results[1].score
+
+
+def test_source_hunter_web_rejects_wrong_city_same_event_words():
+    ddg_html = """
+    <html><body>
+      <div class="result">
+        <a class="result__a" href="https://news.example/riverside-k9">
+          Riverside K9 shooting bodycam footage released
+        </a>
+        <a class="result__snippet">
+          Bodycam footage of a Riverside deputy shooting.
+        </a>
+      </div>
+    </body></html>
+    """
+    empty_rss = """<?xml version="1.0"?><rss><channel></channel></rss>"""
+    session = _SequenceSession(
+        [
+            _Response(ddg_html, status_code=200),
+            _Response(empty_rss, status_code=200),
+        ]
+    )
+
+    try:
+        find_web_sources(
+            "Bodycam footage shows Portland police shooting that left suspect, K9 officer dead",
+            session=session,
+        )
+    except Exception as exc:
+        assert "web source search failed" in str(exc)
+    else:
+        raise AssertionError("wrong-city web result should have been rejected")
 
 
 def test_source_hunter_web_search_falls_back_to_bing():
