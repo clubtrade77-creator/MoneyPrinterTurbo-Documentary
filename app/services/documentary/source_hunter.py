@@ -21,6 +21,7 @@ from app.services.documentary.youtube_source import build_youtube_source_asset
 
 _YOUTUBE_SEARCH_URL = "https://www.youtube.com/results"
 _DUCKDUCKGO_SEARCH_URL = "https://html.duckduckgo.com/html/"
+_BING_SEARCH_URL = "https://www.bing.com/search"
 _REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -138,6 +139,69 @@ class _DuckDuckGoParser(HTMLParser):
             if self._current.get("title") and self._current.get("url"):
                 self.results.append(self._current)
             self._current = None
+
+
+class _BingParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.results = []
+        self._inside_result = False
+        self._inside_h2 = False
+        self._capture = None
+        self._current = None
+        self._depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        classes = set((attrs.get("class") or "").split())
+
+        if tag == "li" and "b_algo" in classes:
+            self._inside_result = True
+            self._depth = 1
+            self._current = {"title": "", "url": "", "snippet": ""}
+            return
+
+        if not self._inside_result:
+            return
+
+        if tag == "li":
+            self._depth += 1
+        elif tag == "h2":
+            self._inside_h2 = True
+        elif tag == "a" and self._inside_h2 and self._current is not None:
+            self._current["url"] = attrs.get("href") or ""
+            self._capture = "title"
+        elif tag == "p" and self._current is not None:
+            self._capture = "snippet"
+
+    def handle_data(self, data):
+        if self._inside_result and self._current is not None and self._capture:
+            self._current[self._capture] += data
+
+    def handle_endtag(self, tag):
+        if not self._inside_result:
+            return
+
+        if tag == "a" and self._capture == "title":
+            self._capture = None
+        elif tag == "p" and self._capture == "snippet":
+            self._capture = None
+        elif tag == "h2":
+            self._inside_h2 = False
+        elif tag == "li":
+            self._depth -= 1
+            if self._depth <= 0:
+                if (
+                    self._current is not None
+                    and self._current.get("title")
+                    and self._current.get("url")
+                ):
+                    self.results.append(self._current)
+                self._inside_result = False
+                self._current = None
+                self._capture = None
+                self._inside_h2 = False
+                self._depth = 0
 
 
 def _normalize_search_result_url(value: str) -> str:
@@ -408,45 +472,16 @@ def _build_search_query(story_title: str) -> str:
     return " ".join(selected) + ' bodycam footage'
 
 
-def find_web_sources(
+def _web_candidates_from_items(
     story_title: str,
+    items: list[dict],
     *,
-    limit: int = 8,
-    timeout_seconds: float = 20.0,
-    session=None,
+    limit: int,
 ) -> list[SourceWebCandidate]:
-    """Find likely original/official web sources beyond YouTube."""
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("source hunter web limit must be an integer") from exc
-    if not 1 <= limit <= 20:
-        raise ValueError("source hunter web limit must be between 1 and 20")
-
-    query = _build_web_search_query(story_title)
-    request = session or requests
-    try:
-        response = request.get(
-            _DUCKDUCKGO_SEARCH_URL,
-            params={"q": query},
-            headers=_REQUEST_HEADERS,
-            timeout=timeout_seconds,
-            allow_redirects=True,
-        )
-    except requests.RequestException as exc:
-        raise SourceHunterError("web source search request failed") from exc
-
-    if response.status_code != 200:
-        raise SourceHunterError(
-            f"web source search returned HTTP {response.status_code}"
-        )
-
-    parser = _DuckDuckGoParser()
-    parser.feed(response.text)
-
     candidates = []
     seen_urls = set()
-    for item in parser.results:
+
+    for item in items:
         url = _normalize_search_result_url(item.get("url") or "")
         if not url or url in seen_urls:
             continue
@@ -497,10 +532,87 @@ def find_web_sources(
         ),
         reverse=True,
     )
-    logger.info(
-        f"Documentary Source Hunter found {len(candidates)} web candidates"
-    )
     return candidates[:limit]
+
+
+def find_web_sources(
+    story_title: str,
+    *,
+    limit: int = 8,
+    timeout_seconds: float = 20.0,
+    session=None,
+) -> list[SourceWebCandidate]:
+    """Find likely original/official web sources with a search-provider fallback."""
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("source hunter web limit must be an integer") from exc
+    if not 1 <= limit <= 20:
+        raise ValueError("source hunter web limit must be between 1 and 20")
+
+    query = _build_web_search_query(story_title)
+    request = session or requests
+    errors = []
+
+    try:
+        response = request.get(
+            _DUCKDUCKGO_SEARCH_URL,
+            params={"q": query},
+            headers=_REQUEST_HEADERS,
+            timeout=timeout_seconds,
+            allow_redirects=True,
+        )
+        if response.status_code == 200:
+            parser = _DuckDuckGoParser()
+            parser.feed(response.text)
+            candidates = _web_candidates_from_items(
+                story_title,
+                parser.results,
+                limit=limit,
+            )
+            if candidates:
+                logger.info(
+                    f"Documentary Source Hunter found {len(candidates)} "
+                    "web candidates via DuckDuckGo"
+                )
+                return candidates
+            errors.append("DuckDuckGo returned no usable results")
+        else:
+            errors.append(f"DuckDuckGo returned HTTP {response.status_code}")
+    except requests.RequestException as exc:
+        errors.append(f"DuckDuckGo request failed: {exc}")
+
+    try:
+        response = request.get(
+            _BING_SEARCH_URL,
+            params={"q": query, "setlang": "en-US"},
+            headers=_REQUEST_HEADERS,
+            timeout=timeout_seconds,
+            allow_redirects=True,
+        )
+        if response.status_code == 200:
+            parser = _BingParser()
+            parser.feed(response.text)
+            candidates = _web_candidates_from_items(
+                story_title,
+                parser.results,
+                limit=limit,
+            )
+            if candidates:
+                logger.info(
+                    f"Documentary Source Hunter found {len(candidates)} "
+                    "web candidates via Bing fallback"
+                )
+                return candidates
+            errors.append("Bing returned no usable results")
+        else:
+            errors.append(f"Bing returned HTTP {response.status_code}")
+    except requests.RequestException as exc:
+        errors.append(f"Bing request failed: {exc}")
+
+    raise SourceHunterError(
+        "web source search failed: " + "; ".join(errors)
+    )
 
 
 def find_source_videos(
