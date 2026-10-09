@@ -1522,8 +1522,6 @@ dependencies = [
     { name = "streamlit" },
     { name = "streamlit-tour" },
     { name = "uvicorn" },
-    { name = "yt-dlp" },
-    { name = "yt-dlp-ejs" },
 ]
 
 [package.optional-dependencies]
@@ -1562,8 +1560,6 @@ requires-dist = [
     { name = "streamlit-tour", specifier = "==1.1.0" },
     { name = "twelvelabs", marker = "extra == 'twelvelabs'", specifier = ">=1.2.8" },
     { name = "uvicorn", specifier = "==0.32.1" },
-    { name = "yt-dlp", specifier = "==2026.8.19" },
-    { name = "yt-dlp-ejs", specifier = "==0.8.0" },
 ]
 provides-extras = ["twelvelabs"]
 
@@ -3312,16 +3308,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/69/68/c8739671f5699c7dc470580a4f821ef37c32c4cb0b047ce223a7f115757f/yarl-1.23.0-py3-none-any.whl", hash = "sha256:a2df6afe50dea8ae15fa34c9f824a3ee958d785fd5d089063d960bae1daa0a3f", size = 48288 },
 ]
 
-
-[[package]]
-name = "yt-dlp"
-version = "2026.8.19"
-source = { registry = "https://pypi.org/simple" }
-
-[[package]]
-name = "yt-dlp-ejs"
-version = "0.8.0"
-source = { registry = "https://pypi.org/simple" }
 
 [[package]]
 name = "zipp"
