@@ -23,11 +23,15 @@ _GOOGLE_NEWS_RSS_API = "https://news.google.com/rss/search"
 _DEFAULT_DISCOVERY_QUERY = (
     '("bodycam" OR "body camera" OR CCTV OR "surveillance video" OR dashcam '
     'OR "caught on camera" OR "police released video" OR "court footage" '
-    'OR "security camera" OR "video shows")'
+    'OR "security camera" OR "doorbell camera" OR "cell phone video" '
+    'OR "cellphone video" OR livestream OR "archive footage" '
+    'OR "official video" OR "interview footage" OR "video shows")'
 )
 _GOOGLE_VISUAL_QUERY = (
     '"bodycam" OR CCTV OR dashcam OR "caught on camera" OR '
-    '"surveillance video" OR "video shows" OR footage'
+    '"surveillance video" OR "doorbell camera" OR "cell phone video" OR '
+    '"cellphone video" OR livestream OR "archive footage" OR "official video" '
+    'OR "interview footage" OR "video shows" OR footage'
 )
 _FOOTAGE_TERMS = (
     "bodycam",
@@ -40,6 +44,13 @@ _FOOTAGE_TERMS = (
     "footage",
     "video",
     "camera",
+    "doorbell camera",
+    "cell phone video",
+    "cellphone video",
+    "livestream",
+    "archive footage",
+    "official video",
+    "interview footage",
 )
 _FOOTAGE_PUBLISHED_PATTERNS = (
     "video shows",
@@ -62,6 +73,15 @@ _FOOTAGE_PUBLISHED_PATTERNS = (
     "surveillance video shows",
     "cctv shows",
     "cctv footage shows",
+    "security camera shows",
+    "doorbell camera shows",
+    "doorbell video shows",
+    "cell phone video shows",
+    "cellphone video shows",
+    "livestream shows",
+    "archive footage shows",
+    "official video shows",
+    "interview footage",
 )
 _FOOTAGE_NOT_AVAILABLE_PATTERNS = (
     "calls for footage",
