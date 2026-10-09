@@ -18,6 +18,7 @@ from app.services.documentary.clip_selector import (
     select_clips,
 )
 from app.services.documentary.project import (
+    add_source,
     attach_local_video,
     create_project,
     list_projects,
@@ -28,6 +29,11 @@ from app.services.documentary.project import (
 from app.services.documentary.narration import (
     NarrationWriterError,
     write_narration,
+)
+from app.services.documentary.story_discovery import (
+    StoryDiscoveryError,
+    candidate_to_source,
+    discover_stories,
 )
 from app.services.documentary.story_planner import (
     StoryPlannerError,
@@ -308,6 +314,133 @@ def _write_uploaded_video_to_temp(uploaded_file) -> Path:
     except Exception:
         temp_path.unlink(missing_ok=True)
         raise
+
+
+def _render_story_discovery(tr: Tr) -> None:
+    with st.expander(tr("Documentary Story Discovery"), expanded=True):
+        st.caption(tr("Documentary Story Discovery Description"))
+
+        cols = st.columns([2, 1, 1])
+        query = cols[0].text_input(
+            tr("Documentary Story Discovery Topic"),
+            placeholder=tr("Documentary Story Discovery Topic Placeholder"),
+            key="documentary_story_discovery_topic",
+        )
+        lookback_hours = cols[1].selectbox(
+            tr("Documentary Story Discovery Window"),
+            options=(24, 72, 168),
+            index=1,
+            format_func=lambda hours: {
+                24: tr("Documentary Story Discovery 24h"),
+                72: tr("Documentary Story Discovery 72h"),
+                168: tr("Documentary Story Discovery 7d"),
+            }[hours],
+            key="documentary_story_discovery_window",
+        )
+        project_language = cols[2].selectbox(
+            tr("Documentary Story Discovery Project Language"),
+            options=("ru", "en", "es"),
+            index=0,
+            format_func=lambda code: {
+                "ru": "Русский",
+                "en": "English",
+                "es": "Español",
+            }[code],
+            key="documentary_story_discovery_language",
+        )
+
+        if st.button(
+            tr("Documentary Story Discovery Search"),
+            type="primary",
+            width="stretch",
+            key="documentary_story_discovery_search",
+        ):
+            try:
+                with st.spinner(tr("Documentary Story Discovery Searching")):
+                    candidates = discover_stories(
+                        query,
+                        lookback_hours=lookback_hours,
+                        limit=12,
+                    )
+            except (OSError, ValueError, StoryDiscoveryError) as exc:
+                st.error(
+                    tr("Documentary Story Discovery Failed").format(error=str(exc))
+                )
+            else:
+                st.session_state["documentary_story_candidates"] = candidates
+
+        candidates = st.session_state.get("documentary_story_candidates", [])
+        if not candidates:
+            return
+
+        st.markdown(
+            f"**{tr('Documentary Story Discovery Results').format(count=len(candidates))}**"
+        )
+        for index, candidate in enumerate(candidates, start=1):
+            with st.container(border=True):
+                st.markdown(f"### {index}. {candidate.title}")
+                metadata = " · ".join(
+                    item
+                    for item in (
+                        candidate.publisher,
+                        candidate.source_country,
+                        candidate.language,
+                        candidate.published_at,
+                    )
+                    if item
+                )
+                if metadata:
+                    st.caption(metadata)
+
+                score_cols = st.columns(4)
+                score_cols[0].metric(
+                    tr("Documentary Story Discovery Score"),
+                    f"{candidate.score}/100",
+                )
+                score_cols[1].metric(
+                    tr("Documentary Story Discovery Footage"),
+                    candidate.footage_score,
+                )
+                score_cols[2].metric(
+                    tr("Documentary Story Discovery Freshness"),
+                    candidate.freshness_score,
+                )
+                score_cols[3].metric(
+                    tr("Documentary Story Discovery Story"),
+                    candidate.story_score,
+                )
+
+                if candidate.reasons:
+                    st.caption(" · ".join(candidate.reasons))
+
+                actions = st.columns([1, 1])
+                actions[0].link_button(
+                    tr("Documentary Story Discovery Open Source"),
+                    candidate.url,
+                    width="stretch",
+                )
+                if actions[1].button(
+                    tr("Documentary Story Discovery Create Project"),
+                    type="primary",
+                    width="stretch",
+                    key=f"documentary_story_discovery_create_{candidate.id}",
+                ):
+                    try:
+                        project = create_project(
+                            candidate.title,
+                            master_language=project_language,
+                        )
+                        add_source(project.id, candidate_to_source(candidate))
+                    except (OSError, ValueError) as exc:
+                        st.error(
+                            tr("Documentary Story Discovery Create Failed").format(
+                                error=str(exc)
+                            )
+                        )
+                    else:
+                        st.session_state["documentary_project_id"] = project.id
+                        st.success(tr("Documentary Story Discovery Project Created"))
+                        st.rerun()
 
 
 def _render_create_project(tr: Tr) -> None:
@@ -1015,6 +1148,7 @@ def render_documentary_application(tr: Tr) -> None:
     st.header(tr("Documentary Mode"))
     st.caption(tr("Documentary Mode Description"))
 
+    _render_story_discovery(tr)
     _render_create_project(tr)
 
     projects = list_projects()
