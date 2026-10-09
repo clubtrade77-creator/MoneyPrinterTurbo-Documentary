@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ipaddress
 import os
-import re
 import tempfile
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -14,17 +13,11 @@ from app.services.documentary.project import (
     attach_local_copy_to_source,
     load_project,
 )
-from app.utils import utils
 
 _MAX_ACQUISITION_BYTES = 1024 * 1024 * 1024
 _COPY_CHUNK_BYTES = 1024 * 1024
 _MAX_REDIRECTS = 3
 _DIRECT_VIDEO_EXTENSIONS = {".mp4", ".mov"}
-_YOUTUBE_FORMAT = (
-    "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/"
-    "b[ext=mp4][height<=1080]/"
-    "bv*[height<=1080]+ba/b[height<=1080]"
-)
 _REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -269,20 +262,12 @@ def acquire_source(
 
     with tempfile.TemporaryDirectory(prefix="documentary-source-") as temp_dir_value:
         temp_dir = Path(temp_dir_value)
-        if source.source_type == SourceType.youtube:
-            downloaded_path = _download_youtube_video(
-                source,
-                temp_dir,
-                timeout_seconds=timeout_seconds,
-                ydl_factory=ydl_factory,
-            )
-        else:
-            downloaded_path = _download_direct_video(
-                source.source_url,
-                temp_dir,
-                timeout_seconds=timeout_seconds,
-                session=session,
-            )
+        downloaded_path = _download_direct_video(
+            source.source_url,
+            temp_dir,
+            timeout_seconds=timeout_seconds,
+            session=session,
+        )
 
         return attach_local_copy_to_source(
             project_id,
