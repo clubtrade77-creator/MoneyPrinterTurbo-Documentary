@@ -123,6 +123,60 @@ def test_discover_stories_deduplicates_urls_and_titles():
     assert len(results) == 1
 
 
+def test_discover_stories_deduplicates_editorial_prefix_variants():
+    session = _Session(
+        _Response(
+            {
+                "articles": [
+                    {
+                        "url": "https://example.com/a",
+                        "title": "VIDEO: PPB releases body camera footage, officer names in shooting that struck homicide suspect, K9",
+                        "seendate": "20261009T060000Z",
+                    },
+                    {
+                        "url": "https://example.net/b",
+                        "title": "PPB releases body camera footage, officer names in shooting that struck homicide suspect, K9",
+                        "seendate": "20261009T055900Z",
+                    },
+                ]
+            }
+        )
+    )
+
+    results = discover_stories(
+        limit=10,
+        session=session,
+        now=datetime(2026, 10, 9, 7, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(results) == 1
+
+
+def test_discover_stories_scores_high_stakes_story_terms():
+    session = _Session(
+        _Response(
+            {
+                "articles": [
+                    {
+                        "url": "https://example.com/bodycam-story",
+                        "title": "Body camera footage released after shooting of homicide suspect and K9",
+                        "seendate": "20261009T060000Z",
+                    }
+                ]
+            }
+        )
+    )
+
+    result = discover_stories(
+        limit=10,
+        session=session,
+        now=datetime(2026, 10, 9, 7, 0, tzinfo=timezone.utc),
+    )[0]
+
+    assert result.story_score >= 25
+    assert result.score >= 90
+
+
 def test_discover_stories_uses_literal_user_topic():
     query = _build_query('airport "incident"')
 
