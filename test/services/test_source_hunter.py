@@ -170,6 +170,37 @@ def test_source_hunter_queries_match_court_story_type():
     assert "court official" in web_query.lower()
 
 
+def test_source_hunter_keeps_geographic_acronym_as_event_anchor():
+    session = _Session(
+        _Response(
+            _youtube_html(
+                [
+                    _renderer(
+                        "abcdefghijk",
+                        "Bodycam footage shows aftermath of agent shooting in Los Angeles",
+                        "Local News",
+                        "2 hours ago",
+                    ),
+                    _renderer(
+                        "lmnopqrstuv",
+                        "Bodycam footage shows aftermath of agent shooting in NYC",
+                        "Local News",
+                        "2 hours ago",
+                    ),
+                ]
+            )
+        )
+    )
+
+    results = find_source_videos(
+        "Bodycam footage shows aftermath of ICE agent shooting in NYC",
+        session=session,
+    )
+
+    assert len(results) == 1
+    assert results[0].video_id == "lmnopqrstuv"
+
+
 def test_source_hunter_does_not_require_short_agency_acronym_anchor():
     session = _Session(
         _Response(
