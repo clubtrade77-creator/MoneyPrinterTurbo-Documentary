@@ -152,6 +152,44 @@ def test_discover_stories_deduplicates_editorial_prefix_variants():
     assert len(results) == 1
 
 
+def test_discover_stories_clusters_different_headlines_for_same_event():
+    session = _Session(
+        _Response(
+            {
+                "articles": [
+                    {
+                        "url": "https://koin.example/story",
+                        "title": "VIDEO: PPB releases body camera footage, officer names in shooting that struck homicide suspect, K9",
+                        "seendate": "20261008T221441Z",
+                        "domain": "KOIN.com",
+                    },
+                    {
+                        "url": "https://kgw.example/story",
+                        "title": "Bodycam footage captures deadly police shooting of Gresham homicide suspect, Portland police K9",
+                        "seendate": "20261008T215900Z",
+                        "domain": "KGW",
+                    },
+                    {
+                        "url": "https://katu.example/story",
+                        "title": "WATCH: Bodycam footage shows Portland police shooting that left suspect, K-9 officer dead",
+                        "seendate": "20261009T012856Z",
+                        "domain": "KATU",
+                    },
+                ]
+            }
+        )
+    )
+
+    results = discover_stories(
+        limit=10,
+        session=session,
+        now=datetime(2026, 10, 9, 7, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(results) == 1
+    assert results[0].story_score == 30
+
+
 def test_discover_stories_scores_high_stakes_story_terms():
     session = _Session(
         _Response(
