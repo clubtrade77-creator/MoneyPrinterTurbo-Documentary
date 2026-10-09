@@ -1115,6 +1115,41 @@ def find_source_videos(
     return candidates[:limit]
 
 
+def embedded_media_to_source(
+    candidate: EmbeddedMediaCandidate,
+    *,
+    title: str = "",
+) -> SourceAsset:
+    """Convert media embedded on an official page into a traceable source asset."""
+    rights_note = (
+        "Media discovered on an official source page. Verify reuse/publication "
+        "rights separately before using the media in a published documentary."
+    )
+
+    if candidate.platform == "youtube":
+        return build_youtube_source_asset(
+            candidate.url,
+            title=(title or candidate.label).strip(),
+            rights_status=RightsStatus.unknown_review_required,
+            rights_note=rights_note,
+        )
+
+    source_id = (
+        "media_"
+        + hashlib.sha256(candidate.url.encode("utf-8")).hexdigest()[:16]
+    )
+    return SourceAsset(
+        id=source_id,
+        source_type=SourceType.news,
+        provenance=ProvenanceType.official_public_source,
+        title=(title or candidate.label).strip(),
+        source_url=candidate.url,
+        publisher=(urlparse(candidate.source_page_url).hostname or ""),
+        rights_status=RightsStatus.unknown_review_required,
+        rights_note=rights_note,
+    )
+
+
 def candidate_to_web_source(candidate: SourceWebCandidate) -> SourceAsset:
     """Create a traceable web source without assuming publication rights."""
     source_id = (
