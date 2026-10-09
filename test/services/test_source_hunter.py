@@ -672,6 +672,39 @@ def test_source_hunter_extracts_embedded_media_from_official_page():
     assert results[1].url == "https://agency.gov/media/bodycam.mp4"
 
 
+def test_source_hunter_extracts_youtube_nocookie_embed():
+    html = """
+    <html><body>
+      <iframe
+        title="Official video"
+        src="https://www.youtube-nocookie.com/embed/abcdefghijk">
+      </iframe>
+    </body></html>
+    """
+
+    results = find_embedded_media(
+        "https://agency.gov.uk/bodycam-release",
+        session=_Session(_Response(html)),
+    )
+
+    assert len(results) == 1
+    assert results[0].platform == "youtube"
+    assert results[0].url == "https://www.youtube.com/watch?v=abcdefghijk"
+
+
+def test_source_hunter_accepts_international_government_page():
+    html = '<video><source src="/media/cctv.mp4"></video>'
+
+    results = find_embedded_media(
+        "https://agency.gov.in/release",
+        session=_Session(_Response(html)),
+    )
+
+    assert len(results) == 1
+    assert results[0].platform == "direct_video"
+    assert results[0].url == "https://agency.gov.in/media/cctv.mp4"
+
+
 def test_source_hunter_embedded_media_rejects_non_gov_page():
     session = _Session(_Response("<html></html>"))
 
@@ -681,7 +714,7 @@ def test_source_hunter_embedded_media_rejects_non_gov_page():
             session=session,
         )
     except SourceHunterError as exc:
-        assert "restricted to official .gov pages" in str(exc)
+        assert "restricted to recognized government domains" in str(exc)
     else:
         raise AssertionError("non-.gov page should not be fetched")
 
