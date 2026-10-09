@@ -64,12 +64,15 @@ def test_synthesis_persists_voice_and_reuses_current_audio(tmp_path, monkeypatch
         "en-US-TestVoice",
         root=tmp_path,
     )
+    revision_after_first = load_project(project.id, tmp_path).revision
     second = narration_synthesis.synthesize_narration(
         project.id,
         "en-US-TestVoice",
         root=tmp_path,
     )
+    revision_after_second = load_project(project.id, tmp_path).revision
 
+    assert revision_after_second == revision_after_first
     assert len(first.generated) == 1
     assert len(second.generated) == 0
     assert len(second.reused) == 1
