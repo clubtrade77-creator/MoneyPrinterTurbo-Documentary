@@ -806,7 +806,12 @@ def find_source_videos(
 
         story_strong = story_tokens & _STRONG_EVENT_TERMS
         candidate_strong = candidate_tokens & _STRONG_EVENT_TERMS
-        if len(story_strong) >= 2 and len(story_strong & candidate_strong) < 2:
+        strong_overlap = len(story_strong & candidate_strong)
+        required_strong_overlap = 1 if source_quality > 0 else 2
+        if (
+            len(story_strong) >= required_strong_overlap
+            and strong_overlap < required_strong_overlap
+        ):
             continue
 
         # When the story contains a concrete place/entity anchor (for example
