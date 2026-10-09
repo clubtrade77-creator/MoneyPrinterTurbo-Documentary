@@ -474,7 +474,7 @@ def _render_story_discovery(tr: Tr) -> None:
                         if source_meta:
                             st.caption(source_meta)
 
-                        source_scores = st.columns(4)
+                        source_scores = st.columns(5)
                         source_scores[0].metric(
                             tr("Documentary Source Hunter Score"),
                             f"{source_candidate.score}/100",
@@ -484,10 +484,14 @@ def _render_story_discovery(tr: Tr) -> None:
                             source_candidate.title_overlap_score,
                         )
                         source_scores[2].metric(
+                            tr("Documentary Source Hunter Freshness"),
+                            source_candidate.freshness_score,
+                        )
+                        source_scores[3].metric(
                             tr("Documentary Source Hunter Official"),
                             source_candidate.source_quality_score,
                         )
-                        source_scores[3].metric(
+                        source_scores[4].metric(
                             tr("Documentary Source Hunter Video Signal"),
                             source_candidate.video_signal_score,
                         )
