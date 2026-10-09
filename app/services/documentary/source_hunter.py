@@ -130,6 +130,7 @@ _GENERIC_MATCH_TERMS = {
 _STRONG_EVENT_TERMS = {
     "k9", "shooting", "homicide", "murder", "dead", "fatal", "chase", "rescue",
     "crash", "arrest", "standoff", "kidnapping", "hostage", "explosion", "attack",
+    "trial", "court", "fire", "flood", "escape", "missing", "robbery", "collapse",
 }
 _AGENCY_ACRONYMS = {
     "PPB", "NYPD", "LAPD", "LASD", "ICE", "FBI", "DEA", "ATF", "CBP",
