@@ -364,24 +364,15 @@ def _dedupe_and_rank(
     limit: int,
     now: datetime,
 ) -> list[StoryCandidate]:
-    candidates: list[StoryCandidate] = []
-    seen_urls: set[str] = set()
-    seen_titles: list[str] = []
+    scored: list[StoryCandidate] = []
+    seen_exact_urls: set[str] = set()
 
     for article in raw_items:
         if not isinstance(article, dict):
             continue
         url = _safe_http_url(str(article.get("url") or ""))
         title = re.sub(r"\s+", " ", str(article.get("title") or "").strip())
-        if not url or not title:
-            continue
-
-        title_key = _story_title_key(title)
-        if url in seen_urls or any(
-            _near_duplicate_title(title, seen_title)
-            or _same_event_title(title, seen_title)
-            for seen_title in seen_titles
-        ):
+        if not url or not title or url in seen_exact_urls:
             continue
 
         published_at = _canonical_published_at(
@@ -395,7 +386,7 @@ def _dedupe_and_rank(
             reasons,
         ) = _score_text(title, published_at=published_at, now=now)
 
-        candidates.append(
+        scored.append(
             StoryCandidate(
                 id=_candidate_id(url),
                 title=title,
@@ -405,7 +396,11 @@ def _dedupe_and_rank(
                 ).strip(),
                 published_at=published_at,
                 language=str(article.get("language") or "").strip(),
-                source_country=str(article.get("source_country") or article.get("sourcecountry") or "").strip(),
+                source_country=str(
+                    article.get("source_country")
+                    or article.get("sourcecountry")
+                    or ""
+                ).strip(),
                 image_url=_safe_http_url(
                     str(article.get("image_url") or article.get("socialimage") or "")
                 ),
@@ -417,20 +412,36 @@ def _dedupe_and_rank(
                 reasons=reasons,
             )
         )
-        seen_urls.add(url)
-        if title_key:
-            seen_titles.append(title)
+        seen_exact_urls.add(url)
 
-    candidates.sort(
+    # Rank first, then cluster. This preserves the strongest headline/source as the
+    # representative when several providers report the same underlying event.
+    scored.sort(
         key=lambda item: (
             item.score,
             item.freshness_score,
             item.footage_score,
+            item.story_score,
             item.title.lower(),
         ),
         reverse=True,
     )
-    return candidates[:limit]
+
+    selected: list[StoryCandidate] = []
+    selected_titles: list[str] = []
+    for candidate in scored:
+        if any(
+            _near_duplicate_title(candidate.title, selected_title)
+            or _same_event_title(candidate.title, selected_title)
+            for selected_title in selected_titles
+        ):
+            continue
+        selected.append(candidate)
+        selected_titles.append(candidate.title)
+        if len(selected) >= limit:
+            break
+
+    return selected
 
 
 def _discover_gdelt(
@@ -542,8 +553,8 @@ def discover_stories(
 ) -> list[StoryCandidate]:
     """Find recent documentary story candidates with a resilient provider fallback.
 
-    GDELT is attempted first. If it rate-limits, fails, or returns no usable leads,
-    Google News RSS is used automatically. Discovery only finds research leads; it does
+    GDELT and Google News are both queried, then candidates are ranked and clustered
+    across providers. Discovery only finds research leads; it does
     not grant publication rights and does not download third-party media.
     """
     try:
@@ -564,58 +575,56 @@ def discover_stories(
     discovery_query = _build_query(query)
     request = session or requests
     current_time = now or datetime.now(timezone.utc)
+    provider_timeout = min(float(timeout_seconds), 10.0)
     provider_errors: list[str] = []
+    raw_items: list[dict] = []
 
     try:
         gdelt_articles = _discover_gdelt(
             discovery_query,
             lookback_hours=lookback_hours,
             limit=limit,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=provider_timeout,
             request=request,
         )
-        candidates = _dedupe_and_rank(
-            gdelt_articles,
-            discovery_query=discovery_query,
-            limit=limit,
-            now=current_time,
-        )
-        if candidates:
-            logger.info(
-                f"Documentary Story Discovery found {len(candidates)} candidates via GDELT"
-            )
-            return candidates
-        provider_errors.append("GDELT returned no usable candidates")
+        if gdelt_articles:
+            raw_items.extend(gdelt_articles)
+        else:
+            provider_errors.append("GDELT returned no usable candidates")
     except (requests.RequestException, StoryDiscoveryError) as exc:
         provider_errors.append(str(exc))
-        logger.warning(f"Documentary Story Discovery GDELT fallback trigger: {exc}")
+        logger.warning(f"Documentary Story Discovery GDELT failed: {exc}")
 
     try:
-        google_query, google_articles = _discover_google_news(
+        _, google_articles = _discover_google_news(
             query,
             lookback_hours=lookback_hours,
             limit=limit,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=provider_timeout,
             request=request,
         )
-        candidates = _dedupe_and_rank(
-            google_articles,
-            discovery_query=google_query,
-            limit=limit,
-            now=current_time,
-        )
-        if candidates:
-            logger.info(
-                "Documentary Story Discovery found "
-                f"{len(candidates)} candidates via Google News fallback"
-            )
-            return candidates
-        provider_errors.append("Google News fallback returned no usable candidates")
+        if google_articles:
+            raw_items.extend(google_articles)
+        else:
+            provider_errors.append("Google News returned no usable candidates")
     except (requests.RequestException, StoryDiscoveryError) as exc:
         provider_errors.append(str(exc))
-        logger.warning(f"Documentary Story Discovery Google News fallback failed: {exc}")
+        logger.warning(f"Documentary Story Discovery Google News failed: {exc}")
 
-    detail = "; ".join(provider_errors) or "no discovery providers were available"
+    candidates = _dedupe_and_rank(
+        raw_items,
+        discovery_query=discovery_query,
+        limit=limit,
+        now=current_time,
+    )
+    if candidates:
+        logger.info(
+            "Documentary Story Discovery found "
+            f"{len(candidates)} aggregated candidates"
+        )
+        return candidates
+
+    detail = "; ".join(provider_errors) or "providers returned no usable candidates"
     raise StoryDiscoveryError(f"story discovery failed: {detail}")
 
 
