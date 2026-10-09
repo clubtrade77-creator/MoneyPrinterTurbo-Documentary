@@ -132,7 +132,7 @@ def _walk_video_renderers(value):
 
 def _story_tokens(title: str) -> set[str]:
     value = re.sub(r"\bk[\s_-]*9\b", "k9", (title or "").lower())
-    tokens = re.findall(r"[a-z0-9]{3,}", value)
+    tokens = re.findall(r"k9|[a-z0-9]{3,}", value)
     return {
         token
         for token in tokens
@@ -236,17 +236,23 @@ def _build_search_query(story_title: str) -> str:
     if not clean:
         raise ValueError("story title is required for source discovery")
 
-    tokens = list(_story_tokens(clean))
-    strong = [token for token in tokens if token in _STRONG_EVENT_TERMS]
+    normalized = re.sub(r"\bk[\s_-]*9\b", "k9", clean.lower())
+    ordered_tokens = []
+    for token in re.findall(r"k9|[a-z0-9]{3,}", normalized):
+        if token in _QUERY_NOISE_TERMS or token in ordered_tokens:
+            continue
+        ordered_tokens.append(token)
+
+    strong = [token for token in ordered_tokens if token in _STRONG_EVENT_TERMS]
     specific = [
         token
-        for token in tokens
+        for token in ordered_tokens
         if token not in _STRONG_EVENT_TERMS
         and token not in _GENERIC_MATCH_TERMS
     ]
     generic = [
         token
-        for token in tokens
+        for token in ordered_tokens
         if token in _GENERIC_MATCH_TERMS
     ]
     selected = (strong + specific + generic)[:7]
