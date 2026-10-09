@@ -522,12 +522,7 @@ def _build_web_search_query(story_title: str) -> str:
 
     entity_anchors = _entity_anchor_tokens(clean)
     strong_priority = [
-        token
-        for token in (
-            "k9", "shooting", "homicide", "murder", "attack",
-            "chase", "rescue", "crash", "arrest",
-        )
-        if token in ordered_tokens
+        token for token in ordered_tokens if token in _STRONG_EVENT_TERMS
     ]
     specific = [
         token
