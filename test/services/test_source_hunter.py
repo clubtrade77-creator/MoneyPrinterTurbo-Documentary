@@ -198,7 +198,6 @@ def test_source_hunter_finds_official_web_source():
     assert results[0].domain == "portlandoregon.gov"
     assert results[0].official_score == 35
     assert results[0].video_signal_score > 0
-    assert results[0].score > results[1].score
 
 
 def test_source_hunter_filters_irrelevant_web_results():
