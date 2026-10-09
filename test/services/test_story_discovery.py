@@ -190,6 +190,62 @@ def test_discover_stories_clusters_different_headlines_for_same_event():
     assert results[0].story_score == 30
 
 
+def test_discover_stories_penalizes_camera_mentions_without_published_footage():
+    session = _Session(
+        _Response(
+            {
+                "articles": [
+                    {
+                        "url": "https://example.com/request",
+                        "title": "MP challenges officials to release CCTV footage of 100 seats",
+                        "seendate": "20261009T060000Z",
+                    },
+                    {
+                        "url": "https://example.com/released",
+                        "title": "Police release bodycam footage showing dramatic chase and arrest",
+                        "seendate": "20261009T060000Z",
+                    },
+                ]
+            }
+        )
+    )
+
+    results = discover_stories(
+        limit=10,
+        session=session,
+        now=datetime(2026, 10, 9, 7, 0, tzinfo=timezone.utc),
+    )
+
+    released = next(item for item in results if "bodycam" in item.title.lower())
+    request = next(item for item in results if "challenges" in item.title.lower())
+    assert released.footage_score > request.footage_score
+    assert released.score > request.score
+
+
+def test_discover_stories_camera_infrastructure_is_not_treated_as_footage():
+    session = _Session(
+        _Response(
+            {
+                "articles": [
+                    {
+                        "url": "https://example.com/cameras",
+                        "title": "Councilmember pushes for harbor cameras after migrant boat intercepted",
+                        "seendate": "20261009T060000Z",
+                    }
+                ]
+            }
+        )
+    )
+
+    result = discover_stories(
+        limit=10,
+        session=session,
+        now=datetime(2026, 10, 9, 7, 0, tzinfo=timezone.utc),
+    )[0]
+
+    assert result.footage_score <= 4
+
+
 def test_discover_stories_scores_high_stakes_story_terms():
     session = _Session(
         _Response(
