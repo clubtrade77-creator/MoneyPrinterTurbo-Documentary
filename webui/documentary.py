@@ -467,6 +467,14 @@ def _render_story_discovery(tr: Tr) -> None:
                 )
                 web_candidates = source_bundle.get("web", [])
                 source_candidates = source_bundle.get("videos", [])
+                source_errors = source_bundle.get("errors", [])
+
+                if source_errors:
+                    st.warning(
+                        tr("Documentary Source Hunter Partial").format(
+                            errors="; ".join(source_errors)
+                        )
+                    )
 
                 if web_candidates:
                     st.markdown(
