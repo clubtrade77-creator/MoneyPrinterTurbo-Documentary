@@ -467,7 +467,7 @@ def _score_video(
     published_text: str,
 ):
     story_tokens = _story_tokens(story_title)
-    video_tokens = _story_tokens(video_title)
+    video_tokens = _story_tokens(f"{video_title} {channel}")
     shared = story_tokens & video_tokens
 
     weighted_overlap = 0
@@ -801,13 +801,29 @@ def find_source_videos(
         if video_signal <= 0 and source_quality <= 0:
             continue
 
-        story_strong = _story_tokens(story_title) & _STRONG_EVENT_TERMS
-        video_strong = _story_tokens(title) & _STRONG_EVENT_TERMS
-        if (
-            source_quality <= 0
-            and len(story_strong) >= 2
-            and len(story_strong & video_strong) < 2
-        ):
+        story_tokens = _story_tokens(story_title)
+        candidate_tokens = _story_tokens(f"{title} {channel}")
+
+        story_strong = story_tokens & _STRONG_EVENT_TERMS
+        candidate_strong = candidate_tokens & _STRONG_EVENT_TERMS
+        if len(story_strong) >= 2 and len(story_strong & candidate_strong) < 2:
+            continue
+
+        # When the story contains a concrete place/entity anchor (for example
+        # "Portland"), require at least one such anchor to match. This prevents
+        # unrelated incidents with the same generic words such as K9/shooting.
+        story_specific = {
+            token
+            for token in story_tokens
+            if token not in _STRONG_EVENT_TERMS
+            and token not in _GENERIC_MATCH_TERMS
+        }
+        if story_specific and not (story_specific & candidate_tokens):
+            continue
+
+        # Very old non-official uploads are almost never the source for a fresh
+        # story lead and should not survive merely because generic event terms match.
+        if freshness == 0 and source_quality <= 0:
             continue
 
         if any(
