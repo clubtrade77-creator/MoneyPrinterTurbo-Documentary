@@ -89,6 +89,10 @@ _STRONG_EVENT_TERMS = {
     "k9", "shooting", "homicide", "murder", "dead", "fatal", "chase", "rescue",
     "crash", "arrest", "standoff", "kidnapping", "hostage", "explosion", "attack",
 }
+_AGENCY_ACRONYMS = {
+    "PPB", "NYPD", "LAPD", "LASD", "ICE", "FBI", "DEA", "ATF", "CBP",
+    "DHS", "DOJ", "USMS",
+}
 
 
 class SourceHunterError(RuntimeError):
@@ -376,7 +380,7 @@ def _entity_anchor_tokens(story_title: str) -> list[str]:
         # Short all-caps tokens are usually publisher/agency acronyms (PPB, NYPD,
         # ICE). They are useful search terms but too brittle to be mandatory event
         # anchors because official sources may spell the organization out.
-        if raw_token.isupper() and len(raw_token) <= 5:
+        if raw_token.upper() in _AGENCY_ACRONYMS:
             continue
         token = raw_token.lower()
         if (
