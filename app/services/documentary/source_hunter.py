@@ -318,8 +318,33 @@ def _score_web_source(story_title: str, title: str, snippet: str, domain: str):
 
 
 def _build_web_search_query(story_title: str) -> str:
-    base = _build_search_query(story_title)
-    return base + ' official police sheriff city "video released"'
+    clean = re.sub(r"\s+", " ", (story_title or "").strip())
+    if not clean:
+        raise ValueError("story title is required for web source discovery")
+
+    normalized = re.sub(r"\bk[\s_-]*9\b", "k9", clean.lower())
+    ordered_tokens = []
+    for token in re.findall(r"k9|[a-z0-9]{3,}", normalized):
+        if token in _QUERY_NOISE_TERMS or token in ordered_tokens:
+            continue
+        ordered_tokens.append(token)
+
+    specific = [
+        token
+        for token in ordered_tokens
+        if token not in _STRONG_EVENT_TERMS
+        and token not in _GENERIC_MATCH_TERMS
+    ]
+    strong_priority = [
+        token
+        for token in ("k9", "shooting", "homicide", "murder", "chase", "rescue", "crash")
+        if token in ordered_tokens
+    ]
+    selected = (specific[:2] + strong_priority[:3])[:5]
+    if not selected:
+        selected = ordered_tokens[:5]
+
+    return " ".join(selected) + ' bodycam "video released" police'
 
 
 def _text(value) -> str:
@@ -775,6 +800,16 @@ def find_source_videos(
         # or the upload comes from an official/agency channel.
         if video_signal <= 0 and source_quality <= 0:
             continue
+
+        story_strong = _story_tokens(story_title) & _STRONG_EVENT_TERMS
+        video_strong = _story_tokens(title) & _STRONG_EVENT_TERMS
+        if (
+            source_quality <= 0
+            and len(story_strong) >= 2
+            and len(story_strong & video_strong) < 2
+        ):
+            continue
+
         if any(
             _near_duplicate_video_title(title, seen_title)
             for seen_title in seen_titles
