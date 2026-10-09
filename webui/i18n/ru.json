@@ -582,6 +582,9 @@
     "Documentary Source Hunter YouTube Results": "Видео-кандидаты YouTube: {count}",
     "Documentary Source Hunter Open Web Source": "Открыть веб-источник",
     "Documentary Source Hunter Create Web Project": "Создать проект с источником",
-    "Documentary Source Hunter Low Confidence": "Низкая уверенность: сначала открой и проверь источник вручную."
+    "Documentary Source Hunter Low Confidence": "Низкая уверенность: сначала открой и проверь источник вручную.",
+    "Documentary Source Hunter Embedded Media": "Медиа найдено на официальной странице: {count}",
+    "Documentary Source Hunter Direct Video": "Прямое видео",
+    "Documentary Source Hunter Create Embedded Project": "Создать проект с этим медиа"
   }
 }
