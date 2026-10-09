@@ -520,10 +520,19 @@ def _render_story_discovery(tr: Tr) -> None:
                             web_candidate.url,
                             width="stretch",
                         )
+                        web_create_allowed = (
+                            web_candidate.official_score >= 35
+                            or web_candidate.score >= 50
+                        )
+                        if not web_create_allowed:
+                            st.caption(
+                                tr("Documentary Source Hunter Low Confidence")
+                            )
                         if web_actions[1].button(
                             tr("Documentary Source Hunter Create Web Project"),
                             type="primary",
                             width="stretch",
+                            disabled=not web_create_allowed,
                             key=(
                                 "documentary_source_hunter_web_create_"
                                 f"{candidate.id}_{web_index}"
@@ -616,10 +625,19 @@ def _render_story_discovery(tr: Tr) -> None:
                             source_candidate.url,
                             width="stretch",
                         )
+                        video_create_allowed = (
+                            source_candidate.source_quality_score > 0
+                            or source_candidate.score >= 50
+                        )
+                        if not video_create_allowed:
+                            st.caption(
+                                tr("Documentary Source Hunter Low Confidence")
+                            )
                         if source_actions[1].button(
                             tr("Documentary Source Hunter Create Project"),
                             type="primary",
                             width="stretch",
+                            disabled=not video_create_allowed,
                             key=(
                                 "documentary_source_hunter_create_"
                                 f"{candidate.id}_{source_candidate.video_id}"
