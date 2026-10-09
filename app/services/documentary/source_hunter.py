@@ -402,6 +402,26 @@ def _freshness_score(published_text: str) -> tuple[int, str]:
             "month": amount * 30,
             "year": amount * 365,
         }[unit]
+    else:
+        short_match = re.search(
+            r"(\d+)\s*(m|h|d|w|mo|y)\s+ago",
+            value,
+        )
+        if short_match:
+            amount = int(short_match.group(1))
+            unit = short_match.group(2)
+            age_days = {
+                "m": amount / 1440,
+                "h": amount / 24,
+                "d": amount,
+                "w": amount * 7,
+                "mo": amount * 30,
+                "y": amount * 365,
+            }[unit]
+        else:
+            age_days = None
+
+    if age_days is not None:
         if age_days <= 7:
             return 20, "published within 7 days"
         if age_days <= 30:
@@ -471,6 +491,29 @@ def _score_video(
         freshness_score,
         tuple(reasons),
     )
+
+
+def _video_title_key(title: str) -> str:
+    value = re.sub(r"\bk[\s_-]*9\b", "k9", (title or "").lower())
+    value = re.sub(r"[^a-z0-9]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _near_duplicate_video_title(left: str, right: str) -> bool:
+    left_key = _video_title_key(left)
+    right_key = _video_title_key(right)
+    if not left_key or not right_key:
+        return False
+    if left_key == right_key:
+        return True
+
+    left_tokens = set(left_key.split())
+    right_tokens = set(right_key.split())
+    if min(len(left_tokens), len(right_tokens)) < 5:
+        return False
+    shared = left_tokens & right_tokens
+    union = left_tokens | right_tokens
+    return bool(union) and len(shared) / len(union) >= 0.9
 
 
 def _build_search_query(story_title: str) -> str:
@@ -696,6 +739,7 @@ def find_source_videos(
     initial_data = _extract_initial_data(response.text)
     candidates: list[SourceVideoCandidate] = []
     seen_ids: set[str] = set()
+    seen_titles: list[str] = []
 
     for renderer in _walk_video_renderers(initial_data):
         video_id = str(renderer.get("videoId") or "").strip()
@@ -725,6 +769,18 @@ def find_source_videos(
             channel,
             published_text,
         )
+
+        # Source Hunter is for likely original/source footage, not ordinary news
+        # recaps. Keep a candidate only if the title strongly signals source video
+        # or the upload comes from an official/agency channel.
+        if video_signal <= 0 and source_quality <= 0:
+            continue
+        if any(
+            _near_duplicate_video_title(title, seen_title)
+            for seen_title in seen_titles
+        ):
+            continue
+
         candidates.append(
             SourceVideoCandidate(
                 video_id=video_id,
@@ -743,6 +799,7 @@ def find_source_videos(
             )
         )
         seen_ids.add(video_id)
+        seen_titles.append(title)
 
     candidates.sort(
         key=lambda item: (
