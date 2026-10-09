@@ -2,10 +2,13 @@ import json
 
 from app.models.documentary import ProvenanceType, RightsStatus, SourceType
 from app.services.documentary.source_hunter import (
+    SourceHunterError,
     _build_search_query,
     _build_web_search_query,
     candidate_to_web_source,
     candidate_to_youtube_source,
+    embedded_media_to_source,
+    find_embedded_media,
     find_source_videos,
     find_web_sources,
 )
@@ -608,6 +611,67 @@ def test_source_hunter_parses_bing_rss_fallback():
 
     assert len(results) == 1
     assert results[0].domain == "portlandoregon.gov"
+
+
+def test_source_hunter_extracts_embedded_media_from_official_page():
+    html = """
+    <html><body>
+      <iframe
+        title="Official bodycam video"
+        src="https://www.youtube.com/embed/abcdefghijk">
+      </iframe>
+      <a href="https://www.youtube.com/watch?v=abcdefghijk">
+        Duplicate YouTube link
+      </a>
+      <video controls>
+        <source src="/media/bodycam.mp4" type="video/mp4">
+      </video>
+    </body></html>
+    """
+
+    results = find_embedded_media(
+        "https://agency.gov/bodycam-release",
+        session=_Session(_Response(html)),
+    )
+
+    assert len(results) == 2
+    assert results[0].platform == "youtube"
+    assert results[0].url == "https://www.youtube.com/watch?v=abcdefghijk"
+    assert results[1].platform == "direct_video"
+    assert results[1].url == "https://agency.gov/media/bodycam.mp4"
+
+
+def test_source_hunter_embedded_media_rejects_non_gov_page():
+    session = _Session(_Response("<html></html>"))
+
+    try:
+        find_embedded_media(
+            "https://news.example/bodycam",
+            session=session,
+        )
+    except SourceHunterError as exc:
+        assert "restricted to official .gov pages" in str(exc)
+    else:
+        raise AssertionError("non-.gov page should not be fetched")
+
+    assert session.calls == []
+
+
+def test_source_hunter_embedded_youtube_converter_keeps_rights_review():
+    media = find_embedded_media(
+        "https://agency.gov/bodycam-release",
+        session=_Session(
+            _Response(
+                '<iframe src="https://www.youtube.com/embed/abcdefghijk"></iframe>'
+            )
+        ),
+    )[0]
+
+    source = embedded_media_to_source(media, title="Official bodycam")
+
+    assert source.source_type == SourceType.youtube
+    assert source.youtube_video_id == "abcdefghijk"
+    assert source.rights_status == RightsStatus.unknown_review_required
 
 
 def test_source_hunter_web_converter_preserves_rights_review():
