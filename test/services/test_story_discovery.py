@@ -11,9 +11,10 @@ from app.services.documentary.story_discovery import (
 
 
 class _Response:
-    def __init__(self, payload, status_code=200):
+    def __init__(self, payload, status_code=200, text=""):
         self._payload = payload
         self.status_code = status_code
+        self.text = text
 
     def json(self):
         if isinstance(self._payload, Exception):
@@ -29,6 +30,15 @@ class _Session:
     def get(self, url, **kwargs):
         self.calls.append((url, kwargs))
         return self.response
+
+class _SequenceSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return self.responses.pop(0)
 
 
 def test_discover_stories_scores_visual_recent_candidates_first():
@@ -124,6 +134,40 @@ def test_discover_stories_uses_literal_user_topic():
     query = session.calls[0][1]["params"]["query"]
     assert '"airport incident"' in query
     assert "bodycam" in query.lower()
+
+
+def test_discover_stories_falls_back_when_gdelt_rate_limits():
+    rss = """<?xml version="1.0" encoding="UTF-8"?>
+    <rss><channel>
+      <item>
+        <title>Bodycam video shows dramatic rescue - Example News</title>
+        <link>https://news.google.com/rss/articles/example</link>
+        <pubDate>Fri, 09 Oct 2026 06:00:00 GMT</pubDate>
+        <source url="https://example.com">Example News</source>
+      </item>
+    </channel></rss>
+    """
+    session = _SequenceSession(
+        [
+            _Response({}, status_code=429),
+            _Response({}, status_code=200, text=rss),
+        ]
+    )
+
+    results = discover_stories(
+        lookback_hours=72,
+        limit=10,
+        session=session,
+        now=datetime(2026, 10, 9, 7, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(results) == 1
+    assert results[0].publisher == "Example News"
+    assert results[0].title == "Bodycam video shows dramatic rescue"
+    assert results[0].footage_score > 0
+    assert len(session.calls) == 2
+    assert "gdeltproject.org" in session.calls[0][0]
+    assert "news.google.com" in session.calls[1][0]
 
 
 def test_discover_stories_rejects_bad_http_status():
