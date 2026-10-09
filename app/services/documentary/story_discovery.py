@@ -41,25 +41,40 @@ _FOOTAGE_TERMS = (
     "video",
     "camera",
 )
-_STORY_TERMS = (
-    "rescue",
-    "escape",
-    "missing",
-    "crash",
-    "chase",
-    "caught",
-    "dramatic",
-    "survived",
-    "survivor",
-    "mystery",
-    "investigation",
-    "arrest",
-    "trial",
-    "court",
-    "disaster",
-    "collapse",
-    "fire",
-    "flood",
+_STORY_TERM_WEIGHTS = {
+    "shooting": 10,
+    "homicide": 10,
+    "murder": 10,
+    "kidnapping": 10,
+    "hostage": 10,
+    "standoff": 9,
+    "chase": 9,
+    "rescue": 9,
+    "escape": 8,
+    "missing": 8,
+    "crash": 8,
+    "survived": 8,
+    "survivor": 8,
+    "explosion": 8,
+    "collapse": 8,
+    "attack": 8,
+    "robbery": 7,
+    "arrest": 7,
+    "suspect": 6,
+    "officer": 5,
+    "k9": 5,
+    "dramatic": 5,
+    "mystery": 5,
+    "investigation": 5,
+    "trial": 5,
+    "court": 5,
+    "disaster": 7,
+    "fire": 6,
+    "flood": 6,
+}
+_TITLE_NOISE_PREFIX_RE = re.compile(
+    r"^(?:(?:breaking|watch|video|update|new|exclusive|developing)\s*[:\-–—]\s*)+",
+    re.IGNORECASE,
 )
 _MAX_QUERY_LENGTH = 240
 _MAX_DISCOVERY_RESULTS = 50
@@ -180,17 +195,22 @@ def _score_text(title: str, *, published_at: str, now: datetime):
     normalized = re.sub(r"\s+", " ", (title or "").lower())
 
     footage_matches = [term for term in _FOOTAGE_TERMS if term in normalized]
-    story_matches = [term for term in _STORY_TERMS if term in normalized]
+    story_matches = [
+        term for term in _STORY_TERM_WEIGHTS if term in normalized
+    ]
 
     footage_score = min(40, 12 + len(footage_matches) * 8) if footage_matches else 0
-    story_score = min(30, len(story_matches) * 6)
+    story_score = min(
+        30,
+        sum(_STORY_TERM_WEIGHTS[term] for term in story_matches),
+    )
     freshness_score, freshness_reason = _freshness_score(published_at, now=now)
 
     reasons = []
     if footage_matches:
         reasons.append("visual-source signal: " + ", ".join(footage_matches[:3]))
     if story_matches:
-        reasons.append("story signal: " + ", ".join(story_matches[:3]))
+        reasons.append("story signal: " + ", ".join(story_matches[:4]))
     reasons.append(freshness_reason)
 
     score = min(100, footage_score + story_score + freshness_score)
@@ -209,6 +229,32 @@ def _safe_http_url(value: str) -> str:
     return raw
 
 
+def _story_title_key(title: str) -> str:
+    """Normalize editorial prefixes/punctuation so syndicated headlines deduplicate."""
+    value = _TITLE_NOISE_PREFIX_RE.sub("", (title or "").strip())
+    value = value.lower()
+    value = re.sub(r"[^\w]+", " ", value, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _near_duplicate_title(left: str, right: str) -> bool:
+    left_key = _story_title_key(left)
+    right_key = _story_title_key(right)
+    if not left_key or not right_key:
+        return False
+    if left_key == right_key:
+        return True
+
+    left_tokens = set(left_key.split())
+    right_tokens = set(right_key.split())
+    if min(len(left_tokens), len(right_tokens)) < 5:
+        return False
+
+    overlap = len(left_tokens & right_tokens)
+    union = len(left_tokens | right_tokens)
+    return union > 0 and overlap / union >= 0.82
+
+
 def _dedupe_and_rank(
     raw_items: list[dict],
     *,
@@ -218,7 +264,7 @@ def _dedupe_and_rank(
 ) -> list[StoryCandidate]:
     candidates: list[StoryCandidate] = []
     seen_urls: set[str] = set()
-    seen_titles: set[str] = set()
+    seen_titles: list[str] = []
 
     for article in raw_items:
         if not isinstance(article, dict):
@@ -228,8 +274,10 @@ def _dedupe_and_rank(
         if not url or not title:
             continue
 
-        title_key = re.sub(r"[^\w]+", " ", title.lower(), flags=re.UNICODE).strip()
-        if url in seen_urls or (title_key and title_key in seen_titles):
+        title_key = _story_title_key(title)
+        if url in seen_urls or any(
+            _near_duplicate_title(title, seen_title) for seen_title in seen_titles
+        ):
             continue
 
         published_at = _canonical_published_at(
@@ -267,7 +315,7 @@ def _dedupe_and_rank(
         )
         seen_urls.add(url)
         if title_key:
-            seen_titles.add(title_key)
+            seen_titles.append(title)
 
     candidates.sort(
         key=lambda item: (
