@@ -696,6 +696,27 @@
     "Documentary Voice Preview Text": "Preview text",
     "Documentary Voice Preview Button": "Generate voice preview",
     "Documentary Voice Preview Generating": "Generating voice preview…",
-    "Documentary Voice Preview Failed": "Voice preview failed: {error}"
+    "Documentary Voice Preview Failed": "Voice preview failed: {error}",
+    "Documentary Story Discovery": "Story Discovery",
+    "Documentary Story Discovery Description": "Find recent story leads with strong visual-source signals. Discovery does not grant reuse rights; original footage and publication rights must still be verified.",
+    "Documentary Story Discovery Topic": "Optional topic",
+    "Documentary Story Discovery Topic Placeholder": "e.g. airport incident, rescue, police chase",
+    "Documentary Story Discovery Window": "Search window",
+    "Documentary Story Discovery 24h": "Last 24 hours",
+    "Documentary Story Discovery 72h": "Last 3 days",
+    "Documentary Story Discovery 7d": "Last 7 days",
+    "Documentary Story Discovery Project Language": "Project language",
+    "Documentary Story Discovery Search": "Find stories",
+    "Documentary Story Discovery Searching": "Searching for documentary story candidates…",
+    "Documentary Story Discovery Failed": "Story Discovery failed: {error}",
+    "Documentary Story Discovery Results": "Found {count} candidates",
+    "Documentary Story Discovery Score": "Score",
+    "Documentary Story Discovery Footage": "Footage",
+    "Documentary Story Discovery Freshness": "Freshness",
+    "Documentary Story Discovery Story": "Story",
+    "Documentary Story Discovery Open Source": "Open source article",
+    "Documentary Story Discovery Create Project": "Create project",
+    "Documentary Story Discovery Create Failed": "Could not create project: {error}",
+    "Documentary Story Discovery Project Created": "Documentary project created from this story lead."
   }
 }
