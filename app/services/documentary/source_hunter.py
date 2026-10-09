@@ -780,6 +780,14 @@ def _normalize_embedded_media_url(
             return None
         return "youtube", canonical_youtube_url(video_id)
 
+    if host in {"youtube-nocookie.com", "www.youtube-nocookie.com"}:
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) >= 2 and parts[0] == "embed":
+            video_id = parts[1]
+            if re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+                return "youtube", canonical_youtube_url(video_id)
+        return None
+
     if host == "vimeo.com" or host.endswith(".vimeo.com"):
         return "vimeo", absolute
 
