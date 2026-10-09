@@ -76,6 +76,19 @@ _TITLE_NOISE_PREFIX_RE = re.compile(
     r"^(?:(?:breaking|watch|video|update|new|exclusive|developing)\s*[:\-–—]\s*)+",
     re.IGNORECASE,
 )
+_EVENT_STOPWORDS = {
+    "after", "and", "body", "bodycam", "camera", "captures", "caught",
+    "deadly", "footage", "from", "in", "left", "names", "new", "news",
+    "of", "on", "police", "released", "releases", "shows", "struck", "that",
+    "the", "video", "watch", "with",
+}
+_EVENT_TOKEN_ALIASES = {
+    "k-9": "k9",
+    "k_9": "k9",
+    "body-camera": "bodycam",
+    "bodycamera": "bodycam",
+    "shoot": "shooting",
+}
 _MAX_QUERY_LENGTH = 240
 _MAX_DISCOVERY_RESULTS = 50
 _REQUEST_HEADERS = {
@@ -255,6 +268,36 @@ def _near_duplicate_title(left: str, right: str) -> bool:
     return union > 0 and overlap / union >= 0.82
 
 
+def _event_tokens(title: str) -> set[str]:
+    value = _story_title_key(title)
+    value = value.replace("k-9", "k9")
+    tokens = []
+    for token in value.split():
+        token = _EVENT_TOKEN_ALIASES.get(token, token)
+        if token in _EVENT_STOPWORDS or len(token) < 3:
+            continue
+        tokens.append(token)
+    return set(tokens)
+
+
+def _same_event_title(left: str, right: str) -> bool:
+    """Detect different headlines about the same underlying event."""
+    left_tokens = _event_tokens(left)
+    right_tokens = _event_tokens(right)
+    if min(len(left_tokens), len(right_tokens)) < 4:
+        return False
+
+    shared = left_tokens & right_tokens
+    if len(shared) < 4:
+        return False
+
+    overlap_coeff = len(shared) / min(len(left_tokens), len(right_tokens))
+    story_terms = set(_STORY_TERM_WEIGHTS)
+    strong_shared = shared & story_terms
+
+    return overlap_coeff >= 0.5 and len(strong_shared) >= 2
+
+
 def _dedupe_and_rank(
     raw_items: list[dict],
     *,
@@ -276,7 +319,9 @@ def _dedupe_and_rank(
 
         title_key = _story_title_key(title)
         if url in seen_urls or any(
-            _near_duplicate_title(title, seen_title) for seen_title in seen_titles
+            _near_duplicate_title(title, seen_title)
+            or _same_event_title(title, seen_title)
+            for seen_title in seen_titles
         ):
             continue
 
