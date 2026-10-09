@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, unquote, urlparse
+from xml.etree import ElementTree
 
 import requests
 from loguru import logger
@@ -22,6 +23,14 @@ from app.services.documentary.youtube_source import build_youtube_source_asset
 _YOUTUBE_SEARCH_URL = "https://www.youtube.com/results"
 _DUCKDUCKGO_SEARCH_URL = "https://html.duckduckgo.com/html/"
 _BING_SEARCH_URL = "https://www.bing.com/search"
+_SEARCH_ENGINE_DOMAINS = {
+    "bing.com",
+    "www.bing.com",
+    "duckduckgo.com",
+    "html.duckduckgo.com",
+    "google.com",
+    "www.google.com",
+}
 _REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -202,6 +211,28 @@ class _BingParser(HTMLParser):
                 self._capture = None
                 self._inside_h2 = False
                 self._depth = 0
+
+
+def _parse_bing_rss(text: str) -> list[dict]:
+    try:
+        root = ElementTree.fromstring(text)
+    except (ElementTree.ParseError, TypeError) as exc:
+        raise SourceHunterError("Bing returned invalid RSS") from exc
+
+    items = []
+    for item in root.findall(".//item"):
+        title = (item.findtext("title") or "").strip()
+        url = (item.findtext("link") or "").strip()
+        snippet = (item.findtext("description") or "").strip()
+        if title and url:
+            items.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "snippet": snippet,
+                }
+            )
+    return items
 
 
 def _normalize_search_result_url(value: str) -> str:
@@ -491,7 +522,7 @@ def _web_candidates_from_items(
             r"\s+", " ", unescape(item.get("snippet") or "")
         ).strip()
         domain = urlparse(url).netloc.lower().removeprefix("www.")
-        if not title:
+        if not title or domain in _SEARCH_ENGINE_DOMAINS:
             continue
 
         (
@@ -506,6 +537,11 @@ def _web_candidates_from_items(
             snippet,
             domain,
         )
+
+        # Source Hunter is intentionally strict: a web result must match the event
+        # and either contain a real video/footage signal or look like an official source.
+        if overlap < 12 or (video_signal <= 0 and official_score <= 0):
+            continue
 
         candidates.append(
             SourceWebCandidate(
@@ -585,17 +621,22 @@ def find_web_sources(
     try:
         response = request.get(
             _BING_SEARCH_URL,
-            params={"q": query, "setlang": "en-US"},
+            params={"q": query, "setlang": "en-US", "format": "rss"},
             headers=_REQUEST_HEADERS,
             timeout=timeout_seconds,
             allow_redirects=True,
         )
         if response.status_code == 200:
-            parser = _BingParser()
-            parser.feed(response.text)
+            try:
+                bing_items = _parse_bing_rss(response.text)
+            except SourceHunterError:
+                parser = _BingParser()
+                parser.feed(response.text)
+                bing_items = parser.results
+
             candidates = _web_candidates_from_items(
                 story_title,
-                parser.results,
+                bing_items,
                 limit=limit,
             )
             if candidates:
@@ -604,7 +645,7 @@ def find_web_sources(
                     "web candidates via Bing fallback"
                 )
                 return candidates
-            errors.append("Bing returned no usable results")
+            errors.append("Bing returned no relevant source results")
         else:
             errors.append(f"Bing returned HTTP {response.status_code}")
     except requests.RequestException as exc:
