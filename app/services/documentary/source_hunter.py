@@ -324,7 +324,13 @@ def _entity_anchor_tokens(story_title: str) -> list[str]:
     anchors = []
     normalized = re.sub(r"\bk[\s_-]*9\b", "K9", story_title or "", flags=re.IGNORECASE)
     for match in re.finditer(r"\b[A-Z][A-Za-z0-9'-]{2,}\b", normalized):
-        token = match.group(0).lower()
+        raw_token = match.group(0)
+        # Short all-caps tokens are usually publisher/agency acronyms (PPB, NYPD,
+        # ICE). They are useful search terms but too brittle to be mandatory event
+        # anchors because official sources may spell the organization out.
+        if raw_token.isupper() and len(raw_token) <= 5:
+            continue
+        token = raw_token.lower()
         if (
             token in _QUERY_NOISE_TERMS
             or token in _STRONG_EVENT_TERMS
@@ -352,15 +358,8 @@ def _event_match_ok(
         if len(story_strong & candidate_strong) < required:
             return False
 
-    story_specific = {
-        token
-        for token in story_tokens
-        if token not in _STRONG_EVENT_TERMS
-        and token not in _GENERIC_MATCH_TERMS
-    }
     entity_anchors = set(_entity_anchor_tokens(story_title))
-    preferred_anchors = entity_anchors or story_specific
-    if preferred_anchors and not (preferred_anchors & candidate_tokens):
+    if entity_anchors and not (entity_anchors & candidate_tokens):
         return False
 
     return True
