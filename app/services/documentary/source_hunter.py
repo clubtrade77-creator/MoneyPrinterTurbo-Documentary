@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
+from html import unescape
+from html.parser import HTMLParser
+from urllib.parse import parse_qs, unquote, urlparse
+
 import requests
 from loguru import logger
 
-from app.models.documentary import RightsStatus, SourceAsset
+from app.models.documentary import (
+    ProvenanceType,
+    RightsStatus,
+    SourceAsset,
+    SourceType,
+)
 from app.services.documentary.youtube_source import build_youtube_source_asset
 
 _YOUTUBE_SEARCH_URL = "https://www.youtube.com/results"
+_DUCKDUCKGO_SEARCH_URL = "https://html.duckduckgo.com/html/"
 _REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -64,6 +75,19 @@ class SourceHunterError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class SourceWebCandidate:
+    title: str
+    url: str
+    domain: str
+    snippet: str
+    score: int
+    title_overlap_score: int
+    official_score: int
+    video_signal_score: int
+    reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class SourceVideoCandidate:
     video_id: str
     title: str
@@ -78,6 +102,129 @@ class SourceVideoCandidate:
     video_signal_score: int
     freshness_score: int
     reasons: tuple[str, ...]
+
+
+class _DuckDuckGoParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.results = []
+        self._current = None
+        self._capture = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        classes = set((attrs.get("class") or "").split())
+        if tag == "a" and "result__a" in classes:
+            self._current = {
+                "title": "",
+                "url": attrs.get("href") or "",
+                "snippet": "",
+            }
+            self._capture = "title"
+        elif self._current is not None and "result__snippet" in classes:
+            self._capture = "snippet"
+
+    def handle_data(self, data):
+        if self._current is not None and self._capture in {"title", "snippet"}:
+            self._current[self._capture] += data
+
+    def handle_endtag(self, tag):
+        if self._current is None:
+            return
+        if self._capture == "title" and tag == "a":
+            self._capture = None
+        elif self._capture == "snippet" and tag in {"a", "div", "span"}:
+            self._capture = None
+            if self._current.get("title") and self._current.get("url"):
+                self.results.append(self._current)
+            self._current = None
+
+
+def _normalize_search_result_url(value: str) -> str:
+    raw = unescape((value or "").strip())
+    if not raw:
+        return ""
+    if raw.startswith("//"):
+        raw = "https:" + raw
+    parsed = urlparse(raw)
+    if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
+        target = parse_qs(parsed.query).get("uddg", [""])[0]
+        if target:
+            raw = unquote(target)
+            parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return raw
+
+
+def _is_official_web_source(domain: str, title: str, snippet: str) -> tuple[int, list[str]]:
+    host = (domain or "").lower()
+    haystack = f"{host} {title} {snippet}".lower()
+    reasons = []
+
+    if host.endswith(".gov") or ".gov." in host:
+        reasons.append("government domain")
+        return 35, reasons
+
+    agency_terms = [
+        term
+        for term in (
+            "police department",
+            "police bureau",
+            "sheriff",
+            "district attorney",
+            "public safety",
+            "state patrol",
+            "highway patrol",
+            "city of",
+            "county",
+        )
+        if term in haystack
+    ]
+    if agency_terms:
+        reasons.append("agency signal: " + ", ".join(agency_terms[:2]))
+        return 18, reasons
+
+    return 0, reasons
+
+
+def _score_web_source(story_title: str, title: str, snippet: str, domain: str):
+    story_tokens = _story_tokens(story_title)
+    candidate_tokens = _story_tokens(f"{title} {snippet}")
+    shared = story_tokens & candidate_tokens
+
+    overlap_score = 0
+    for token in shared:
+        if token in _STRONG_EVENT_TERMS:
+            overlap_score += 12
+        elif token in _GENERIC_MATCH_TERMS:
+            overlap_score += 2
+        else:
+            overlap_score += 6
+    overlap_score = min(45, overlap_score)
+
+    normalized = f"{title} {snippet}".lower()
+    video_matches = [term for term in _STRONG_VIDEO_TERMS if term in normalized]
+    video_signal_score = min(25, len(video_matches) * 10)
+
+    official_score, official_reasons = _is_official_web_source(
+        domain, title, snippet
+    )
+
+    reasons = []
+    if shared:
+        reasons.append("story match: " + ", ".join(sorted(shared)[:6]))
+    if video_matches:
+        reasons.append("video signal: " + ", ".join(video_matches[:3]))
+    reasons.extend(official_reasons)
+
+    score = min(100, overlap_score + video_signal_score + official_score)
+    return score, overlap_score, official_score, video_signal_score, tuple(reasons)
+
+
+def _build_web_search_query(story_title: str) -> str:
+    base = _build_search_query(story_title)
+    return base + ' official police sheriff city "video released"'
 
 
 def _text(value) -> str:
@@ -261,6 +408,101 @@ def _build_search_query(story_title: str) -> str:
     return " ".join(selected) + ' bodycam footage'
 
 
+def find_web_sources(
+    story_title: str,
+    *,
+    limit: int = 8,
+    timeout_seconds: float = 20.0,
+    session=None,
+) -> list[SourceWebCandidate]:
+    """Find likely original/official web sources beyond YouTube."""
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("source hunter web limit must be an integer") from exc
+    if not 1 <= limit <= 20:
+        raise ValueError("source hunter web limit must be between 1 and 20")
+
+    query = _build_web_search_query(story_title)
+    request = session or requests
+    try:
+        response = request.get(
+            _DUCKDUCKGO_SEARCH_URL,
+            params={"q": query},
+            headers=_REQUEST_HEADERS,
+            timeout=timeout_seconds,
+            allow_redirects=True,
+        )
+    except requests.RequestException as exc:
+        raise SourceHunterError("web source search request failed") from exc
+
+    if response.status_code != 200:
+        raise SourceHunterError(
+            f"web source search returned HTTP {response.status_code}"
+        )
+
+    parser = _DuckDuckGoParser()
+    parser.feed(response.text)
+
+    candidates = []
+    seen_urls = set()
+    for item in parser.results:
+        url = _normalize_search_result_url(item.get("url") or "")
+        if not url or url in seen_urls:
+            continue
+
+        title = re.sub(r"\s+", " ", unescape(item.get("title") or "")).strip()
+        snippet = re.sub(
+            r"\s+", " ", unescape(item.get("snippet") or "")
+        ).strip()
+        domain = urlparse(url).netloc.lower().removeprefix("www.")
+        if not title:
+            continue
+
+        (
+            score,
+            overlap,
+            official_score,
+            video_signal,
+            reasons,
+        ) = _score_web_source(
+            story_title,
+            title,
+            snippet,
+            domain,
+        )
+
+        candidates.append(
+            SourceWebCandidate(
+                title=title,
+                url=url,
+                domain=domain,
+                snippet=snippet,
+                score=score,
+                title_overlap_score=overlap,
+                official_score=official_score,
+                video_signal_score=video_signal,
+                reasons=reasons,
+            )
+        )
+        seen_urls.add(url)
+
+    candidates.sort(
+        key=lambda item: (
+            item.score,
+            item.official_score,
+            item.video_signal_score,
+            item.title_overlap_score,
+            item.title.lower(),
+        ),
+        reverse=True,
+    )
+    logger.info(
+        f"Documentary Source Hunter found {len(candidates)} web candidates"
+    )
+    return candidates[:limit]
+
+
 def find_source_videos(
     story_title: str,
     *,
@@ -361,6 +603,41 @@ def find_source_videos(
         f"Documentary Source Hunter found {len(candidates)} YouTube candidates"
     )
     return candidates[:limit]
+
+
+def candidate_to_web_source(candidate: SourceWebCandidate) -> SourceAsset:
+    """Create a traceable web source without assuming publication rights."""
+    source_id = (
+        "web_" + hashlib.sha256(candidate.url.encode("utf-8")).hexdigest()[:16]
+    )
+    normalized = f"{candidate.title} {candidate.snippet}".lower()
+    source_type = SourceType.news
+    if "bodycam" in normalized or "body camera" in normalized:
+        source_type = SourceType.bodycam
+    elif "cctv" in normalized or "surveillance" in normalized:
+        source_type = SourceType.cctv
+    elif "court" in normalized:
+        source_type = SourceType.court
+
+    provenance = (
+        ProvenanceType.official_public_source
+        if candidate.official_score >= 35
+        else ProvenanceType.third_party_platform
+    )
+
+    return SourceAsset(
+        id=source_id,
+        source_type=source_type,
+        provenance=provenance,
+        title=candidate.title,
+        source_url=candidate.url,
+        publisher=candidate.domain,
+        rights_status=RightsStatus.unknown_review_required,
+        rights_note=(
+            "Discovered automatically by Source Hunter. Verify this page is the "
+            "authoritative/original source and confirm reuse/publication rights before use."
+        ),
+    )
 
 
 def candidate_to_youtube_source(
