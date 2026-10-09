@@ -816,7 +816,7 @@ def _render_create_project(tr: Tr) -> None:
             submitted = st.form_submit_button(
                 tr("Documentary Create"),
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             )
 
         if submitted:
@@ -879,7 +879,7 @@ def _render_project_overview(project, tr: Tr) -> None:
 
     st.dataframe(
         rows,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -983,7 +983,7 @@ def _render_transcription(project, tr: Tr) -> None:
         if st.button(
             button_label,
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key=f"documentary_transcribe_{project.id}_{source.id}",
         ):
             requested_language = None if language_mode == "auto" else language_mode
@@ -1463,7 +1463,7 @@ def _render_source_upload(project, tr: Tr) -> None:
         attach_clicked = st.button(
             tr("Documentary Attach Source"),
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=uploaded_file is None,
             key=f"documentary_attach_source_{project.id}",
         )
