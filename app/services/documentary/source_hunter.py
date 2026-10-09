@@ -630,6 +630,9 @@ def find_web_sources(
             try:
                 bing_items = _parse_bing_rss(response.text)
             except SourceHunterError:
+                bing_items = []
+
+            if not bing_items:
                 parser = _BingParser()
                 parser.feed(response.text)
                 bing_items = parser.results
