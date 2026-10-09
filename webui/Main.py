@@ -1313,7 +1313,7 @@ def _render_task_table(filtered_tasks, key_prefix):
                     if st.button(
                         play_label,
                         key=f"play_task_{key_prefix}_{task_id}",
-                        use_container_width=True,
+                        width="stretch",
                         icon=":material/play_arrow:",
                         help=play_label,
                         disabled=not has_video,
@@ -1325,7 +1325,7 @@ def _render_task_table(filtered_tasks, key_prefix):
                     if st.button(
                         open_label,
                         key=f"open_task_{key_prefix}_{task_id}",
-                        use_container_width=True,
+                        width="stretch",
                         icon=":material/folder_open:",
                         help=open_label,
                     ):
@@ -1336,7 +1336,7 @@ def _render_task_table(filtered_tasks, key_prefix):
                     if st.button(
                         restore_label,
                         key=f"restore_task_{key_prefix}_{task_id}",
-                        use_container_width=True,
+                        width="stretch",
                         icon=":material/replay:",
                         help=restore_label,
                         disabled=is_processing or not has_restore_data,
@@ -1353,7 +1353,7 @@ def _render_task_table(filtered_tasks, key_prefix):
                     if st.button(
                         delete_label,
                         key=f"delete_task_{key_prefix}_{task_id}",
-                        use_container_width=True,
+                        width="stretch",
                         icon=":material/delete:",
                         help=delete_help,
                         disabled=is_busy,
@@ -1418,7 +1418,7 @@ def _render_task_video_preview():
     closed = preview_cols[1].button(
         "✕",
         key="close_task_video_preview",
-        use_container_width=True,
+        width="stretch",
         help=tr("Close"),
     )
     if closed:
@@ -1693,7 +1693,7 @@ def _render_task_restore_dialog(task_id):
     if cancel_col.button(
         tr("Cancel"),
         key="cancel_task_restore",
-        use_container_width=True,
+        width="stretch",
     ):
         st.session_state.pop("task_restore_candidate_id", None)
         st.rerun(scope="app")
@@ -1701,7 +1701,7 @@ def _render_task_restore_dialog(task_id):
         tr("Load Task Configuration"),
         key="confirm_task_restore",
         type="primary",
-        use_container_width=True,
+        width="stretch",
     ):
         st.session_state["task_restore_payload"] = payload
         st.session_state.pop("task_restore_candidate_id", None)
@@ -2108,7 +2108,7 @@ def _render_generation_task_snapshot(task_id, task):
                             key=f"download_generated_video_{task_id}_{video_index}",
                             icon=":material/download:",
                             on_click="ignore",
-                            use_container_width=True,
+                            width="stretch",
                         )
     except Exception as exc:
         logger.exception(
@@ -2796,7 +2796,7 @@ def _render_cache_management_settings(panel):
         if refresh_col.button(
             tr("Refresh Cache Stats"),
             key="refresh_video_cache_stats",
-            use_container_width=True,
+            width="stretch",
             icon=":material/refresh:",
         ):
             _get_video_cache_stats_data.clear()
@@ -2805,7 +2805,7 @@ def _render_cache_management_settings(panel):
         if open_col.button(
             tr("Open Cache Directory"),
             key="open_video_cache_directory",
-            use_container_width=True,
+            width="stretch",
             icon=":material/folder_open:",
         ):
             webbrowser.open(Path(cache_manager.video_cache_dir()).as_uri())
@@ -2816,7 +2816,7 @@ def _render_cache_management_settings(panel):
             key="clean_video_cache_now",
             type="primary",
             disabled=cleanup_disabled,
-            use_container_width=True,
+            width="stretch",
             icon=":material/delete_sweep:",
         ):
             result = cache_manager.clean_video_cache(max_age_days=max_age_days)
@@ -3080,7 +3080,7 @@ def _render_settings_transfer(params):
             ),
             file_name=SETTINGS_PRESET_FILE_NAME,
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
             key="export_settings_preset_button",
             icon=":material/download:",
         )
@@ -3135,7 +3135,7 @@ def _render_key_backup_settings(panel):
             file_name=KEY_BACKUP_FILE_NAME,
             mime="application/json",
             disabled=backup_key_count == 0,
-            use_container_width=True,
+            width="stretch",
             key="export_key_backup_button",
             icon=":material/download:",
         )
@@ -3585,7 +3585,7 @@ def _render_settings_dialog():
             if llm_form_panel.button(
                 tr("Test LLM Connection"),
                 key="test_llm_connection_button",
-                use_container_width=True,
+                width="stretch",
                 type="secondary",
                 icon=":material/network_check:",
             ):
@@ -4400,7 +4400,7 @@ def _render_loomloom_video_settings(params):
     refresh_models = st.button(
         tr("Refresh AI Video Models"),
         key="loomloom_refresh_video_models",
-        use_container_width=True,
+        width="stretch",
         disabled=not token,
     )
     capability = _load_loomloom_video_capability(token, force=refresh_models)
@@ -4619,7 +4619,7 @@ def _render_local_script_generation(params):
     if not st.button(
         tr("Generate Video Script and Keywords"),
         key="auto_generate_script",
-        use_container_width=True,
+        width="stretch",
         type="secondary",
         icon=":material/auto_awesome:",
     ):
@@ -4696,7 +4696,7 @@ def _render_loomloom_candidates():
         tr("Use Selected Candidate"),
         key="loomloom_apply_candidate",
         type="primary",
-        use_container_width=True,
+        width="stretch",
     ):
         st.session_state["video_script"] = selected.script
         st.session_state["video_terms"] = ", ".join(selected.video_terms)
@@ -4828,7 +4828,7 @@ def _render_loomloom_script_generation(params):
     if st.button(
         tr("Get LoomLoom Quote"),
         key="loomloom_quote_scripts",
-        use_container_width=True,
+        width="stretch",
         type="secondary",
         icon=":material/request_quote:",
         disabled=not effective_token or bool(st.session_state.get("loomloom_run_id")),
@@ -4902,7 +4902,7 @@ def _render_loomloom_script_generation(params):
         if st.button(
             tr("Run LoomLoom Batch"),
             key="loomloom_execute_scripts",
-            use_container_width=True,
+            width="stretch",
             type="primary",
             disabled=(not quote_is_current or not confirm_charge or run_in_progress),
         ):
@@ -4941,7 +4941,7 @@ def _render_loomloom_script_generation(params):
         if retry_col.button(
             tr("Resume LoomLoom Status Check"),
             key="loomloom_resume_status_check",
-            use_container_width=True,
+            width="stretch",
             type="secondary",
         ):
             st.session_state["loomloom_run_error"] = ""
@@ -4952,7 +4952,7 @@ def _render_loomloom_script_generation(params):
         if stop_col.button(
             tr("Stop Tracking LoomLoom Run"),
             key="loomloom_stop_tracking_run",
-            use_container_width=True,
+            width="stretch",
             type="secondary",
             help=tr("Stop Tracking LoomLoom Run Help"),
         ):
@@ -5097,14 +5097,14 @@ def _render_script_settings(panel, params):
                         key="restore_default_system_prompt",
                         icon=":material/restart_alt:",
                         on_click=reset_script_system_prompt,
-                        use_container_width=True,
+                        width="stretch",
                     ):
                         st.toast(tr("Default System Prompt Restored"))
                     if preview_prompt_col.button(
                         tr("Preview Final Prompt"),
                         key="preview_final_script_prompt",
                         icon=":material/preview:",
-                        use_container_width=True,
+                        width="stretch",
                     ):
                         render_script_prompt_preview(
                             llm.build_script_prompt(
@@ -5132,7 +5132,7 @@ def _render_script_settings(panel, params):
             elif st.button(
                 tr("Generate Video Keywords"),
                 key="auto_generate_terms",
-                use_container_width=True,
+                width="stretch",
                 type="secondary",
                 icon=":material/auto_awesome:",
             ):
@@ -6167,7 +6167,7 @@ def _render_voice_preview(params, friendly_names, selected_tts_server, voice_nam
         tr("Play Voice"),
         key="play_voice_button",
         icon=":material/graphic_eq:",
-        use_container_width=True,
+        width="stretch",
         disabled=bool(preview_validation_error),
     )
     full_preview_requested = preview_columns[1].button(
@@ -6175,7 +6175,7 @@ def _render_voice_preview(params, friendly_names, selected_tts_server, voice_nam
         key="generate_full_voiceover_preview_button",
         icon=":material/article:",
         help=tr("Full Voiceover Preview Cost Hint"),
-        use_container_width=True,
+        width="stretch",
         disabled=not bool(script_content) or bool(preview_validation_error),
     )
 
@@ -6458,7 +6458,7 @@ def _render_minimax_tts_settings() -> tuple[list[str], dict[str, str]]:
         tr("Load MiniMax Voices"),
         key="load_minimax_voices_button",
         icon=":material/refresh:",
-        use_container_width=True,
+        width="stretch",
     ):
         try:
             available_voices = voice.get_minimax_voice_catalog(
@@ -6830,7 +6830,7 @@ def _render_background_music_settings(params, elevenlabs_api_key_rendered=False)
         if st.button(
             tr("Test Sonilo Connection"),
             key="test_sonilo_connection_button",
-            use_container_width=True,
+            width="stretch",
         ):
             try:
                 sonilo_service.test_connection()
@@ -6859,7 +6859,7 @@ def _render_background_music_settings(params, elevenlabs_api_key_rendered=False)
         if st.button(
             tr("Test ElevenLabs Connection"),
             key="test_elevenlabs_music_connection_button",
-            use_container_width=True,
+            width="stretch",
         ):
             try:
                 elevenlabs_music_service.test_connection()
@@ -7353,7 +7353,7 @@ def _render_audio_settings(panel, params):
                             key="transcribe_voxcpm_prompt_audio_button",
                             icon=":material/transcribe:",
                             help=tr("Transcribe VoxCPM Prompt Audio Help"),
-                            use_container_width=True,
+                            width="stretch",
                             disabled=not bool(effective_prompt_audio),
                         ):
                             try:
@@ -7898,7 +7898,7 @@ def _render_subtitle_settings(panel, params):
                 key="restore_default_subtitle_settings",
                 icon=":material/restart_alt:",
                 on_click=reset_subtitle_settings,
-                use_container_width=True,
+                width="stretch",
             ):
                 st.toast(tr("Default Subtitle Settings Restored"))
 
@@ -7965,7 +7965,7 @@ def _render_generation_controls(
 
     start_button = st.button(
         tr("Generate Video"),
-        use_container_width=True,
+        width="stretch",
         type="primary",
         key="generate_video_button",
         on_click=_prepare_generation_task,
