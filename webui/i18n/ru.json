@@ -581,6 +581,7 @@
     "Documentary Source Hunter Web Results": "Официальные и веб-источники: {count}",
     "Documentary Source Hunter YouTube Results": "Видео-кандидаты YouTube: {count}",
     "Documentary Source Hunter Open Web Source": "Открыть веб-источник",
-    "Documentary Source Hunter Create Web Project": "Создать проект с источником"
+    "Documentary Source Hunter Create Web Project": "Создать проект с источником",
+    "Documentary Source Hunter Low Confidence": "Низкая уверенность: сначала открой и проверь источник вручную."
   }
 }
