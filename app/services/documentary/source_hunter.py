@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse
 from xml.etree import ElementTree
 
 import requests
@@ -18,7 +18,11 @@ from app.models.documentary import (
     SourceAsset,
     SourceType,
 )
-from app.services.documentary.youtube_source import build_youtube_source_asset
+from app.services.documentary.youtube_source import (
+    build_youtube_source_asset,
+    canonical_youtube_url,
+    extract_youtube_video_id,
+)
 
 _YOUTUBE_SEARCH_URL = "https://www.youtube.com/results"
 _DUCKDUCKGO_SEARCH_URL = "https://html.duckduckgo.com/html/"
@@ -92,6 +96,14 @@ class SourceHunterError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class EmbeddedMediaCandidate:
+    platform: str
+    url: str
+    label: str
+    source_page_url: str
+
+
+@dataclass(frozen=True)
 class SourceWebCandidate:
     title: str
     url: str
@@ -119,6 +131,38 @@ class SourceVideoCandidate:
     video_signal_score: int
     freshness_score: int
     reasons: tuple[str, ...]
+
+
+class _OfficialMediaParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.links: list[tuple[str, str]] = []
+        self._anchor_url = ""
+        self._anchor_text: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "a":
+            self._anchor_url = str(attrs.get("href") or "").strip()
+            self._anchor_text = []
+            return
+
+        if tag in {"iframe", "video", "source"}:
+            src = str(attrs.get("src") or "").strip()
+            if src:
+                label = str(attrs.get("title") or attrs.get("aria-label") or tag).strip()
+                self.links.append((src, label))
+
+    def handle_data(self, data):
+        if self._anchor_url:
+            self._anchor_text.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self._anchor_url:
+            label = re.sub(r"\s+", " ", "".join(self._anchor_text)).strip()
+            self.links.append((self._anchor_url, label or "linked media"))
+            self._anchor_url = ""
+            self._anchor_text = []
 
 
 class _DuckDuckGoParser(HTMLParser):
@@ -666,6 +710,119 @@ def _build_search_query(story_title: str) -> str:
     if not selected:
         selected = re.findall(r"[A-Za-z0-9]+", clean)[:7]
     return (" ".join(selected) + " " + _source_query_terms(story_title)).strip()
+
+
+def _official_page_allowed_for_inspection(url: str) -> bool:
+    parsed = urlparse((url or "").strip())
+    host = (parsed.hostname or "").lower()
+    return (
+        parsed.scheme in {"http", "https"}
+        and bool(host)
+        and host.endswith(".gov")
+        and parsed.username is None
+        and parsed.password is None
+    )
+
+
+def _normalize_embedded_media_url(
+    source_page_url: str,
+    raw_url: str,
+) -> tuple[str, str] | None:
+    absolute = urljoin(source_page_url, unescape((raw_url or "").strip()))
+    parsed = urlparse(absolute)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+
+    host = (parsed.hostname or "").lower()
+    if host in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}:
+        try:
+            video_id = extract_youtube_video_id(absolute)
+        except ValueError:
+            return None
+        return "youtube", canonical_youtube_url(video_id)
+
+    if host == "vimeo.com" or host.endswith(".vimeo.com"):
+        return "vimeo", absolute
+
+    path = parsed.path.lower()
+    if path.endswith((".mp4", ".mov", ".webm", ".m3u8")):
+        return "direct_video", absolute
+
+    return None
+
+
+def find_embedded_media(
+    source_page_url: str,
+    *,
+    limit: int = 6,
+    timeout_seconds: float = 8.0,
+    session=None,
+) -> list[EmbeddedMediaCandidate]:
+    """Inspect an official US .gov source page for embedded/linked video media.
+
+    The fetch is deliberately restricted to .gov pages discovered by Source Hunter;
+    arbitrary third-party URLs are not fetched by this helper.
+    """
+    if not _official_page_allowed_for_inspection(source_page_url):
+        raise SourceHunterError(
+            "embedded-media inspection is restricted to official .gov pages"
+        )
+
+    try:
+        limit = int(limit)
+        timeout_seconds = float(timeout_seconds)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid embedded-media inspection settings") from exc
+    if not 1 <= limit <= 20:
+        raise ValueError("embedded-media limit must be between 1 and 20")
+    if timeout_seconds <= 0:
+        raise ValueError("embedded-media timeout must be positive")
+
+    request = session or requests
+    try:
+        response = request.get(
+            source_page_url,
+            headers=_REQUEST_HEADERS,
+            timeout=min(timeout_seconds, 10.0),
+            allow_redirects=False,
+        )
+    except requests.RequestException as exc:
+        raise SourceHunterError("official source page request failed") from exc
+
+    if 300 <= response.status_code < 400:
+        raise SourceHunterError(
+            "official source page redirected; media inspection skipped"
+        )
+    if response.status_code != 200:
+        raise SourceHunterError(
+            f"official source page returned HTTP {response.status_code}"
+        )
+
+    parser = _OfficialMediaParser()
+    parser.feed((response.text or "")[:2_000_000])
+
+    results: list[EmbeddedMediaCandidate] = []
+    seen_urls: set[str] = set()
+    for raw_url, label in parser.links:
+        normalized = _normalize_embedded_media_url(source_page_url, raw_url)
+        if normalized is None:
+            continue
+        platform, media_url = normalized
+        if media_url in seen_urls:
+            continue
+        results.append(
+            EmbeddedMediaCandidate(
+                platform=platform,
+                url=media_url,
+                label=re.sub(r"\s+", " ", label or "").strip() or platform,
+                source_page_url=source_page_url,
+            )
+        )
+        seen_urls.add(media_url)
+        if len(results) >= limit:
+            break
+
+    return results
 
 
 def _web_candidates_from_items(
