@@ -575,6 +575,10 @@
     "Documentary Source Hunter Open Video": "Открыть видео",
     "Documentary Source Hunter Create Project": "Создать проект с видео",
     "Documentary Source Hunter Create Failed": "Не удалось создать проект с выбранным видео: {error}",
-    "Documentary Source Hunter Project Created": "Проект создан: добавлена статья и выбранное исходное видео."
+    "Documentary Source Hunter Project Created": "Проект создан: добавлена статья и выбранный источник.",
+    "Documentary Source Hunter Web Results": "Официальные и веб-источники: {count}",
+    "Documentary Source Hunter YouTube Results": "Видео-кандидаты YouTube: {count}",
+    "Documentary Source Hunter Open Web Source": "Открыть веб-источник",
+    "Documentary Source Hunter Create Web Project": "Создать проект с источником"
   }
 }
