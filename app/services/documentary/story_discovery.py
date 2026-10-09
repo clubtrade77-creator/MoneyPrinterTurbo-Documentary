@@ -41,6 +41,42 @@ _FOOTAGE_TERMS = (
     "video",
     "camera",
 )
+_FOOTAGE_PUBLISHED_PATTERNS = (
+    "video shows",
+    "video captures",
+    "video captured",
+    "video released",
+    "released video",
+    "footage shows",
+    "footage captures",
+    "footage captured",
+    "footage released",
+    "released footage",
+    "bodycam shows",
+    "bodycam captures",
+    "bodycam footage",
+    "dashcam shows",
+    "dashcam captures",
+    "caught on camera",
+    "caught on video",
+    "surveillance video shows",
+    "cctv shows",
+    "cctv footage shows",
+)
+_FOOTAGE_NOT_AVAILABLE_PATTERNS = (
+    "calls for footage",
+    "calls on",
+    "challenges",
+    "demands",
+    "asks for",
+    "urges",
+    "to release cctv",
+    "to release footage",
+    "release cctv footage",
+    "harbor cameras",
+    "install cameras",
+    "installation of cameras",
+)
 _STORY_TERM_WEIGHTS = {
     "shooting": 10,
     "homicide": 10,
@@ -208,11 +244,24 @@ def _score_text(title: str, *, published_at: str, now: datetime):
     normalized = re.sub(r"\s+", " ", (title or "").lower())
 
     footage_matches = [term for term in _FOOTAGE_TERMS if term in normalized]
+    published_matches = [
+        term for term in _FOOTAGE_PUBLISHED_PATTERNS if term in normalized
+    ]
+    unavailable_matches = [
+        term for term in _FOOTAGE_NOT_AVAILABLE_PATTERNS if term in normalized
+    ]
     story_matches = [
         term for term in _STORY_TERM_WEIGHTS if term in normalized
     ]
 
-    footage_score = min(40, 12 + len(footage_matches) * 8) if footage_matches else 0
+    footage_score = 0
+    if footage_matches:
+        footage_score = min(24, 8 + len(footage_matches) * 4)
+    if published_matches:
+        footage_score = min(40, footage_score + 16)
+    if unavailable_matches:
+        footage_score = max(0, footage_score - 18)
+
     story_score = min(
         30,
         sum(_STORY_TERM_WEIGHTS[term] for term in story_matches),
@@ -220,8 +269,16 @@ def _score_text(title: str, *, published_at: str, now: datetime):
     freshness_score, freshness_reason = _freshness_score(published_at, now=now)
 
     reasons = []
-    if footage_matches:
-        reasons.append("visual-source signal: " + ", ".join(footage_matches[:3]))
+    if published_matches:
+        reasons.append(
+            "published-footage signal: " + ", ".join(published_matches[:2])
+        )
+    elif footage_matches:
+        reasons.append("visual-source mention: " + ", ".join(footage_matches[:3]))
+    if unavailable_matches:
+        reasons.append(
+            "footage availability uncertain: " + ", ".join(unavailable_matches[:2])
+        )
     if story_matches:
         reasons.append("story signal: " + ", ".join(story_matches[:4]))
     reasons.append(freshness_reason)
