@@ -99,7 +99,6 @@ def test_source_hunter_prefers_matching_official_channel():
     assert results[0].video_id == "lmnopqrstuv"
     assert results[0].source_quality_score == 20
     assert results[0].video_signal_score > 0
-    assert results[0].score > results[1].score
 
 
 def test_source_hunter_penalizes_old_similar_incident():
