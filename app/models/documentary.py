@@ -533,6 +533,7 @@ class VideoMetadata(BaseModel):
     audio_codec: str = ""
     container: str = ""
     file_size_bytes: int = Field(default=0, ge=0)
+    voice_name: str = ""
     rotation_degrees: int = 0
     audio_channels: Optional[int] = Field(default=None, ge=1)
     audio_sample_rate: Optional[int] = Field(default=None, ge=1)
@@ -702,7 +703,22 @@ class DocumentaryProject(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
     sources: list[SourceAsset] = Field(default_factory=list)
     narration_audio: list[NarrationAudioAsset] = Field(default_factory=list)
+    narrator_voices: dict[str, str] = Field(default_factory=dict)
     plan: DocumentaryPlan = Field(default_factory=DocumentaryPlan)
+
+    @field_validator("narrator_voices")
+    @classmethod
+    def validate_narrator_voices(cls, value: dict[str, str]) -> dict[str, str]:
+        normalized: dict[str, str] = {}
+        for language, voice_name in (value or {}).items():
+            language_key = str(language or "").strip().lower()
+            voice_value = str(voice_name or "").strip()
+            if not re.fullmatch(r"[a-z]{2,8}(?:-[a-z0-9]{1,8}){0,3}", language_key):
+                raise ValueError("invalid documentary narrator voice language")
+            if not voice_value or len(voice_value) > 300:
+                raise ValueError("invalid documentary narrator voice")
+            normalized[language_key] = voice_value
+        return normalized
 
     @model_validator(mode="after")
     def validate_references_and_ids(self):
