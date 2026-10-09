@@ -47,12 +47,12 @@ def _youtube_html(renderers):
     return "var ytInitialData = " + json.dumps(payload) + ";</script>"
 
 
-def _renderer(video_id, title, channel):
+def _renderer(video_id, title, channel, published_text="2 hours ago"):
     return {
         "videoId": video_id,
         "title": {"runs": [{"text": title}]},
         "ownerText": {"runs": [{"text": channel}]},
-        "publishedTimeText": {"simpleText": "2 hours ago"},
+        "publishedTimeText": {"simpleText": published_text},
         "lengthText": {"simpleText": "8:12"},
         "viewCountText": {"simpleText": "12K views"},
     }
@@ -85,9 +85,57 @@ def test_source_hunter_prefers_matching_official_channel():
 
     assert len(results) == 2
     assert results[0].video_id == "lmnopqrstuv"
-    assert results[0].source_quality_score == 25
+    assert results[0].source_quality_score == 20
     assert results[0].video_signal_score > 0
     assert results[0].score > results[1].score
+
+
+def test_source_hunter_penalizes_old_similar_incident():
+    session = _Session(
+        _Response(
+            _youtube_html(
+                [
+                    _renderer(
+                        "abcdefghijk",
+                        "Suspect attacks two people, injures Portland police officer",
+                        "KGW News",
+                        "7 years ago",
+                    ),
+                    _renderer(
+                        "lmnopqrstuv",
+                        "Portland K9 shooting bodycam footage released after homicide suspect killed",
+                        "Local News",
+                        "3 hours ago",
+                    ),
+                ]
+            )
+        )
+    )
+
+    results = find_source_videos(
+        "Bodycam footage shows Portland police shooting that left suspect, K9 officer dead",
+        session=session,
+    )
+
+    assert results[0].video_id == "lmnopqrstuv"
+    assert results[0].freshness_score == 20
+    old = next(item for item in results if item.video_id == "abcdefghijk")
+    assert old.freshness_score == 0
+    assert results[0].score > old.score
+
+
+def test_source_hunter_query_keeps_k9_event_anchor():
+    session = _Session(_Response(_youtube_html([])))
+
+    find_source_videos(
+        "WATCH: Bodycam footage shows Portland police shooting that left suspect, K-9 officer dead",
+        session=session,
+    )
+
+    query = session.calls[0][1]["params"]["search_query"]
+    assert "k9" in query.lower()
+    assert "shooting" in query.lower()
+    assert "bodycam footage" in query.lower()
 
 
 def test_source_hunter_deduplicates_video_ids():
