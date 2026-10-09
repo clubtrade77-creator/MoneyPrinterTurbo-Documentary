@@ -77,6 +77,7 @@ def test_synthesis_persists_voice_and_reuses_current_audio(tmp_path, monkeypatch
     updated = load_project(project.id, tmp_path)
     assert updated.narrator_voices["en"] == "en-US-TestVoice"
     assert len(updated.narration_audio) == 1
+    assert updated.narration_audio[0].voice_name == "en-US-TestVoice"
 
 
 def test_synthesis_regenerates_after_voice_change(tmp_path, monkeypatch):
@@ -110,3 +111,62 @@ def test_synthesis_regenerates_after_voice_change(tmp_path, monkeypatch):
     assert calls == ["en-US-FirstVoice", "en-US-SecondVoice"]
     updated = load_project(project.id, tmp_path)
     assert updated.narrator_voices["en"] == "en-US-SecondVoice"
+
+
+def test_synthesis_resumes_without_repeating_completed_scene(tmp_path, monkeypatch):
+    project = _make_project(tmp_path)
+    project = load_project(project.id, tmp_path)
+    project.plan.scenes.append(
+        DocumentaryScene(
+            id="scene_second",
+            scene_type="narration_over_source",
+            source_id="source_video",
+            source_start=5.0,
+            source_end=10.0,
+            audio_mode=AudioMode.narration,
+            narration_text="Second narration.",
+        )
+    )
+    save_project(project, tmp_path)
+
+    calls = []
+    fail_second = {"value": True}
+
+    def fake_tts(**kwargs):
+        scene_name = Path(kwargs["voice_file"]).stem
+        calls.append(scene_name)
+        if scene_name == "scene_second" and fail_second["value"]:
+            return None
+        Path(kwargs["voice_file"]).write_bytes(b"audio")
+        return object()
+
+    monkeypatch.setattr(narration_synthesis.voice_service, "tts", fake_tts)
+    monkeypatch.setattr(
+        narration_synthesis.voice_service,
+        "get_audio_duration",
+        lambda path: 2.0,
+    )
+    monkeypatch.setattr(audio_service, "_probe_audio", lambda path: (2.0, "mp3"))
+
+    try:
+        narration_synthesis.synthesize_narration(
+            project.id,
+            "en-US-TestVoice",
+            root=tmp_path,
+        )
+    except narration_synthesis.NarrationSynthesisError:
+        pass
+    else:
+        raise AssertionError("the first run should fail on the second scene")
+
+    fail_second["value"] = False
+    calls.clear()
+    result = narration_synthesis.synthesize_narration(
+        project.id,
+        "en-US-TestVoice",
+        root=tmp_path,
+    )
+
+    assert calls == ["scene_second"]
+    assert len(result.reused) == 1
+    assert len(result.generated) == 1
