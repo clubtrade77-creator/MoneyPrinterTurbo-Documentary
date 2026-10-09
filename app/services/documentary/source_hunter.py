@@ -65,6 +65,8 @@ _STRONG_VIDEO_TERMS = (
     "raw video",
     "video released",
     "released footage",
+    "security camera",
+    "interview",
 )
 _QUERY_NOISE_TERMS = {
     "video", "watch", "footage", "shows", "show", "the", "that", "with", "from",
