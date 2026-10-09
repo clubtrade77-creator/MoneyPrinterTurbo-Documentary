@@ -43,11 +43,11 @@ _REQUEST_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 _OFFICIAL_CHANNEL_TERMS = (
-    "police",
+    "police department",
+    "police bureau",
     "sheriff",
-    "department",
+    "county sheriff",
     "city of",
-    "county",
     "state patrol",
     "highway patrol",
     "district attorney",
@@ -55,7 +55,8 @@ _OFFICIAL_CHANNEL_TERMS = (
     "court",
     "fire department",
     "public safety",
-    "official",
+    "u.s. marshals",
+    "us marshals",
 )
 _STRONG_VIDEO_TERMS = (
     "bodycam",
