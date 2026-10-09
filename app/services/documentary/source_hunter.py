@@ -59,6 +59,27 @@ _GOVERNMENT_DOMAIN_EXACT = {
     "canada.ca",
     "service-public.fr",
 }
+_COUNTRY_GOV_SEARCH_SUFFIX = {
+    "united states": ".gov",
+    "usa": ".gov",
+    "us": ".gov",
+    "united kingdom": ".gov.uk",
+    "uk": ".gov.uk",
+    "india": ".gov.in",
+    "australia": ".gov.au",
+    "brazil": ".gov.br",
+    "singapore": ".gov.sg",
+    "hong kong": ".gov.hk",
+    "ireland": ".gov.ie",
+    "south africa": ".gov.za",
+    "new zealand": ".govt.nz",
+    "mexico": ".gob.mx",
+    "japan": ".go.jp",
+    "south korea": ".go.kr",
+    "korea": ".go.kr",
+    "france": ".gouv.fr",
+    "canada": "canada.ca",
+}
 _REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -948,9 +969,18 @@ def _web_candidates_from_items(
     return candidates[:limit]
 
 
+def _official_search_query(query: str, source_country: str) -> str:
+    country = re.sub(r"\s+", " ", (source_country or "").strip().lower())
+    suffix = _COUNTRY_GOV_SEARCH_SUFFIX.get(country, "")
+    if suffix:
+        return f"{query} site:{suffix}"
+    return f"{query} official"
+
+
 def find_web_sources(
     story_title: str,
     *,
+    source_country: str = "",
     limit: int = 8,
     timeout_seconds: float = 20.0,
     session=None,
@@ -964,7 +994,7 @@ def find_web_sources(
         raise ValueError("source hunter web limit must be between 1 and 20")
 
     query = _build_web_search_query(story_title)
-    official_query = query + " site:.gov"
+    official_query = _official_search_query(query, source_country)
     request = session or requests
     provider_timeout = min(float(timeout_seconds), 10.0)
     errors = []
