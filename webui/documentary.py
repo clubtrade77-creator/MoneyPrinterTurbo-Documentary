@@ -35,6 +35,11 @@ from app.services.documentary.story_discovery import (
     candidate_to_source,
     discover_stories,
 )
+from app.services.documentary.source_hunter import (
+    SourceHunterError,
+    candidate_to_youtube_source,
+    find_source_videos,
+)
 from app.services.documentary.story_planner import (
     StoryPlannerError,
     load_story_plan,
@@ -419,28 +424,123 @@ def _render_story_discovery(tr: Tr) -> None:
                     candidate.url,
                     width="stretch",
                 )
+
+                hunter_key = f"documentary_source_hunter_{candidate.id}"
                 if actions[1].button(
-                    tr("Documentary Story Discovery Create Project"),
+                    tr("Documentary Source Hunter Search"),
                     type="primary",
                     width="stretch",
-                    key=f"documentary_story_discovery_create_{candidate.id}",
+                    key=f"documentary_source_hunter_search_{candidate.id}",
                 ):
                     try:
-                        project = create_project(
-                            candidate.title,
-                            master_language=project_language,
-                        )
-                        add_source(project.id, candidate_to_source(candidate))
-                    except (OSError, ValueError) as exc:
+                        with st.spinner(tr("Documentary Source Hunter Searching")):
+                            source_candidates = find_source_videos(
+                                candidate.title,
+                                limit=6,
+                            )
+                    except (OSError, ValueError, SourceHunterError) as exc:
                         st.error(
-                            tr("Documentary Story Discovery Create Failed").format(
+                            tr("Documentary Source Hunter Failed").format(
                                 error=str(exc)
                             )
                         )
                     else:
-                        st.session_state["documentary_project_id"] = project.id
-                        st.success(tr("Documentary Story Discovery Project Created"))
-                        st.rerun()
+                        st.session_state[hunter_key] = source_candidates
+
+                source_candidates = st.session_state.get(hunter_key, [])
+                if source_candidates:
+                    st.markdown(
+                        f"**{tr('Documentary Source Hunter Results').format(count=len(source_candidates))}**"
+                    )
+
+                for source_index, source_candidate in enumerate(
+                    source_candidates,
+                    start=1,
+                ):
+                    with st.container(border=True):
+                        st.markdown(
+                            f"**{source_index}. {source_candidate.title}**"
+                        )
+                        source_meta = " · ".join(
+                            item
+                            for item in (
+                                source_candidate.channel,
+                                source_candidate.published_text,
+                                source_candidate.duration_text,
+                                source_candidate.view_count_text,
+                            )
+                            if item
+                        )
+                        if source_meta:
+                            st.caption(source_meta)
+
+                        source_scores = st.columns(4)
+                        source_scores[0].metric(
+                            tr("Documentary Source Hunter Score"),
+                            f"{source_candidate.score}/100",
+                        )
+                        source_scores[1].metric(
+                            tr("Documentary Source Hunter Match"),
+                            source_candidate.title_overlap_score,
+                        )
+                        source_scores[2].metric(
+                            tr("Documentary Source Hunter Official"),
+                            source_candidate.source_quality_score,
+                        )
+                        source_scores[3].metric(
+                            tr("Documentary Source Hunter Video Signal"),
+                            source_candidate.video_signal_score,
+                        )
+
+                        if source_candidate.reasons:
+                            st.caption(" · ".join(source_candidate.reasons))
+
+                        source_actions = st.columns([1, 1])
+                        source_actions[0].link_button(
+                            tr("Documentary Source Hunter Open Video"),
+                            source_candidate.url,
+                            width="stretch",
+                        )
+                        if source_actions[1].button(
+                            tr("Documentary Source Hunter Create Project"),
+                            type="primary",
+                            width="stretch",
+                            key=(
+                                "documentary_source_hunter_create_"
+                                f"{candidate.id}_{source_candidate.video_id}"
+                            ),
+                        ):
+                            try:
+                                project = create_project(
+                                    candidate.title,
+                                    master_language=project_language,
+                                )
+                                add_source(
+                                    project.id,
+                                    candidate_to_source(candidate),
+                                )
+                                add_source(
+                                    project.id,
+                                    candidate_to_youtube_source(
+                                        source_candidate
+                                    ),
+                                )
+                            except (OSError, ValueError) as exc:
+                                st.error(
+                                    tr(
+                                        "Documentary Source Hunter Create Failed"
+                                    ).format(error=str(exc))
+                                )
+                            else:
+                                st.session_state[
+                                    "documentary_project_id"
+                                ] = project.id
+                                st.success(
+                                    tr(
+                                        "Documentary Source Hunter Project Created"
+                                    )
+                                )
+                                st.rerun()
 
 
 def _render_create_project(tr: Tr) -> None:
