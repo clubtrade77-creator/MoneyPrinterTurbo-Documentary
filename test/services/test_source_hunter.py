@@ -194,11 +194,42 @@ def test_source_hunter_finds_official_web_source():
         session=session,
     )
 
-    assert len(results) == 2
+    assert len(results) == 1
     assert results[0].domain == "portlandoregon.gov"
     assert results[0].official_score == 35
     assert results[0].video_signal_score > 0
     assert results[0].score > results[1].score
+
+
+def test_source_hunter_filters_irrelevant_web_results():
+    html = """
+    <html><body>
+      <div class="result">
+        <a class="result__a" href="https://support.microsoft.com/printer-driver">
+          Download and install printer drivers
+        </a>
+        <a class="result__snippet">
+          Microsoft recommends installing the latest printer driver.
+        </a>
+      </div>
+      <div class="result">
+        <a class="result__a" href="https://agency.gov/bodycam-release">
+          Police department releases bodycam footage after K9 shooting
+        </a>
+        <a class="result__snippet">
+          Official body camera video from the Portland shooting.
+        </a>
+      </div>
+    </body></html>
+    """
+
+    results = find_web_sources(
+        "Bodycam footage shows Portland police shooting that left suspect, K9 officer dead",
+        session=_Session(_Response(html)),
+    )
+
+    assert len(results) == 1
+    assert results[0].domain == "agency.gov"
 
 
 def test_source_hunter_web_search_falls_back_to_bing():
@@ -232,6 +263,32 @@ def test_source_hunter_web_search_falls_back_to_bing():
     assert len(session.calls) == 2
     assert "duckduckgo.com" in session.calls[0][0]
     assert "bing.com" in session.calls[1][0]
+
+
+def test_source_hunter_parses_bing_rss_fallback():
+    rss = """<?xml version="1.0"?>
+    <rss><channel>
+      <item>
+        <title>Portland Police Bureau releases bodycam footage in K9 shooting</title>
+        <link>https://www.portlandoregon.gov/police/article/123</link>
+        <description>Official police bureau page with released body camera video.</description>
+      </item>
+    </channel></rss>
+    """
+    session = _SequenceSession(
+        [
+            _Response("<html><body>No results</body></html>", status_code=200),
+            _Response(rss, status_code=200),
+        ]
+    )
+
+    results = find_web_sources(
+        "Bodycam footage shows Portland police shooting that left suspect, K9 officer dead",
+        session=session,
+    )
+
+    assert len(results) == 1
+    assert results[0].domain == "portlandoregon.gov"
 
 
 def test_source_hunter_web_converter_preserves_rights_review():
