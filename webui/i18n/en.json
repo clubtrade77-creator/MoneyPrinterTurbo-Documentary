@@ -717,6 +717,18 @@
     "Documentary Story Discovery Open Source": "Open source article",
     "Documentary Story Discovery Create Project": "Create project",
     "Documentary Story Discovery Create Failed": "Could not create project: {error}",
-    "Documentary Story Discovery Project Created": "Documentary project created from this story lead."
+    "Documentary Story Discovery Project Created": "Documentary project created from this story lead.",
+    "Documentary Source Hunter Search": "Find original videos",
+    "Documentary Source Hunter Searching": "Searching YouTube for likely source videos…",
+    "Documentary Source Hunter Failed": "Source Hunter failed: {error}",
+    "Documentary Source Hunter Results": "Source video candidates: {count}",
+    "Documentary Source Hunter Score": "Score",
+    "Documentary Source Hunter Match": "Story match",
+    "Documentary Source Hunter Official": "Official source",
+    "Documentary Source Hunter Video Signal": "Video signal",
+    "Documentary Source Hunter Open Video": "Open video",
+    "Documentary Source Hunter Create Project": "Create project with video",
+    "Documentary Source Hunter Create Failed": "Could not create project with selected video: {error}",
+    "Documentary Source Hunter Project Created": "Project created with the story article and selected source video."
   }
 }
