@@ -256,6 +256,60 @@ def test_discover_stories_camera_infrastructure_is_not_treated_as_footage():
     assert result.footage_score <= 4
 
 
+def test_discover_stories_recognizes_doorbell_and_cellphone_footage():
+    session = _Session(
+        _Response(
+            {
+                "articles": [
+                    {
+                        "url": "https://example.com/doorbell",
+                        "title": "Doorbell camera shows dramatic rescue after fire",
+                        "seendate": "20261009T060000Z",
+                    },
+                    {
+                        "url": "https://example.com/cellphone",
+                        "title": "Cell phone video shows passengers escaping crash",
+                        "seendate": "20261009T055000Z",
+                    },
+                ]
+            }
+        )
+    )
+
+    results = discover_stories(
+        limit=10,
+        session=session,
+        now=datetime(2026, 10, 9, 7, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(results) == 2
+    assert all(item.footage_score >= 28 for item in results)
+
+
+def test_discover_stories_recognizes_interview_footage():
+    session = _Session(
+        _Response(
+            {
+                "articles": [
+                    {
+                        "url": "https://example.com/interview",
+                        "title": "Interview footage reveals survivor account after rescue",
+                        "seendate": "20261009T060000Z",
+                    }
+                ]
+            }
+        )
+    )
+
+    result = discover_stories(
+        limit=10,
+        session=session,
+        now=datetime(2026, 10, 9, 7, 0, tzinfo=timezone.utc),
+    )[0]
+
+    assert result.footage_score > 0
+
+
 def test_discover_stories_scores_high_stakes_story_terms():
     session = _Session(
         _Response(
