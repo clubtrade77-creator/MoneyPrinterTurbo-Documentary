@@ -446,6 +446,7 @@ def _render_story_discovery(tr: Tr) -> None:
                         try:
                             bundle["web"] = find_web_sources(
                                 candidate.title,
+                                source_country=candidate.source_country,
                                 limit=6,
                             )
                         except (OSError, ValueError, SourceHunterError) as exc:
