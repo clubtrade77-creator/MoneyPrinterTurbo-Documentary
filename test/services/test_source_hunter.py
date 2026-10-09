@@ -95,7 +95,7 @@ def test_source_hunter_prefers_matching_official_channel():
         session=session,
     )
 
-    assert len(results) == 2
+    assert len(results) == 1
     assert results[0].video_id == "lmnopqrstuv"
     assert results[0].source_quality_score == 20
     assert results[0].video_signal_score > 0
@@ -129,11 +129,9 @@ def test_source_hunter_penalizes_old_similar_incident():
         session=session,
     )
 
+    assert len(results) == 1
     assert results[0].video_id == "lmnopqrstuv"
     assert results[0].freshness_score == 20
-    old = next(item for item in results if item.video_id == "abcdefghijk")
-    assert old.freshness_score == 0
-    assert results[0].score > old.score
 
 
 def test_source_hunter_query_keeps_k9_event_anchor():
@@ -148,6 +146,99 @@ def test_source_hunter_query_keeps_k9_event_anchor():
     assert "k9" in query.lower()
     assert "shooting" in query.lower()
     assert "bodycam footage" in query.lower()
+
+
+def test_source_hunter_understands_short_youtube_age_labels():
+    session = _Session(
+        _Response(
+            _youtube_html(
+                [
+                    _renderer(
+                        "abcdefghijk",
+                        "Bodycam footage released after K9 shooting",
+                        "Local News",
+                        "2w ago",
+                    ),
+                    _renderer(
+                        "lmnopqrstuv",
+                        "Bodycam footage released after K9 shooting update",
+                        "Local News",
+                        "9d ago",
+                    ),
+                ]
+            )
+        )
+    )
+
+    results = find_source_videos(
+        "Bodycam footage shows Portland police shooting that left suspect, K9 officer dead",
+        session=session,
+    )
+
+    assert results
+    by_id = {item.video_id: item for item in results}
+    assert by_id["abcdefghijk"].freshness_score == 14
+    assert by_id["lmnopqrstuv"].freshness_score == 14
+
+
+def test_source_hunter_filters_news_recaps_without_source_video_signal():
+    session = _Session(
+        _Response(
+            _youtube_html(
+                [
+                    _renderer(
+                        "abcdefghijk",
+                        "Wanted Gresham homicide suspect dead after police shooting in Portland; police K-9 killed",
+                        "KATU News",
+                        "2w ago",
+                    ),
+                    _renderer(
+                        "lmnopqrstuv",
+                        "Portland Police release bodycam footage from K9 shooting",
+                        "Local News",
+                        "2 hours ago",
+                    ),
+                ]
+            )
+        )
+    )
+
+    results = find_source_videos(
+        "Bodycam footage shows Portland police shooting that left suspect, K9 officer dead",
+        session=session,
+    )
+
+    assert len(results) == 1
+    assert results[0].video_id == "lmnopqrstuv"
+    assert results[0].video_signal_score > 0
+
+
+def test_source_hunter_deduplicates_same_title_different_video_ids():
+    session = _Session(
+        _Response(
+            _youtube_html(
+                [
+                    _renderer(
+                        "abcdefghijk",
+                        "Portland Police release bodycam footage from K9 shooting",
+                        "Local News",
+                    ),
+                    _renderer(
+                        "lmnopqrstuv",
+                        "Portland Police release bodycam footage from K9 shooting",
+                        "Local News",
+                    ),
+                ]
+            )
+        )
+    )
+
+    results = find_source_videos(
+        "Bodycam footage shows Portland police shooting that left suspect, K9 officer dead",
+        session=session,
+    )
+
+    assert len(results) == 1
 
 
 def test_source_hunter_deduplicates_video_ids():
