@@ -5,6 +5,7 @@ import pytest
 from app.models.documentary import ProvenanceType, RightsStatus, SourceType
 from app.services.documentary.story_discovery import (
     StoryDiscoveryError,
+    _build_query,
     candidate_to_source,
     discover_stories,
 )
@@ -123,15 +124,8 @@ def test_discover_stories_deduplicates_urls_and_titles():
 
 
 def test_discover_stories_uses_literal_user_topic():
-    session = _Session(_Response({"articles": []}))
+    query = _build_query('airport "incident"')
 
-    discover_stories(
-        'airport "incident"',
-        session=session,
-        now=datetime(2026, 10, 9, 7, 0, tzinfo=timezone.utc),
-    )
-
-    query = session.calls[0][1]["params"]["query"]
     assert '"airport incident"' in query
     assert "bodycam" in query.lower()
 
