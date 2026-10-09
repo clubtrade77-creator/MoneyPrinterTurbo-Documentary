@@ -39,6 +39,8 @@ from app.services.documentary.source_hunter import (
     SourceHunterError,
     candidate_to_web_source,
     candidate_to_youtube_source,
+    embedded_media_to_source,
+    find_embedded_media,
     find_source_videos,
     find_web_sources,
 )
@@ -434,7 +436,12 @@ def _render_story_discovery(tr: Tr) -> None:
                     width="stretch",
                     key=f"documentary_source_hunter_search_{candidate.id}",
                 ):
-                    bundle = {"web": [], "videos": [], "errors": []}
+                    bundle = {
+                        "web": [],
+                        "videos": [],
+                        "embedded": {},
+                        "errors": [],
+                    }
                     with st.spinner(tr("Documentary Source Hunter Searching")):
                         try:
                             bundle["web"] = find_web_sources(
@@ -443,6 +450,29 @@ def _render_story_discovery(tr: Tr) -> None:
                             )
                         except (OSError, ValueError, SourceHunterError) as exc:
                             bundle["errors"].append(f"web: {exc}")
+                        else:
+                            for official_candidate in bundle["web"]:
+                                if official_candidate.official_score < 35:
+                                    continue
+                                try:
+                                    media = find_embedded_media(
+                                        official_candidate.url,
+                                        limit=4,
+                                    )
+                                except (
+                                    OSError,
+                                    ValueError,
+                                    SourceHunterError,
+                                ) as exc:
+                                    bundle["errors"].append(
+                                        f"official media: {exc}"
+                                    )
+                                else:
+                                    if media:
+                                        bundle["embedded"][
+                                            official_candidate.url
+                                        ] = media
+                                break
 
                         try:
                             bundle["videos"] = find_source_videos(
@@ -463,10 +493,16 @@ def _render_story_discovery(tr: Tr) -> None:
 
                 source_bundle = st.session_state.get(
                     hunter_key,
-                    {"web": [], "videos": [], "errors": []},
+                    {
+                        "web": [],
+                        "videos": [],
+                        "embedded": {},
+                        "errors": [],
+                    },
                 )
                 web_candidates = source_bundle.get("web", [])
                 source_candidates = source_bundle.get("videos", [])
+                embedded_by_page = source_bundle.get("embedded", {})
                 source_errors = source_bundle.get("errors", [])
 
                 if source_errors:
@@ -513,6 +549,84 @@ def _render_story_discovery(tr: Tr) -> None:
 
                         if web_candidate.reasons:
                             st.caption(" · ".join(web_candidate.reasons))
+
+                        embedded_media = embedded_by_page.get(
+                            web_candidate.url,
+                            [],
+                        )
+                        if embedded_media:
+                            st.markdown(
+                                f"**{tr('Documentary Source Hunter Embedded Media').format(count=len(embedded_media))}**"
+                            )
+                            for media_index, media_candidate in enumerate(
+                                embedded_media,
+                                start=1,
+                            ):
+                                media_actions = st.columns([1, 1])
+                                platform_label = {
+                                    "youtube": "YouTube",
+                                    "vimeo": "Vimeo",
+                                    "direct_video": tr(
+                                        "Documentary Source Hunter Direct Video"
+                                    ),
+                                }.get(
+                                    media_candidate.platform,
+                                    media_candidate.platform,
+                                )
+                                media_actions[0].link_button(
+                                    f"{platform_label}: {media_candidate.label}",
+                                    media_candidate.url,
+                                    width="stretch",
+                                )
+                                if media_actions[1].button(
+                                    tr(
+                                        "Documentary Source Hunter Create Embedded Project"
+                                    ),
+                                    type="primary",
+                                    width="stretch",
+                                    key=(
+                                        "documentary_source_hunter_embedded_create_"
+                                        f"{candidate.id}_{web_index}_{media_index}"
+                                    ),
+                                ):
+                                    try:
+                                        project = create_project(
+                                            candidate.title,
+                                            master_language=project_language,
+                                        )
+                                        add_source(
+                                            project.id,
+                                            candidate_to_source(candidate),
+                                        )
+                                        add_source(
+                                            project.id,
+                                            candidate_to_web_source(
+                                                web_candidate
+                                            ),
+                                        )
+                                        add_source(
+                                            project.id,
+                                            embedded_media_to_source(
+                                                media_candidate,
+                                                title=web_candidate.title,
+                                            ),
+                                        )
+                                    except (OSError, ValueError) as exc:
+                                        st.error(
+                                            tr(
+                                                "Documentary Source Hunter Create Failed"
+                                            ).format(error=str(exc))
+                                        )
+                                    else:
+                                        st.session_state[
+                                            "documentary_project_id"
+                                        ] = project.id
+                                        st.success(
+                                            tr(
+                                                "Documentary Source Hunter Project Created"
+                                            )
+                                        )
+                                        st.rerun()
 
                         web_actions = st.columns([1, 1])
                         web_actions[0].link_button(
