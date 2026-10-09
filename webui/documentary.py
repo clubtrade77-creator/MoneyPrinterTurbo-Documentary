@@ -451,13 +451,18 @@ def _render_story_discovery(tr: Tr) -> None:
                         except (OSError, ValueError, SourceHunterError) as exc:
                             bundle["errors"].append(f"web: {exc}")
                         else:
+                            inspected_official_pages = 0
                             for official_candidate in bundle["web"]:
                                 if official_candidate.official_score < 35:
                                     continue
+                                if inspected_official_pages >= 3:
+                                    break
+                                inspected_official_pages += 1
                                 try:
                                     media = find_embedded_media(
                                         official_candidate.url,
                                         limit=4,
+                                        timeout_seconds=6.0,
                                     )
                                 except (
                                     OSError,
@@ -467,12 +472,13 @@ def _render_story_discovery(tr: Tr) -> None:
                                     bundle["errors"].append(
                                         f"official media: {exc}"
                                     )
-                                else:
-                                    if media:
-                                        bundle["embedded"][
-                                            official_candidate.url
-                                        ] = media
-                                break
+                                    continue
+
+                                if media:
+                                    bundle["embedded"][
+                                        official_candidate.url
+                                    ] = media
+                                    break
 
                         try:
                             bundle["videos"] = find_source_videos(
