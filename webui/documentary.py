@@ -37,8 +37,10 @@ from app.services.documentary.story_discovery import (
 )
 from app.services.documentary.source_hunter import (
     SourceHunterError,
+    candidate_to_web_source,
     candidate_to_youtube_source,
     find_source_videos,
+    find_web_sources,
 )
 from app.services.documentary.story_planner import (
     StoryPlannerError,
@@ -432,25 +434,126 @@ def _render_story_discovery(tr: Tr) -> None:
                     width="stretch",
                     key=f"documentary_source_hunter_search_{candidate.id}",
                 ):
-                    try:
-                        with st.spinner(tr("Documentary Source Hunter Searching")):
-                            source_candidates = find_source_videos(
+                    bundle = {"web": [], "videos": [], "errors": []}
+                    with st.spinner(tr("Documentary Source Hunter Searching")):
+                        try:
+                            bundle["web"] = find_web_sources(
                                 candidate.title,
                                 limit=6,
                             )
-                    except (OSError, ValueError, SourceHunterError) as exc:
+                        except (OSError, ValueError, SourceHunterError) as exc:
+                            bundle["errors"].append(f"web: {exc}")
+
+                        try:
+                            bundle["videos"] = find_source_videos(
+                                candidate.title,
+                                limit=6,
+                            )
+                        except (OSError, ValueError, SourceHunterError) as exc:
+                            bundle["errors"].append(f"YouTube: {exc}")
+
+                    if not bundle["web"] and not bundle["videos"]:
                         st.error(
                             tr("Documentary Source Hunter Failed").format(
-                                error=str(exc)
+                                error="; ".join(bundle["errors"])
                             )
                         )
                     else:
-                        st.session_state[hunter_key] = source_candidates
+                        st.session_state[hunter_key] = bundle
 
-                source_candidates = st.session_state.get(hunter_key, [])
+                source_bundle = st.session_state.get(
+                    hunter_key,
+                    {"web": [], "videos": [], "errors": []},
+                )
+                web_candidates = source_bundle.get("web", [])
+                source_candidates = source_bundle.get("videos", [])
+
+                if web_candidates:
+                    st.markdown(
+                        f"**{tr('Documentary Source Hunter Web Results').format(count=len(web_candidates))}**"
+                    )
+
+                for web_index, web_candidate in enumerate(
+                    web_candidates,
+                    start=1,
+                ):
+                    with st.container(border=True):
+                        st.markdown(
+                            f"**{web_index}. {web_candidate.title}**"
+                        )
+                        st.caption(web_candidate.domain)
+                        if web_candidate.snippet:
+                            st.caption(web_candidate.snippet)
+
+                        web_scores = st.columns(4)
+                        web_scores[0].metric(
+                            tr("Documentary Source Hunter Score"),
+                            f"{web_candidate.score}/100",
+                        )
+                        web_scores[1].metric(
+                            tr("Documentary Source Hunter Match"),
+                            web_candidate.title_overlap_score,
+                        )
+                        web_scores[2].metric(
+                            tr("Documentary Source Hunter Official"),
+                            web_candidate.official_score,
+                        )
+                        web_scores[3].metric(
+                            tr("Documentary Source Hunter Video Signal"),
+                            web_candidate.video_signal_score,
+                        )
+
+                        if web_candidate.reasons:
+                            st.caption(" · ".join(web_candidate.reasons))
+
+                        web_actions = st.columns([1, 1])
+                        web_actions[0].link_button(
+                            tr("Documentary Source Hunter Open Web Source"),
+                            web_candidate.url,
+                            width="stretch",
+                        )
+                        if web_actions[1].button(
+                            tr("Documentary Source Hunter Create Web Project"),
+                            type="primary",
+                            width="stretch",
+                            key=(
+                                "documentary_source_hunter_web_create_"
+                                f"{candidate.id}_{web_index}"
+                            ),
+                        ):
+                            try:
+                                project = create_project(
+                                    candidate.title,
+                                    master_language=project_language,
+                                )
+                                add_source(
+                                    project.id,
+                                    candidate_to_source(candidate),
+                                )
+                                add_source(
+                                    project.id,
+                                    candidate_to_web_source(web_candidate),
+                                )
+                            except (OSError, ValueError) as exc:
+                                st.error(
+                                    tr(
+                                        "Documentary Source Hunter Create Failed"
+                                    ).format(error=str(exc))
+                                )
+                            else:
+                                st.session_state[
+                                    "documentary_project_id"
+                                ] = project.id
+                                st.success(
+                                    tr(
+                                        "Documentary Source Hunter Project Created"
+                                    )
+                                )
+                                st.rerun()
+
                 if source_candidates:
                     st.markdown(
-                        f"**{tr('Documentary Source Hunter Results').format(count=len(source_candidates))}**"
+                        f"**{tr('Documentary Source Hunter YouTube Results').format(count=len(source_candidates))}**"
                     )
 
                 for source_index, source_candidate in enumerate(
