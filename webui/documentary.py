@@ -26,6 +26,10 @@ from app.services.documentary.project import (
     project_dir,
     project_manifest_path,
 )
+from app.services.documentary.narration_synthesis import (
+    NarrationSynthesisError,
+    synthesize_narration,
+)
 from app.services.documentary.narration import (
     NarrationWriterError,
     write_narration,
@@ -1338,9 +1342,20 @@ def _render_narration_writer(project, tr: Tr) -> None:
         st.markdown(f"**{tr('Documentary Voice Preview')}**")
         voice_options = _documentary_voice_options(project.master_language)
         voice_by_id = dict(voice_options)
+        voice_ids = list(voice_by_id)
+        persisted_voice = project.narrator_voices.get(
+            project.master_language.lower(),
+            "",
+        )
+        default_voice_index = (
+            voice_ids.index(persisted_voice)
+            if persisted_voice in voice_ids
+            else 0
+        )
         selected_voice = st.selectbox(
             tr("Documentary Voice"),
-            options=list(voice_by_id),
+            options=voice_ids,
+            index=default_voice_index,
             format_func=lambda value: voice_by_id[value],
             key=f"documentary_voice_preview_voice_{project.id}",
             help=tr("Documentary Voice Help"),
@@ -1373,6 +1388,48 @@ def _render_narration_writer(project, tr: Tr) -> None:
         preview_value = st.session_state.get(preview_state_key)
         if preview_value and Path(preview_value).is_file():
             st.audio(preview_value)
+
+        narrated_scenes = [
+            scene
+            for scene in project.plan.scenes
+            if scene.audio_mode in {AudioMode.narration, AudioMode.mixed}
+            and scene.narration_text.strip()
+        ]
+        if narrated_scenes and narration_needed == 0:
+            st.caption(tr("Documentary Narration Audio Help"))
+            if st.button(
+                tr("Documentary Narration Audio Generate"),
+                type="primary",
+                width="stretch",
+                key=f"documentary_narration_audio_generate_{project.id}",
+            ):
+                try:
+                    with st.spinner(
+                        tr("Documentary Narration Audio Generating")
+                    ):
+                        synthesis = synthesize_narration(
+                            project.id,
+                            selected_voice,
+                            language=project.master_language,
+                        )
+                except (
+                    OSError,
+                    ValueError,
+                    NarrationSynthesisError,
+                ) as exc:
+                    st.error(
+                        tr("Documentary Narration Audio Failed").format(
+                            error=str(exc)
+                        )
+                    )
+                else:
+                    st.success(
+                        tr("Documentary Narration Audio Complete").format(
+                            generated=len(synthesis.generated),
+                            reused=len(synthesis.reused),
+                        )
+                    )
+                    st.rerun()
 
 
 def _render_master_video(project, tr: Tr) -> None:
