@@ -729,6 +729,10 @@
     "Documentary Source Hunter Open Video": "Open video",
     "Documentary Source Hunter Create Project": "Create project with video",
     "Documentary Source Hunter Create Failed": "Could not create project with selected video: {error}",
-    "Documentary Source Hunter Project Created": "Project created with the story article and selected source video."
+    "Documentary Source Hunter Project Created": "Project created with the story article and selected source video.",
+    "Documentary Source Hunter Web Results": "Official/web source candidates: {count}",
+    "Documentary Source Hunter YouTube Results": "YouTube video candidates: {count}",
+    "Documentary Source Hunter Open Web Source": "Open web source",
+    "Documentary Source Hunter Create Web Project": "Create project with source"
   }
 }
