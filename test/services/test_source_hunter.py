@@ -146,6 +146,62 @@ def test_source_hunter_web_query_prioritizes_event_anchors():
     assert "suspect" not in query.lower()
 
 
+def test_source_hunter_rejects_wrong_city_same_k9_shooting():
+    session = _Session(
+        _Response(
+            _youtube_html(
+                [
+                    _renderer(
+                        "abcdefghijk",
+                        "Riverside Sheriff's Dept. release bodycam footage of suspect and K9 shooting deaths",
+                        "CBS LA",
+                        "3y ago",
+                    ),
+                    _renderer(
+                        "lmnopqrstuv",
+                        "Portland K9 shooting bodycam footage released after homicide suspect killed",
+                        "KATU News",
+                        "2 hours ago",
+                    ),
+                ]
+            )
+        )
+    )
+
+    results = find_source_videos(
+        "Bodycam footage shows Portland police shooting that left suspect, K9 officer dead",
+        session=session,
+    )
+
+    assert len(results) == 1
+    assert results[0].video_id == "lmnopqrstuv"
+
+
+def test_source_hunter_can_match_place_from_official_channel_name():
+    session = _Session(
+        _Response(
+            _youtube_html(
+                [
+                    _renderer(
+                        "abcdefghijk",
+                        "Officer involved shooting bodycam footage released",
+                        "Portland Police Bureau",
+                        "3 hours ago",
+                    )
+                ]
+            )
+        )
+    )
+
+    results = find_source_videos(
+        "Bodycam footage shows Portland police shooting that left suspect, K9 officer dead",
+        session=session,
+    )
+
+    assert len(results) == 1
+    assert results[0].video_id == "abcdefghijk"
+
+
 def test_source_hunter_rejects_old_generic_same_city_shooting():
     session = _Session(
         _Response(
