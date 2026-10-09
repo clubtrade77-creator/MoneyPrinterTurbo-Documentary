@@ -246,6 +246,8 @@ def _story_title_key(title: str) -> str:
     """Normalize editorial prefixes/punctuation so syndicated headlines deduplicate."""
     value = _TITLE_NOISE_PREFIX_RE.sub("", (title or "").strip())
     value = value.lower()
+    # Preserve short but meaningful entities before punctuation is stripped.
+    value = re.sub(r"\bk[\s_-]*9\b", "k9", value)
     value = re.sub(r"[^\w]+", " ", value, flags=re.UNICODE)
     return re.sub(r"\s+", " ", value).strip()
 
@@ -274,7 +276,7 @@ def _event_tokens(title: str) -> set[str]:
     tokens = []
     for token in value.split():
         token = _EVENT_TOKEN_ALIASES.get(token, token)
-        if token in _EVENT_STOPWORDS or len(token) < 3:
+        if token in _EVENT_STOPWORDS or (len(token) < 3 and token != "k9"):
             continue
         tokens.append(token)
     return set(tokens)
