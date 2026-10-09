@@ -4,7 +4,9 @@ import hashlib
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
+from xml.etree import ElementTree
 
 import requests
 from loguru import logger
@@ -17,10 +19,15 @@ from app.models.documentary import (
 )
 
 _GDELT_DOC_API = "https://api.gdeltproject.org/api/v2/doc/doc"
+_GOOGLE_NEWS_RSS_API = "https://news.google.com/rss/search"
 _DEFAULT_DISCOVERY_QUERY = (
     '("bodycam" OR "body camera" OR CCTV OR "surveillance video" OR dashcam '
     'OR "caught on camera" OR "police released video" OR "court footage" '
     'OR "security camera" OR "video shows")'
+)
+_GOOGLE_VISUAL_QUERY = (
+    '"bodycam" OR CCTV OR dashcam OR "caught on camera" OR '
+    '"surveillance video" OR "video shows" OR footage'
 )
 _FOOTAGE_TERMS = (
     "bodycam",
@@ -56,10 +63,14 @@ _STORY_TERMS = (
 )
 _MAX_QUERY_LENGTH = 240
 _MAX_DISCOVERY_RESULTS = 50
+_REQUEST_HEADERS = {
+    "User-Agent": "MoneyPrinterTurbo-Documentary/1.3 (+story-discovery)",
+    "Accept": "application/json, application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+}
 
 
 class StoryDiscoveryError(RuntimeError):
-    """Raised when the external story-discovery feed cannot be queried safely."""
+    """Raised when all configured story-discovery feeds fail."""
 
 
 @dataclass(frozen=True)
@@ -103,19 +114,55 @@ def _build_query(user_query: str) -> str:
     return f'"{phrase}" {_DEFAULT_DISCOVERY_QUERY}'
 
 
-def _parse_gdelt_datetime(value: str) -> datetime | None:
+def _google_when_token(lookback_hours: int) -> str:
+    if lookback_hours <= 24:
+        return "when:1d"
+    days = max(1, min(30, (lookback_hours + 23) // 24))
+    return f"when:{days}d"
+
+
+def _build_google_query(user_query: str, lookback_hours: int) -> str:
+    clean = _clean_query(user_query)
+    visual_query = _GOOGLE_VISUAL_QUERY
+    if clean:
+        phrase = re.sub(r"\s+", " ", clean.replace('"', " ")).strip()
+        if phrase:
+            return f'"{phrase}" ({visual_query}) {_google_when_token(lookback_hours)}'
+    return f"({visual_query}) {_google_when_token(lookback_hours)}"
+
+
+def _parse_published_datetime(value: str) -> datetime | None:
     raw = (value or "").strip()
+    if not raw:
+        return None
+
     for fmt in ("%Y%m%dT%H%M%SZ", "%Y%m%d%H%M%S", "%Y%m%dT%H%M%S"):
         try:
             parsed = datetime.strptime(raw, fmt)
         except ValueError:
             continue
         return parsed.replace(tzinfo=timezone.utc)
-    return None
+
+    try:
+        parsed = parsedate_to_datetime(raw)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _canonical_published_at(value: str) -> str:
+    parsed = _parse_published_datetime(value)
+    if parsed is None:
+        return (value or "").strip()
+    return parsed.strftime("%Y%m%dT%H%M%SZ")
 
 
 def _freshness_score(published_at: str, *, now: datetime) -> tuple[int, str]:
-    published = _parse_gdelt_datetime(published_at)
+    published = _parse_published_datetime(published_at)
     if published is None:
         return 8, "publication time unavailable"
 
@@ -162,76 +209,18 @@ def _safe_http_url(value: str) -> str:
     return raw
 
 
-def discover_stories(
-    query: str = "",
+def _dedupe_and_rank(
+    raw_items: list[dict],
     *,
-    lookback_hours: int = 72,
-    limit: int = 20,
-    timeout_seconds: float = 20.0,
-    session=None,
-    now: datetime | None = None,
+    discovery_query: str,
+    limit: int,
+    now: datetime,
 ) -> list[StoryCandidate]:
-    """Find recent documentary story candidates from GDELT.
-
-    This stage discovers leads only. It deliberately does not claim publication rights
-    and does not download third-party media.
-    """
-    try:
-        lookback_hours = int(lookback_hours)
-        limit = int(limit)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("invalid documentary discovery limits") from exc
-
-    if not 1 <= lookback_hours <= 24 * 30:
-        raise ValueError("documentary discovery lookback must be between 1 hour and 30 days")
-    if not 1 <= limit <= _MAX_DISCOVERY_RESULTS:
-        raise ValueError(
-            f"documentary discovery limit must be between 1 and {_MAX_DISCOVERY_RESULTS}"
-        )
-
-    discovery_query = _build_query(query)
-    request = session or requests
-    params = {
-        "query": discovery_query,
-        "mode": "artlist",
-        "format": "json",
-        "maxrecords": min(250, max(limit * 3, 25)),
-        "timespan": f"{lookback_hours}h",
-        "sort": "datedesc",
-    }
-
-    try:
-        response = request.get(
-            _GDELT_DOC_API,
-            params=params,
-            timeout=timeout_seconds,
-            allow_redirects=False,
-        )
-    except requests.RequestException as exc:
-        raise StoryDiscoveryError("story discovery request failed") from exc
-
-    if 300 <= response.status_code < 400:
-        raise StoryDiscoveryError("story discovery endpoint returned a redirect")
-    if response.status_code != 200:
-        raise StoryDiscoveryError(
-            f"story discovery endpoint returned HTTP {response.status_code}"
-        )
-
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise StoryDiscoveryError("story discovery returned invalid JSON") from exc
-
-    articles = payload.get("articles", []) if isinstance(payload, dict) else []
-    if not isinstance(articles, list):
-        raise StoryDiscoveryError("story discovery returned an invalid article list")
-
-    current_time = now or datetime.now(timezone.utc)
     candidates: list[StoryCandidate] = []
     seen_urls: set[str] = set()
     seen_titles: set[str] = set()
 
-    for article in articles:
+    for article in raw_items:
         if not isinstance(article, dict):
             continue
         url = _safe_http_url(str(article.get("url") or ""))
@@ -239,29 +228,35 @@ def discover_stories(
         if not url or not title:
             continue
 
-        title_key = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+        title_key = re.sub(r"[^\w]+", " ", title.lower(), flags=re.UNICODE).strip()
         if url in seen_urls or (title_key and title_key in seen_titles):
             continue
 
-        published_at = str(article.get("seendate") or "").strip()
+        published_at = _canonical_published_at(
+            str(article.get("published_at") or article.get("seendate") or "")
+        )
         (
             score,
             footage_score,
             freshness_score,
             story_score,
             reasons,
-        ) = _score_text(title, published_at=published_at, now=current_time)
+        ) = _score_text(title, published_at=published_at, now=now)
 
         candidates.append(
             StoryCandidate(
                 id=_candidate_id(url),
                 title=title,
                 url=url,
-                publisher=str(article.get("domain") or "").strip(),
+                publisher=str(
+                    article.get("publisher") or article.get("domain") or ""
+                ).strip(),
                 published_at=published_at,
                 language=str(article.get("language") or "").strip(),
-                source_country=str(article.get("sourcecountry") or "").strip(),
-                image_url=_safe_http_url(str(article.get("socialimage") or "")),
+                source_country=str(article.get("source_country") or article.get("sourcecountry") or "").strip(),
+                image_url=_safe_http_url(
+                    str(article.get("image_url") or article.get("socialimage") or "")
+                ),
                 discovery_query=discovery_query,
                 score=score,
                 footage_score=footage_score,
@@ -283,10 +278,193 @@ def discover_stories(
         ),
         reverse=True,
     )
-    logger.info(
-        f"Documentary Story Discovery found {len(candidates)} unique candidates"
-    )
     return candidates[:limit]
+
+
+def _discover_gdelt(
+    query: str,
+    *,
+    lookback_hours: int,
+    limit: int,
+    timeout_seconds: float,
+    request,
+) -> list[dict]:
+    params = {
+        "query": query,
+        "mode": "artlist",
+        "format": "json",
+        "maxrecords": min(250, max(limit * 3, 25)),
+        "timespan": f"{lookback_hours}h",
+        "sort": "datedesc",
+    }
+    response = request.get(
+        _GDELT_DOC_API,
+        params=params,
+        headers=_REQUEST_HEADERS,
+        timeout=timeout_seconds,
+        allow_redirects=False,
+    )
+    if 300 <= response.status_code < 400:
+        raise StoryDiscoveryError("GDELT returned a redirect")
+    if response.status_code != 200:
+        raise StoryDiscoveryError(f"GDELT returned HTTP {response.status_code}")
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise StoryDiscoveryError("GDELT returned invalid JSON") from exc
+
+    articles = payload.get("articles", []) if isinstance(payload, dict) else []
+    if not isinstance(articles, list):
+        raise StoryDiscoveryError("GDELT returned an invalid article list")
+    return articles
+
+
+def _discover_google_news(
+    user_query: str,
+    *,
+    lookback_hours: int,
+    limit: int,
+    timeout_seconds: float,
+    request,
+) -> tuple[str, list[dict]]:
+    google_query = _build_google_query(user_query, lookback_hours)
+    response = request.get(
+        _GOOGLE_NEWS_RSS_API,
+        params={
+            "q": google_query,
+            "hl": "en-US",
+            "gl": "US",
+            "ceid": "US:en",
+        },
+        headers=_REQUEST_HEADERS,
+        timeout=timeout_seconds,
+        allow_redirects=True,
+    )
+    if response.status_code != 200:
+        raise StoryDiscoveryError(
+            f"Google News fallback returned HTTP {response.status_code}"
+        )
+
+    try:
+        root = ElementTree.fromstring(response.text)
+    except (ElementTree.ParseError, AttributeError) as exc:
+        raise StoryDiscoveryError("Google News fallback returned invalid RSS") from exc
+
+    articles: list[dict] = []
+    for item in root.findall(".//item")[: max(limit * 3, 25)]:
+        title = (item.findtext("title") or "").strip()
+        url = (item.findtext("link") or "").strip()
+        published_at = (item.findtext("pubDate") or "").strip()
+        source_node = item.find("source")
+        publisher = ""
+        if source_node is not None and source_node.text:
+            publisher = source_node.text.strip()
+        if title and publisher:
+            suffix = f" - {publisher}"
+            if title.endswith(suffix):
+                title = title[: -len(suffix)].strip()
+
+        articles.append(
+            {
+                "url": url,
+                "title": title,
+                "published_at": published_at,
+                "publisher": publisher,
+                "language": "English",
+                "source_country": "",
+                "image_url": "",
+            }
+        )
+    return google_query, articles
+
+
+def discover_stories(
+    query: str = "",
+    *,
+    lookback_hours: int = 72,
+    limit: int = 20,
+    timeout_seconds: float = 20.0,
+    session=None,
+    now: datetime | None = None,
+) -> list[StoryCandidate]:
+    """Find recent documentary story candidates with a resilient provider fallback.
+
+    GDELT is attempted first. If it rate-limits, fails, or returns no usable leads,
+    Google News RSS is used automatically. Discovery only finds research leads; it does
+    not grant publication rights and does not download third-party media.
+    """
+    try:
+        lookback_hours = int(lookback_hours)
+        limit = int(limit)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid documentary discovery limits") from exc
+
+    if not 1 <= lookback_hours <= 24 * 30:
+        raise ValueError(
+            "documentary discovery lookback must be between 1 hour and 30 days"
+        )
+    if not 1 <= limit <= _MAX_DISCOVERY_RESULTS:
+        raise ValueError(
+            f"documentary discovery limit must be between 1 and {_MAX_DISCOVERY_RESULTS}"
+        )
+
+    discovery_query = _build_query(query)
+    request = session or requests
+    current_time = now or datetime.now(timezone.utc)
+    provider_errors: list[str] = []
+
+    try:
+        gdelt_articles = _discover_gdelt(
+            discovery_query,
+            lookback_hours=lookback_hours,
+            limit=limit,
+            timeout_seconds=timeout_seconds,
+            request=request,
+        )
+        candidates = _dedupe_and_rank(
+            gdelt_articles,
+            discovery_query=discovery_query,
+            limit=limit,
+            now=current_time,
+        )
+        if candidates:
+            logger.info(
+                f"Documentary Story Discovery found {len(candidates)} candidates via GDELT"
+            )
+            return candidates
+        provider_errors.append("GDELT returned no usable candidates")
+    except (requests.RequestException, StoryDiscoveryError) as exc:
+        provider_errors.append(str(exc))
+        logger.warning(f"Documentary Story Discovery GDELT fallback trigger: {exc}")
+
+    try:
+        google_query, google_articles = _discover_google_news(
+            query,
+            lookback_hours=lookback_hours,
+            limit=limit,
+            timeout_seconds=timeout_seconds,
+            request=request,
+        )
+        candidates = _dedupe_and_rank(
+            google_articles,
+            discovery_query=google_query,
+            limit=limit,
+            now=current_time,
+        )
+        if candidates:
+            logger.info(
+                "Documentary Story Discovery found "
+                f"{len(candidates)} candidates via Google News fallback"
+            )
+            return candidates
+        provider_errors.append("Google News fallback returned no usable candidates")
+    except (requests.RequestException, StoryDiscoveryError) as exc:
+        provider_errors.append(str(exc))
+        logger.warning(f"Documentary Story Discovery Google News fallback failed: {exc}")
+
+    detail = "; ".join(provider_errors) or "no discovery providers were available"
+    raise StoryDiscoveryError(f"story discovery failed: {detail}")
 
 
 def candidate_to_source(candidate: StoryCandidate) -> SourceAsset:
