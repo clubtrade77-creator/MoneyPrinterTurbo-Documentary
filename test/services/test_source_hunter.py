@@ -2,6 +2,7 @@ import json
 
 from app.models.documentary import ProvenanceType, RightsStatus, SourceType
 from app.services.documentary.source_hunter import (
+    _build_web_search_query,
     candidate_to_web_source,
     candidate_to_youtube_source,
     find_source_videos,
@@ -131,6 +132,49 @@ def test_source_hunter_penalizes_old_similar_incident():
     assert len(results) == 1
     assert results[0].video_id == "lmnopqrstuv"
     assert results[0].freshness_score == 20
+
+
+def test_source_hunter_web_query_prioritizes_event_anchors():
+    query = _build_web_search_query(
+        "WATCH: Bodycam footage shows Portland police shooting that left suspect, K-9 officer dead"
+    )
+
+    assert "portland" in query.lower()
+    assert "k9" in query.lower()
+    assert "shooting" in query.lower()
+    assert '"video released"' in query.lower()
+    assert "suspect" not in query.lower()
+
+
+def test_source_hunter_rejects_old_generic_same_city_shooting():
+    session = _Session(
+        _Response(
+            _youtube_html(
+                [
+                    _renderer(
+                        "abcdefghijk",
+                        "Body cam footage released of Portland officer-involved shooting",
+                        "KOIN 6",
+                        "1y ago",
+                    ),
+                    _renderer(
+                        "lmnopqrstuv",
+                        "Portland K9 shooting bodycam footage released after homicide suspect killed",
+                        "Local News",
+                        "2 hours ago",
+                    ),
+                ]
+            )
+        )
+    )
+
+    results = find_source_videos(
+        "Bodycam footage shows Portland police shooting that left suspect, K9 officer dead",
+        session=session,
+    )
+
+    assert len(results) == 1
+    assert results[0].video_id == "lmnopqrstuv"
 
 
 def test_source_hunter_query_keeps_k9_event_anchor():
