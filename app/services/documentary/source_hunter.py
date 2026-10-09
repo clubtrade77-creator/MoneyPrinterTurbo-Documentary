@@ -69,14 +69,15 @@ _STRONG_VIDEO_TERMS = (
 _QUERY_NOISE_TERMS = {
     "video", "watch", "footage", "shows", "show", "the", "that", "with", "from",
     "after", "into", "over", "under", "and", "for", "police", "bodycam", "camera",
-    "left", "officer",
+    "left", "officer", "new", "update", "updates", "release", "released",
+    "releases", "involved", "official",
 }
 _GENERIC_MATCH_TERMS = {
     "officer", "suspect", "police", "incident", "man", "woman", "people", "person",
 }
 _STRONG_EVENT_TERMS = {
     "k9", "shooting", "homicide", "murder", "dead", "fatal", "chase", "rescue",
-    "crash", "arrest", "standoff", "kidnapping", "hostage", "explosion",
+    "crash", "arrest", "standoff", "kidnapping", "hostage", "explosion", "attack",
 }
 
 
@@ -317,6 +318,52 @@ def _score_web_source(story_title: str, title: str, snippet: str, domain: str):
     return score, overlap_score, official_score, video_signal_score, tuple(reasons)
 
 
+def _entity_anchor_tokens(story_title: str) -> list[str]:
+    anchors = []
+    normalized = re.sub(r"\bk[\s_-]*9\b", "K9", story_title or "", flags=re.IGNORECASE)
+    for match in re.finditer(r"\b[A-Z][A-Za-z0-9'-]{2,}\b", normalized):
+        token = match.group(0).lower()
+        if (
+            token in _QUERY_NOISE_TERMS
+            or token in _STRONG_EVENT_TERMS
+            or token in _GENERIC_MATCH_TERMS
+            or token in anchors
+        ):
+            continue
+        anchors.append(token)
+    return anchors
+
+
+def _event_match_ok(
+    story_title: str,
+    candidate_text: str,
+    *,
+    official: bool,
+) -> bool:
+    story_tokens = _story_tokens(story_title)
+    candidate_tokens = _story_tokens(candidate_text)
+
+    story_strong = story_tokens & _STRONG_EVENT_TERMS
+    candidate_strong = candidate_tokens & _STRONG_EVENT_TERMS
+    if story_strong:
+        required = min(1 if official else 2, len(story_strong))
+        if len(story_strong & candidate_strong) < required:
+            return False
+
+    story_specific = {
+        token
+        for token in story_tokens
+        if token not in _STRONG_EVENT_TERMS
+        and token not in _GENERIC_MATCH_TERMS
+    }
+    entity_anchors = set(_entity_anchor_tokens(story_title))
+    preferred_anchors = entity_anchors or story_specific
+    if preferred_anchors and not (preferred_anchors & candidate_tokens):
+        return False
+
+    return True
+
+
 def _build_web_search_query(story_title: str) -> str:
     clean = re.sub(r"\s+", " ", (story_title or "").strip())
     if not clean:
@@ -329,18 +376,23 @@ def _build_web_search_query(story_title: str) -> str:
             continue
         ordered_tokens.append(token)
 
+    entity_anchors = _entity_anchor_tokens(clean)
+    strong_priority = [
+        token
+        for token in (
+            "k9", "shooting", "homicide", "murder", "attack",
+            "chase", "rescue", "crash", "arrest",
+        )
+        if token in ordered_tokens
+    ]
     specific = [
         token
         for token in ordered_tokens
         if token not in _STRONG_EVENT_TERMS
         and token not in _GENERIC_MATCH_TERMS
+        and token not in entity_anchors
     ]
-    strong_priority = [
-        token
-        for token in ("k9", "shooting", "homicide", "murder", "chase", "rescue", "crash")
-        if token in ordered_tokens
-    ]
-    selected = (specific[:2] + strong_priority[:3])[:5]
+    selected = (entity_anchors[:3] + strong_priority[:3] + specific[:1])[:6]
     if not selected:
         selected = ordered_tokens[:5]
 
@@ -606,9 +658,17 @@ def _web_candidates_from_items(
             domain,
         )
 
-        # Source Hunter is intentionally strict: a web result must match the event
-        # and either contain a real video/footage signal or look like an official source.
-        if overlap < 12 or (video_signal <= 0 and official_score <= 0):
+        # Source Hunter is intentionally strict: a web result must match the
+        # concrete event and either contain footage/video evidence or be a government source.
+        if overlap < 12:
+            continue
+        if video_signal <= 0 and official_score < 35:
+            continue
+        if not _event_match_ok(
+            story_title,
+            f"{title} {snippet} {domain}",
+            official=official_score >= 35,
+        ):
             continue
 
         candidates.append(
@@ -657,6 +717,7 @@ def find_web_sources(
     query = _build_web_search_query(story_title)
     request = session or requests
     errors = []
+    collected_items: list[dict] = []
 
     try:
         response = request.get(
@@ -669,18 +730,10 @@ def find_web_sources(
         if response.status_code == 200:
             parser = _DuckDuckGoParser()
             parser.feed(response.text)
-            candidates = _web_candidates_from_items(
-                story_title,
-                parser.results,
-                limit=limit,
-            )
-            if candidates:
-                logger.info(
-                    f"Documentary Source Hunter found {len(candidates)} "
-                    "web candidates via DuckDuckGo"
-                )
-                return candidates
-            errors.append("DuckDuckGo returned no usable results")
+            if parser.results:
+                collected_items.extend(parser.results)
+            else:
+                errors.append("DuckDuckGo returned no usable results")
         else:
             errors.append(f"DuckDuckGo returned HTTP {response.status_code}")
     except requests.RequestException as exc:
@@ -705,26 +758,28 @@ def find_web_sources(
                 parser.feed(response.text)
                 bing_items = parser.results
 
-            candidates = _web_candidates_from_items(
-                story_title,
-                bing_items,
-                limit=limit,
-            )
-            if candidates:
-                logger.info(
-                    f"Documentary Source Hunter found {len(candidates)} "
-                    "web candidates via Bing fallback"
-                )
-                return candidates
-            errors.append("Bing returned no relevant source results")
+            if bing_items:
+                collected_items.extend(bing_items)
+            else:
+                errors.append("Bing returned no relevant source results")
         else:
             errors.append(f"Bing returned HTTP {response.status_code}")
     except requests.RequestException as exc:
         errors.append(f"Bing request failed: {exc}")
 
-    raise SourceHunterError(
-        "web source search failed: " + "; ".join(errors)
+    candidates = _web_candidates_from_items(
+        story_title,
+        collected_items,
+        limit=limit,
     )
+    if candidates:
+        logger.info(
+            f"Documentary Source Hunter found {len(candidates)} aggregated web candidates"
+        )
+        return candidates
+
+    detail = "; ".join(errors) or "providers returned no relevant source results"
+    raise SourceHunterError("web source search failed: " + detail)
 
 
 def find_source_videos(
@@ -801,29 +856,11 @@ def find_source_videos(
         if video_signal <= 0 and source_quality <= 0:
             continue
 
-        story_tokens = _story_tokens(story_title)
-        candidate_tokens = _story_tokens(f"{title} {channel}")
-
-        story_strong = story_tokens & _STRONG_EVENT_TERMS
-        candidate_strong = candidate_tokens & _STRONG_EVENT_TERMS
-        strong_overlap = len(story_strong & candidate_strong)
-        required_strong_overlap = 1 if source_quality > 0 else 2
-        if (
-            len(story_strong) >= required_strong_overlap
-            and strong_overlap < required_strong_overlap
+        if not _event_match_ok(
+            story_title,
+            f"{title} {channel}",
+            official=source_quality > 0,
         ):
-            continue
-
-        # When the story contains a concrete place/entity anchor (for example
-        # "Portland"), require at least one such anchor to match. This prevents
-        # unrelated incidents with the same generic words such as K9/shooting.
-        story_specific = {
-            token
-            for token in story_tokens
-            if token not in _STRONG_EVENT_TERMS
-            and token not in _GENERIC_MATCH_TERMS
-        }
-        if story_specific and not (story_specific & candidate_tokens):
             continue
 
         # Very old non-official uploads are almost never the source for a fresh
