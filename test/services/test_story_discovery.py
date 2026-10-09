@@ -30,6 +30,16 @@ class _Session:
 
     def get(self, url, **kwargs):
         self.calls.append((url, kwargs))
+        if (
+            "news.google.com" in url
+            and self.response.status_code == 200
+            and not self.response.text
+        ):
+            return _Response(
+                {},
+                status_code=200,
+                text='<?xml version="1.0"?><rss><channel></channel></rss>',
+            )
         return self.response
 
 class _SequenceSession:
@@ -276,6 +286,89 @@ def test_discover_stories_uses_literal_user_topic():
 
     assert '"airport incident"' in query
     assert "bodycam" in query.lower()
+
+
+def test_discover_stories_aggregates_providers_and_ranks_stronger_google_story():
+    gdelt = _Response(
+        {
+            "articles": [
+                {
+                    "url": "https://example.com/weak",
+                    "title": "Camera mentioned after city incident",
+                    "seendate": "20261009T060000Z",
+                    "domain": "example.com",
+                }
+            ]
+        }
+    )
+    google_rss = """<?xml version="1.0"?>
+    <rss><channel>
+      <item>
+        <title>Bodycam footage shows dramatic rescue after crash - Strong News</title>
+        <link>https://news.google.com/rss/articles/strong</link>
+        <pubDate>Fri, 09 Oct 2026 06:30:00 GMT</pubDate>
+        <source url="https://strong.example">Strong News</source>
+      </item>
+    </channel></rss>
+    """
+    session = _SequenceSession(
+        [
+            gdelt,
+            _Response({}, status_code=200, text=google_rss),
+        ]
+    )
+
+    results = discover_stories(
+        limit=10,
+        session=session,
+        now=datetime(2026, 10, 9, 7, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(results) == 2
+    assert results[0].publisher == "Strong News"
+    assert results[0].score > results[1].score
+    assert len(session.calls) == 2
+
+
+def test_discover_stories_keeps_stronger_representative_of_cross_provider_event():
+    gdelt = _Response(
+        {
+            "articles": [
+                {
+                    "url": "https://example.com/portland-summary",
+                    "title": "Portland police shooting leaves homicide suspect and K9 dead",
+                    "seendate": "20261009T060000Z",
+                    "domain": "Example",
+                }
+            ]
+        }
+    )
+    google_rss = """<?xml version="1.0"?>
+    <rss><channel>
+      <item>
+        <title>Bodycam footage shows Portland police shooting that left homicide suspect, K9 dead - KATU</title>
+        <link>https://news.google.com/rss/articles/portland-bodycam</link>
+        <pubDate>Fri, 09 Oct 2026 06:30:00 GMT</pubDate>
+        <source url="https://katu.com">KATU</source>
+      </item>
+    </channel></rss>
+    """
+    session = _SequenceSession(
+        [
+            gdelt,
+            _Response({}, status_code=200, text=google_rss),
+        ]
+    )
+
+    results = discover_stories(
+        limit=10,
+        session=session,
+        now=datetime(2026, 10, 9, 7, 0, tzinfo=timezone.utc),
+    )
+
+    assert len(results) == 1
+    assert "Bodycam footage" in results[0].title
+    assert results[0].publisher == "KATU"
 
 
 def test_discover_stories_falls_back_when_gdelt_rate_limits():
