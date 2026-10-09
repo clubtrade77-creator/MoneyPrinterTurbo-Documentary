@@ -360,6 +360,8 @@ def set_narrator_voice(
 
     with _project_lock(project_id, root):
         project = _load_project_unlocked(project_id, root)
+        if project.narrator_voices.get(language_key) == voice_value:
+            return project
         project.narrator_voices[language_key] = voice_value
         _save_project_unlocked(project, root)
         return project
