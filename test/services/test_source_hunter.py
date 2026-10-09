@@ -5,6 +5,7 @@ from app.services.documentary.source_hunter import (
     SourceHunterError,
     _build_search_query,
     _build_web_search_query,
+    _official_search_query,
     candidate_to_web_source,
     candidate_to_youtube_source,
     embedded_media_to_source,
@@ -136,6 +137,15 @@ def test_source_hunter_penalizes_old_similar_incident():
     assert len(results) == 1
     assert results[0].video_id == "lmnopqrstuv"
     assert results[0].freshness_score == 20
+
+
+def test_source_hunter_uses_country_specific_official_domain():
+    base = "bodycam shooting portland"
+
+    assert "site:.gov.in" in _official_search_query(base, "India")
+    assert "site:.gov.uk" in _official_search_query(base, "United Kingdom")
+    assert "site:.gov" in _official_search_query(base, "United States")
+    assert "site:" not in _official_search_query(base, "")
 
 
 def test_source_hunter_queries_match_cctv_story_type():
