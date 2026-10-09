@@ -1,9 +1,11 @@
 import json
 
-from app.models.documentary import RightsStatus, SourceType
+from app.models.documentary import ProvenanceType, RightsStatus, SourceType
 from app.services.documentary.source_hunter import (
+    candidate_to_web_source,
     candidate_to_youtube_source,
     find_source_videos,
+    find_web_sources,
 )
 
 
@@ -152,6 +154,67 @@ def test_source_hunter_deduplicates_video_ids():
     )
 
     assert len(results) == 1
+
+
+def test_source_hunter_finds_official_web_source():
+    html = """
+    <html><body>
+      <div class="result">
+        <a class="result__a" href="https://www.portlandoregon.gov/police/article/123">
+          Portland Police Bureau releases bodycam footage in K9 shooting
+        </a>
+        <a class="result__snippet">
+          Official police bureau page with released body camera video from the shooting.
+        </a>
+      </div>
+      <div class="result">
+        <a class="result__a" href="https://example.com/commentary">
+          Portland shooting commentary
+        </a>
+        <a class="result__snippet">
+          Discussion of the incident.
+        </a>
+      </div>
+    </body></html>
+    """
+    session = _Session(_Response(html))
+
+    results = find_web_sources(
+        "Bodycam footage shows Portland police shooting that left suspect, K9 officer dead",
+        session=session,
+    )
+
+    assert len(results) == 2
+    assert results[0].domain == "portlandoregon.gov"
+    assert results[0].official_score == 35
+    assert results[0].video_signal_score > 0
+    assert results[0].score > results[1].score
+
+
+def test_source_hunter_web_converter_preserves_rights_review():
+    html = """
+    <html><body>
+      <div class="result">
+        <a class="result__a" href="https://agency.gov/bodycam-release">
+          Police department releases bodycam footage
+        </a>
+        <a class="result__snippet">
+          Official body camera footage released after shooting.
+        </a>
+      </div>
+    </body></html>
+    """
+    candidate = find_web_sources(
+        "Police shooting bodycam footage",
+        session=_Session(_Response(html)),
+    )[0]
+
+    source = candidate_to_web_source(candidate)
+
+    assert source.provenance == ProvenanceType.official_public_source
+    assert source.source_type == SourceType.bodycam
+    assert source.rights_status == RightsStatus.unknown_review_required
+    assert source.local_path == ""
 
 
 def test_source_hunter_converts_candidate_without_granting_rights():
