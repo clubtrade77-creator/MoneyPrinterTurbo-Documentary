@@ -542,6 +542,27 @@
     "Documentary Voice Preview Text": "Текст для прослушивания",
     "Documentary Voice Preview Button": "Прослушать голос",
     "Documentary Voice Preview Generating": "Генерирую пример голоса…",
-    "Documentary Voice Preview Failed": "Не удалось создать пример голоса: {error}"
+    "Documentary Voice Preview Failed": "Не удалось создать пример голоса: {error}",
+    "Documentary Story Discovery": "Поиск историй",
+    "Documentary Story Discovery Description": "Автоматически ищет свежие истории с признаками сильного видеоматериала. Найденная статья — только отправная точка: оригинальные кадры и права на публикацию нужно проверять отдельно.",
+    "Documentary Story Discovery Topic": "Тема, необязательно",
+    "Documentary Story Discovery Topic Placeholder": "например: происшествие в аэропорту, спасение, полицейская погоня",
+    "Documentary Story Discovery Window": "Период поиска",
+    "Documentary Story Discovery 24h": "Последние 24 часа",
+    "Documentary Story Discovery 72h": "Последние 3 дня",
+    "Documentary Story Discovery 7d": "Последние 7 дней",
+    "Documentary Story Discovery Project Language": "Язык проекта",
+    "Documentary Story Discovery Search": "Найти истории",
+    "Documentary Story Discovery Searching": "Ищу подходящие истории…",
+    "Documentary Story Discovery Failed": "Поиск историй не удался: {error}",
+    "Documentary Story Discovery Results": "Найдено кандидатов: {count}",
+    "Documentary Story Discovery Score": "Оценка",
+    "Documentary Story Discovery Footage": "Видео",
+    "Documentary Story Discovery Freshness": "Свежесть",
+    "Documentary Story Discovery Story": "Сюжет",
+    "Documentary Story Discovery Open Source": "Открыть статью",
+    "Documentary Story Discovery Create Project": "Создать проект",
+    "Documentary Story Discovery Create Failed": "Не удалось создать проект: {error}",
+    "Documentary Story Discovery Project Created": "Документальный проект создан из найденной истории."
   }
 }
