@@ -82,6 +82,7 @@ _RIGHTS_STATUSES = (
 
 _SOURCE_TYPE_LABELS = {
     SourceType.local_video: "Documentary Source Local Video",
+    SourceType.youtube: "Documentary Source YouTube",
     SourceType.bodycam: "Documentary Source Bodycam",
     SourceType.cctv: "Documentary Source CCTV",
     SourceType.court: "Documentary Source Court",
