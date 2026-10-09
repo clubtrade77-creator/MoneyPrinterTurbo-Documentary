@@ -563,6 +563,18 @@
     "Documentary Story Discovery Open Source": "Открыть статью",
     "Documentary Story Discovery Create Project": "Создать проект",
     "Documentary Story Discovery Create Failed": "Не удалось создать проект: {error}",
-    "Documentary Story Discovery Project Created": "Документальный проект создан из найденной истории."
+    "Documentary Story Discovery Project Created": "Документальный проект создан из найденной истории.",
+    "Documentary Source Hunter Search": "Найти оригинальные видео",
+    "Documentary Source Hunter Searching": "Ищу на YouTube вероятные исходные видео…",
+    "Documentary Source Hunter Failed": "Поиск исходных видео не удался: {error}",
+    "Documentary Source Hunter Results": "Найдено видео-кандидатов: {count}",
+    "Documentary Source Hunter Score": "Оценка",
+    "Documentary Source Hunter Match": "Совпадение",
+    "Documentary Source Hunter Official": "Официальный источник",
+    "Documentary Source Hunter Video Signal": "Признак исходного видео",
+    "Documentary Source Hunter Open Video": "Открыть видео",
+    "Documentary Source Hunter Create Project": "Создать проект с видео",
+    "Documentary Source Hunter Create Failed": "Не удалось создать проект с выбранным видео: {error}",
+    "Documentary Source Hunter Project Created": "Проект создан: добавлена статья и выбранное исходное видео."
   }
 }
