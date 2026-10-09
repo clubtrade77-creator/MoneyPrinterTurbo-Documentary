@@ -344,6 +344,27 @@ def add_source(
         return project
 
 
+def set_narrator_voice(
+    project_id: str,
+    language: str,
+    voice_name: str,
+    *,
+    root: str | os.PathLike | None = None,
+) -> DocumentaryProject:
+    language_key = str(language or "").strip().lower()
+    voice_value = str(voice_name or "").strip()
+    if not re.fullmatch(r"[a-z]{2,8}(?:-[a-z0-9]{1,8}){0,3}", language_key):
+        raise ValueError("invalid documentary narrator voice language")
+    if not voice_value or len(voice_value) > 300:
+        raise ValueError("invalid documentary narrator voice")
+
+    with _project_lock(project_id, root):
+        project = _load_project_unlocked(project_id, root)
+        project.narrator_voices[language_key] = voice_value
+        _save_project_unlocked(project, root)
+        return project
+
+
 def sha256_file(path: str | os.PathLike, chunk_size: int = 1024 * 1024) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
