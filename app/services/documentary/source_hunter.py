@@ -48,6 +48,14 @@ _STRONG_VIDEO_TERMS = (
 _QUERY_NOISE_TERMS = {
     "video", "watch", "footage", "shows", "show", "the", "that", "with", "from",
     "after", "into", "over", "under", "and", "for", "police", "bodycam", "camera",
+    "left", "officer",
+}
+_GENERIC_MATCH_TERMS = {
+    "officer", "suspect", "police", "incident", "man", "woman", "people", "person",
+}
+_STRONG_EVENT_TERMS = {
+    "k9", "shooting", "homicide", "murder", "dead", "fatal", "chase", "rescue",
+    "crash", "arrest", "standoff", "kidnapping", "hostage", "explosion",
 }
 
 
@@ -68,6 +76,7 @@ class SourceVideoCandidate:
     title_overlap_score: int
     source_quality_score: int
     video_signal_score: int
+    freshness_score: int
     reasons: tuple[str, ...]
 
 
@@ -131,42 +140,119 @@ def _story_tokens(title: str) -> set[str]:
     }
 
 
-def _score_video(story_title: str, video_title: str, channel: str):
+def _freshness_score(published_text: str) -> tuple[int, str]:
+    value = (published_text or "").strip().lower()
+    if not value:
+        return 4, "video age unavailable"
+
+    match = re.search(
+        r"(\d+)\s*(minute|hour|day|week|month|year)s?\s+ago",
+        value,
+    )
+    if match:
+        amount = int(match.group(1))
+        unit = match.group(2)
+        age_days = {
+            "minute": amount / 1440,
+            "hour": amount / 24,
+            "day": amount,
+            "week": amount * 7,
+            "month": amount * 30,
+            "year": amount * 365,
+        }[unit]
+        if age_days <= 7:
+            return 20, "published within 7 days"
+        if age_days <= 30:
+            return 14, "published within 30 days"
+        if age_days <= 365:
+            return 6, "published within 1 year"
+        return 0, "older than 1 year"
+
+    if any(token in value for token in ("today", "just now", "streamed")):
+        return 20, "published recently"
+    return 4, "video age unavailable"
+
+
+def _score_video(
+    story_title: str,
+    video_title: str,
+    channel: str,
+    published_text: str,
+):
     story_tokens = _story_tokens(story_title)
     video_tokens = _story_tokens(video_title)
     shared = story_tokens & video_tokens
 
-    overlap_score = min(45, len(shared) * 9)
+    weighted_overlap = 0
+    for token in shared:
+        if token in _STRONG_EVENT_TERMS:
+            weighted_overlap += 12
+        elif token in _GENERIC_MATCH_TERMS:
+            weighted_overlap += 2
+        else:
+            weighted_overlap += 6
+    overlap_score = min(45, weighted_overlap)
+
     normalized_title = video_title.lower()
     normalized_channel = channel.lower()
 
     video_matches = [term for term in _STRONG_VIDEO_TERMS if term in normalized_title]
-    video_signal_score = min(30, len(video_matches) * 10)
+    video_signal_score = min(25, len(video_matches) * 10)
 
     official_matches = [
         term for term in _OFFICIAL_CHANNEL_TERMS if term in normalized_channel
     ]
-    source_quality_score = 25 if official_matches else 0
+    source_quality_score = 20 if official_matches else 0
+    freshness_score, freshness_reason = _freshness_score(published_text)
 
     reasons = []
     if shared:
-        reasons.append("story match: " + ", ".join(sorted(shared)[:5]))
+        reasons.append("story match: " + ", ".join(sorted(shared)[:6]))
     if video_matches:
         reasons.append("video signal: " + ", ".join(video_matches[:3]))
     if official_matches:
         reasons.append("official-channel signal: " + ", ".join(official_matches[:2]))
+    reasons.append(freshness_reason)
 
-    score = min(100, overlap_score + video_signal_score + source_quality_score)
-    return score, overlap_score, source_quality_score, video_signal_score, tuple(reasons)
+    score = min(
+        100,
+        overlap_score
+        + video_signal_score
+        + source_quality_score
+        + freshness_score,
+    )
+    return (
+        score,
+        overlap_score,
+        source_quality_score,
+        video_signal_score,
+        freshness_score,
+        tuple(reasons),
+    )
 
 
 def _build_search_query(story_title: str) -> str:
     clean = re.sub(r"\s+", " ", (story_title or "").strip())
     if not clean:
         raise ValueError("story title is required for source discovery")
-    if len(clean) > 300:
-        clean = clean[:300].rsplit(" ", 1)[0]
-    return f'{clean} bodycam OR footage OR "full video"'
+
+    tokens = list(_story_tokens(clean))
+    strong = [token for token in tokens if token in _STRONG_EVENT_TERMS]
+    specific = [
+        token
+        for token in tokens
+        if token not in _STRONG_EVENT_TERMS
+        and token not in _GENERIC_MATCH_TERMS
+    ]
+    generic = [
+        token
+        for token in tokens
+        if token in _GENERIC_MATCH_TERMS
+    ]
+    selected = (strong + specific + generic)[:7]
+    if not selected:
+        selected = re.findall(r"[A-Za-z0-9]+", clean)[:7]
+    return " ".join(selected) + ' bodycam footage'
 
 
 def find_source_videos(
@@ -221,8 +307,19 @@ def find_source_videos(
         if not title:
             continue
 
-        score, overlap, source_quality, video_signal, reasons = _score_video(
-            story_title, title, channel
+        published_text = _text(renderer.get("publishedTimeText"))
+        (
+            score,
+            overlap,
+            source_quality,
+            video_signal,
+            freshness,
+            reasons,
+        ) = _score_video(
+            story_title,
+            title,
+            channel,
+            published_text,
         )
         candidates.append(
             SourceVideoCandidate(
@@ -230,13 +327,14 @@ def find_source_videos(
                 title=title,
                 channel=channel,
                 url=f"https://www.youtube.com/watch?v={video_id}",
-                published_text=_text(renderer.get("publishedTimeText")),
+                published_text=published_text,
                 duration_text=_text(renderer.get("lengthText")),
                 view_count_text=_text(renderer.get("viewCountText")),
                 score=score,
                 title_overlap_score=overlap,
                 source_quality_score=source_quality,
                 video_signal_score=video_signal,
+                freshness_score=freshness,
                 reasons=reasons,
             )
         )
@@ -246,6 +344,7 @@ def find_source_videos(
         key=lambda item: (
             item.score,
             item.source_quality_score,
+            item.freshness_score,
             item.video_signal_score,
             item.title_overlap_score,
             item.title.lower(),
