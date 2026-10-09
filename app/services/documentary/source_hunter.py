@@ -30,6 +30,9 @@ _SEARCH_ENGINE_DOMAINS = {
     "html.duckduckgo.com",
     "google.com",
     "www.google.com",
+    "youtube.com",
+    "www.youtube.com",
+    "youtu.be",
 }
 _REQUEST_HEADERS = {
     "User-Agent": (
@@ -756,7 +759,9 @@ def find_web_sources(
         raise ValueError("source hunter web limit must be between 1 and 20")
 
     query = _build_web_search_query(story_title)
+    official_query = query + " site:.gov"
     request = session or requests
+    provider_timeout = min(float(timeout_seconds), 10.0)
     errors = []
     collected_items: list[dict] = []
 
@@ -765,7 +770,7 @@ def find_web_sources(
             _DUCKDUCKGO_SEARCH_URL,
             params={"q": query},
             headers=_REQUEST_HEADERS,
-            timeout=timeout_seconds,
+            timeout=provider_timeout,
             allow_redirects=True,
         )
         if response.status_code == 200:
@@ -783,9 +788,9 @@ def find_web_sources(
     try:
         response = request.get(
             _BING_SEARCH_URL,
-            params={"q": query, "setlang": "en-US", "format": "rss"},
+            params={"q": official_query, "setlang": "en-US", "format": "rss"},
             headers=_REQUEST_HEADERS,
-            timeout=timeout_seconds,
+            timeout=provider_timeout,
             allow_redirects=True,
         )
         if response.status_code == 200:
