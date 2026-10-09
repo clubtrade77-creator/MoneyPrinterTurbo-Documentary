@@ -38,6 +38,27 @@ _SEARCH_ENGINE_DOMAINS = {
     "www.youtube.com",
     "youtu.be",
 }
+_GOVERNMENT_DOMAIN_SUFFIXES = (
+    ".gov",
+    ".gov.uk",
+    ".gov.au",
+    ".gov.in",
+    ".gov.br",
+    ".gov.sg",
+    ".gov.hk",
+    ".gov.ie",
+    ".gov.za",
+    ".govt.nz",
+    ".gob.mx",
+    ".go.jp",
+    ".go.kr",
+    ".gouv.fr",
+    ".gc.ca",
+)
+_GOVERNMENT_DOMAIN_EXACT = {
+    "canada.ca",
+    "service-public.fr",
+}
 _REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -307,12 +328,26 @@ def _normalize_search_result_url(value: str) -> str:
     return raw
 
 
+def _is_government_domain(domain: str) -> bool:
+    host = (domain or "").lower().strip(".")
+    if not host:
+        return False
+    if host in _GOVERNMENT_DOMAIN_EXACT:
+        return True
+    if any(
+        host == suffix.lstrip(".") or host.endswith(suffix)
+        for suffix in _GOVERNMENT_DOMAIN_SUFFIXES
+    ):
+        return True
+    return any(host.endswith("." + exact) for exact in _GOVERNMENT_DOMAIN_EXACT)
+
+
 def _is_official_web_source(domain: str, title: str, snippet: str) -> tuple[int, list[str]]:
     host = (domain or "").lower()
     haystack = f"{host} {title} {snippet}".lower()
     reasons = []
 
-    if host.endswith(".gov") or ".gov." in host:
+    if _is_government_domain(host):
         reasons.append("government domain")
         return 35, reasons
 
@@ -722,7 +757,7 @@ def _official_page_allowed_for_inspection(url: str) -> bool:
     return (
         parsed.scheme in {"http", "https"}
         and bool(host)
-        and host.endswith(".gov")
+        and _is_government_domain(host)
         and parsed.username is None
         and parsed.password is None
     )
@@ -764,12 +799,12 @@ def find_embedded_media(
 ) -> list[EmbeddedMediaCandidate]:
     """Inspect an official US .gov source page for embedded/linked video media.
 
-    The fetch is deliberately restricted to .gov pages discovered by Source Hunter;
-    arbitrary third-party URLs are not fetched by this helper.
+    The fetch is deliberately restricted to recognized government domains discovered
+    by Source Hunter; arbitrary third-party URLs are not fetched by this helper.
     """
     if not _official_page_allowed_for_inspection(source_page_url):
         raise SourceHunterError(
-            "embedded-media inspection is restricted to official .gov pages"
+            "embedded-media inspection is restricted to recognized government domains"
         )
 
     try:
