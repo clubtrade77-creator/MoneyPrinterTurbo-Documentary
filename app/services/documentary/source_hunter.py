@@ -364,6 +364,40 @@ def _event_match_ok(
     return True
 
 
+def _source_query_terms(story_title: str) -> str:
+    normalized = (story_title or "").lower()
+    if "bodycam" in normalized or "body camera" in normalized:
+        return "bodycam footage"
+    if (
+        "cctv" in normalized
+        or "surveillance" in normalized
+        or "security camera" in normalized
+    ):
+        return "cctv surveillance footage"
+    if "dashcam" in normalized or "dash cam" in normalized:
+        return "dashcam footage"
+    if "court" in normalized or "trial" in normalized:
+        return "court footage video"
+    if "interview" in normalized:
+        return "original interview video"
+    return "original video footage"
+
+
+def _agency_query_terms(story_title: str) -> str:
+    normalized = (story_title or "").lower()
+    if any(
+        term in normalized
+        for term in (
+            "police", "officer", "sheriff", "bodycam", "body camera",
+            "arrest", "shooting", "chase", "suspect",
+        )
+    ):
+        return "police sheriff official"
+    if "court" in normalized or "trial" in normalized:
+        return "court official"
+    return "official"
+
+
 def _build_web_search_query(story_title: str) -> str:
     clean = re.sub(r"\s+", " ", (story_title or "").strip())
     if not clean:
@@ -396,7 +430,13 @@ def _build_web_search_query(story_title: str) -> str:
     if not selected:
         selected = ordered_tokens[:5]
 
-    return " ".join(selected) + ' bodycam "video released" police'
+    return (
+        " ".join(selected)
+        + " "
+        + _source_query_terms(story_title)
+        + ' "video released" '
+        + _agency_query_terms(story_title)
+    ).strip()
 
 
 def _text(value) -> str:
@@ -620,7 +660,7 @@ def _build_search_query(story_title: str) -> str:
     selected = (strong + specific + generic)[:7]
     if not selected:
         selected = re.findall(r"[A-Za-z0-9]+", clean)[:7]
-    return " ".join(selected) + ' bodycam footage'
+    return (" ".join(selected) + " " + _source_query_terms(story_title)).strip()
 
 
 def _web_candidates_from_items(
