@@ -25,6 +25,16 @@ class _Session:
         return self.response
 
 
+class _SequenceSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return self.responses.pop(0)
+
+
 def _youtube_html(renderers):
     payload = {
         "contents": {
@@ -189,6 +199,39 @@ def test_source_hunter_finds_official_web_source():
     assert results[0].official_score == 35
     assert results[0].video_signal_score > 0
     assert results[0].score > results[1].score
+
+
+def test_source_hunter_web_search_falls_back_to_bing():
+    bing_html = """
+    <html><body>
+      <li class="b_algo">
+        <h2>
+          <a href="https://www.portlandoregon.gov/police/article/123">
+            Portland Police Bureau releases bodycam footage in K9 shooting
+          </a>
+        </h2>
+        <p>Official police bureau page with released body camera video.</p>
+      </li>
+    </body></html>
+    """
+    session = _SequenceSession(
+        [
+            _Response("<html><body>No results</body></html>", status_code=200),
+            _Response(bing_html, status_code=200),
+        ]
+    )
+
+    results = find_web_sources(
+        "Bodycam footage shows Portland police shooting that left suspect, K9 officer dead",
+        session=session,
+    )
+
+    assert len(results) == 1
+    assert results[0].domain == "portlandoregon.gov"
+    assert results[0].official_score == 35
+    assert len(session.calls) == 2
+    assert "duckduckgo.com" in session.calls[0][0]
+    assert "bing.com" in session.calls[1][0]
 
 
 def test_source_hunter_web_converter_preserves_rights_review():
