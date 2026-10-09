@@ -735,6 +735,7 @@
     "Documentary Source Hunter Web Results": "Official/web source candidates: {count}",
     "Documentary Source Hunter YouTube Results": "YouTube video candidates: {count}",
     "Documentary Source Hunter Open Web Source": "Open web source",
-    "Documentary Source Hunter Create Web Project": "Create project with source"
+    "Documentary Source Hunter Create Web Project": "Create project with source",
+    "Documentary Source Hunter Low Confidence": "Low-confidence match: review the source manually before using it."
   }
 }
