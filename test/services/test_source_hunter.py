@@ -2,6 +2,7 @@ import json
 
 from app.models.documentary import ProvenanceType, RightsStatus, SourceType
 from app.services.documentary.source_hunter import (
+    _build_search_query,
     _build_web_search_query,
     candidate_to_web_source,
     candidate_to_youtube_source,
@@ -132,6 +133,63 @@ def test_source_hunter_penalizes_old_similar_incident():
     assert len(results) == 1
     assert results[0].video_id == "lmnopqrstuv"
     assert results[0].freshness_score == 20
+
+
+def test_source_hunter_queries_match_cctv_story_type():
+    story = "CCTV footage shows dramatic escape from downtown store"
+
+    youtube_query = _build_search_query(story)
+    web_query = _build_web_search_query(story)
+
+    assert "cctv surveillance footage" in youtube_query.lower()
+    assert "cctv surveillance footage" in web_query.lower()
+    assert "bodycam" not in youtube_query.lower()
+
+
+def test_source_hunter_queries_match_dashcam_story_type():
+    story = "Dashcam video captures highway crash and rescue"
+
+    youtube_query = _build_search_query(story)
+    web_query = _build_web_search_query(story)
+
+    assert "dashcam footage" in youtube_query.lower()
+    assert "dashcam footage" in web_query.lower()
+
+
+def test_source_hunter_queries_match_court_story_type():
+    story = "Court footage shows key moment during fraud trial"
+
+    youtube_query = _build_search_query(story)
+    web_query = _build_web_search_query(story)
+
+    assert "court footage video" in youtube_query.lower()
+    assert "court footage video" in web_query.lower()
+    assert "court official" in web_query.lower()
+
+
+def test_source_hunter_does_not_require_short_agency_acronym_anchor():
+    session = _Session(
+        _Response(
+            _youtube_html(
+                [
+                    _renderer(
+                        "abcdefghijk",
+                        "Bodycam footage from shooting involving homicide suspect and K9",
+                        "Portland Police Bureau",
+                        "2 hours ago",
+                    )
+                ]
+            )
+        )
+    )
+
+    results = find_source_videos(
+        "PPB releases body camera footage in shooting involving homicide suspect and K9",
+        session=session,
+    )
+
+    assert len(results) == 1
+    assert results[0].video_id == "abcdefghijk"
 
 
 def test_source_hunter_web_query_prioritizes_event_anchors():
