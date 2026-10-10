@@ -12,6 +12,7 @@ from app.services.documentary.source_hunter import (
     find_embedded_media,
     find_source_videos,
     find_web_sources,
+    inspect_story_article,
 )
 
 
@@ -74,6 +75,104 @@ def _renderer(video_id, title, channel, published_text="2 hours ago"):
         "lengthText": {"simpleText": "8:12"},
         "viewCountText": {"simpleText": "12K views"},
     }
+
+
+def test_source_hunter_extracts_agency_and_official_links_from_story_article():
+    html = """
+    <html><body>
+      <p>
+        The Portland Police Bureau released bodycam footage after the shooting.
+      </p>
+      <a href="https://www.portland.gov/police/news/bodycam-release">
+        Read the official release
+      </a>
+    </body></html>
+    """
+    session = _Session(_Response(html))
+
+    hints = inspect_story_article(
+        "https://news.example/story",
+        session=session,
+    )
+
+    assert "Portland Police Bureau" in hints.agency_names
+    assert hints.official_urls == (
+        "https://www.portland.gov/police/news/bodycam-release",
+    )
+    assert session.calls[0][1]["allow_redirects"] is False
+
+
+def test_source_hunter_rejects_private_story_article_url_without_request():
+    session = _Session(_Response("<html></html>"))
+
+    try:
+        inspect_story_article(
+            "http://127.0.0.1/private-story",
+            session=session,
+        )
+    except SourceHunterError as exc:
+        assert "safe public HTTP(S) URL" in str(exc)
+    else:
+        raise AssertionError("private story URL should be rejected")
+
+    assert session.calls == []
+
+
+def test_source_hunter_adds_article_agency_hint_to_youtube_query():
+    session = _Session(
+        _Response(
+            _youtube_html(
+                [
+                    _renderer(
+                        "abcdefghijk",
+                        "Bodycam footage shows Portland K9 shooting",
+                        "Portland Police Bureau",
+                    )
+                ]
+            )
+        )
+    )
+
+    results = find_source_videos(
+        "Bodycam footage shows Portland police shooting involving K9",
+        search_hints=("Portland Police Bureau",),
+        session=session,
+    )
+
+    assert results
+    query = session.calls[0][1]["params"]["search_query"]
+    assert '"Portland Police Bureau"' in query
+
+
+def test_source_hunter_searches_official_domain_found_in_article():
+    empty_rss = "<?xml version='1.0'?><rss><channel></channel></rss>"
+    official_rss = """<?xml version="1.0"?>
+    <rss><channel>
+      <item>
+        <title>Bodycam footage shows Portland police shooting involving K9</title>
+        <link>https://www.portland.gov/police/news/bodycam-release</link>
+        <description>Official bodycam video released after Portland K9 shooting.</description>
+      </item>
+    </channel></rss>
+    """
+    session = _SequenceSession(
+        [
+            _Response("<html></html>"),
+            _Response(empty_rss),
+            _Response(official_rss),
+        ]
+    )
+
+    results = find_web_sources(
+        "Bodycam footage shows Portland police shooting involving K9",
+        search_hints=("Portland Police Bureau",),
+        official_urls=("https://www.portland.gov/police",),
+        session=session,
+    )
+
+    assert len(results) == 1
+    assert results[0].domain == "portland.gov"
+    assert "site:portland.gov" in session.calls[2][1]["params"]["q"]
 
 
 def test_source_hunter_prefers_matching_official_channel():
