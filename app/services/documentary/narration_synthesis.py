@@ -27,6 +27,33 @@ class NarrationSynthesisResult:
     language: str
 
 
+def _assert_scene_unchanged(
+    project_id: str,
+    snapshot,
+    *,
+    root: str | os.PathLike | None,
+) -> None:
+    current_project = load_project(project_id, root)
+    current = next(
+        (scene for scene in current_project.plan.scenes if scene.id == snapshot.id),
+        None,
+    )
+    if current is None:
+        raise NarrationSynthesisError(
+            f"scene changed during narration synthesis: {snapshot.id}"
+        )
+
+    if (
+        current.narration_text != snapshot.narration_text
+        or current.audio_mode != snapshot.audio_mode
+        or current.source_start != snapshot.source_start
+        or current.source_end != snapshot.source_end
+    ):
+        raise NarrationSynthesisError(
+            f"scene changed during narration synthesis: {snapshot.id}"
+        )
+
+
 def synthesize_narration(
     project_id: str,
     voice_name: str,
@@ -69,6 +96,11 @@ def synthesize_narration(
     generated: list[NarrationAudioAsset] = []
     with tempfile.TemporaryDirectory(prefix="documentary-narration-") as temp_dir:
         for scene in pending:
+            _assert_scene_unchanged(
+                project_id,
+                scene,
+                root=root,
+            )
             output = Path(temp_dir) / f"{scene.id}.mp3"
             try:
                 result = voice_service.tts(
@@ -103,6 +135,11 @@ def synthesize_narration(
                 raise NarrationSynthesisError(
                     f"narration does not fit scene {scene.id}"
                 )
+            _assert_scene_unchanged(
+                project_id,
+                scene,
+                root=root,
+            )
             try:
                 generated.append(
                     attach_narration_audio(
@@ -119,7 +156,12 @@ def synthesize_narration(
                     f"could not register narration audio for scene {scene.id}: {exc}"
                 ) from exc
 
-    set_narrator_voice(project_id, language, voice_name, root=root)
+    try:
+        set_narrator_voice(project_id, language, voice_name, root=root)
+    except Exception as exc:
+        raise NarrationSynthesisError(
+            f"could not persist narrator voice selection: {exc}"
+        ) from exc
     return NarrationSynthesisResult(
         generated=tuple(generated),
         reused=tuple(reused),
