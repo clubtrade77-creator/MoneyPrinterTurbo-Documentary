@@ -289,7 +289,7 @@ def _fetch_first_available_source(
             try:
                 add_source(project_id, source, root=root)
             except ValueError as exc:
-                if "duplicate source id" not in str(exc).lower():
+                if "source already exists in project" not in str(exc).lower():
                     raise
         try:
             fetch_source_local_copy(
