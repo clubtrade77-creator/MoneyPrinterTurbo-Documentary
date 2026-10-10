@@ -86,7 +86,11 @@ class _NonRetryableStoryPlannerError(StoryPlannerError):
     """Raised for provider/runtime failures that retries cannot repair."""
 
 
-class _TranscriptLikeStoryPlanError(StoryPlannerError):
+class _StoryPlanSchemaError(StoryPlannerError):
+    """Raised when generated JSON does not match the Story Plan schema."""
+
+
+class _TranscriptLikeStoryPlanError(_StoryPlanSchemaError):
     """Raised when the model returns transcript rows instead of editorial beats."""
 
 
@@ -386,17 +390,17 @@ def parse_story_plan_response(
 ) -> StoryPlan:
     raw = _strip_code_fence(response_text)
     if not raw:
-        raise StoryPlannerError("story planner returned an empty response")
+        raise _StoryPlanSchemaError("story planner returned an empty response")
     if raw.startswith("Error:"):
         raise StoryPlannerError(raw.removeprefix("Error:").strip() or raw)
 
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise StoryPlannerError("story planner did not return valid JSON") from exc
+        raise _StoryPlanSchemaError("story planner did not return valid JSON") from exc
 
     if not isinstance(payload, dict):
-        raise StoryPlannerError("story planner response must be one JSON object")
+        raise _StoryPlanSchemaError("story planner response must be one JSON object")
 
     if _looks_like_transcript_dump(payload):
         raise _TranscriptLikeStoryPlanError(
@@ -516,7 +520,7 @@ def parse_story_plan_response(
     try:
         return StoryPlan.model_validate(payload)
     except ValueError as exc:
-        raise StoryPlannerError(f"invalid story plan: {exc}") from exc
+        raise _StoryPlanSchemaError(f"invalid story plan: {exc}") from exc
 
 
 
@@ -1279,7 +1283,7 @@ def plan_story(
                 break
             except _NonRetryableStoryPlannerError:
                 raise
-            except StoryPlannerError as exc:
+            except _StoryPlanSchemaError as exc:
                 last_error = exc
                 if attempt >= MAX_STORY_PLAN_ATTEMPTS:
                     candidate = _build_deterministic_story_plan(
@@ -1295,6 +1299,11 @@ def plan_story(
                     candidate.grounding_review_version = CURRENT_GROUNDING_REVIEW_VERSION
                     plan = candidate
                     break
+                current_prompt = _retry_prompt(prompt, exc, attempt)
+            except StoryPlannerError as exc:
+                last_error = exc
+                if attempt >= MAX_STORY_PLAN_ATTEMPTS:
+                    raise
                 current_prompt = _retry_prompt(prompt, exc, attempt)
 
         if plan is None:
