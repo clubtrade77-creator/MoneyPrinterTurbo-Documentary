@@ -527,6 +527,7 @@
     "Documentary Render Again": "Собрать мастер-видео заново",
     "Documentary Rendering": "Собираю мастер-видео через FFmpeg…",
     "Documentary Render Failed": "Не удалось собрать мастер-видео: {error}",
+    "Documentary Render Not Ready": "Рендер пока не готов. Сначала исправь указанные ниже блокеры.",
     "Documentary Render Complete": "Мастер-видео создано: {filename}",
     "Documentary Narration": "Закадровый рассказчик",
     "Documentary Narration Original": "Сцена {index}: приоритет оригинального звука — рассказчик не нужен.",
