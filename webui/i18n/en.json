@@ -746,6 +746,15 @@
     "Documentary Source Hunter Low Confidence": "Low-confidence match: review the source manually before using it.",
     "Documentary Source Hunter Embedded Media": "Media found on official page: {count}",
     "Documentary Source Hunter Direct Video": "Direct video",
-    "Documentary Source Hunter Create Embedded Project": "Create project with this media"
+    "Documentary Source Hunter Create Embedded Project": "Create project with this media",
+    "Documentary Attach Local Copy": "Attach local copy to discovered source",
+    "Documentary Attach Local Copy Help": "Use this when Source Hunter found the original page/video but you acquired the media file separately. The existing source URL, publisher, provenance and rights status are preserved.",
+    "Documentary Attach Local Copy Source": "Discovered source",
+    "Documentary Attach Local Copy Open Source": "Open original source",
+    "Documentary Attach Local Copy File": "Local MP4/MOV copy",
+    "Documentary Attach Local Copy Button": "Attach local copy",
+    "Documentary Attach Local Copy Failed": "Could not attach local copy: {error}",
+    "Documentary Attach Local Copy Complete": "Local copy attached to source {source_id}."
+
   }
 }
