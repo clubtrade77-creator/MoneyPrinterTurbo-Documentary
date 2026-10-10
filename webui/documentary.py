@@ -1824,10 +1824,11 @@ def _render_localized_versions(project, tr: Tr) -> None:
         return
 
     master_language = project.master_language.lower()
+    master_base_language = master_language.split("-", 1)[0]
     target_languages = [
         language
         for language in ("ru", "en", "es")
-        if language != master_language
+        if language != master_base_language
     ]
     if not target_languages:
         return
