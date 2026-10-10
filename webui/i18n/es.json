@@ -714,6 +714,9 @@
     "Documentary Autopilot Failed": "El autopiloto se detuvo en: {stage}",
     "Documentary Autopilot Created": "«{title}» está listo con vistas previas en {languages}.",
     "Documentary Autopilot Rights Review": "La vista previa está lista. Confirma los derechos de publicación de {count} fuente(s) usada(s) antes del máster final.",
-    "Documentary Manual Mode": "Modo manual"
+    "Documentary Manual Mode": "Modo manual",
+    "Documentary Autopilot Resume": "CONTINUAR GENERACIÓN ANTERIOR",
+    "Documentary Autopilot Resume Available": "Se encontró un documental sin terminar. Se reutilizarán los puntos de control ya completados sin repetir búsqueda, descargas, Whisper ni artefactos de IA válidos.",
+    "Documentary Autopilot Stage Resume": "Continuando desde el punto guardado"
   }
 }
