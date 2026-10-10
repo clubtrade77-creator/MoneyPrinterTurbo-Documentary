@@ -29,6 +29,7 @@ from app.services.documentary.story_planner import (
     plan_story,
     story_plan_path,
     validate_story_plan_evidence,
+    _validate_generated_plan,
 )
 from app.services.documentary.transcription import transcript_path
 
@@ -446,8 +447,6 @@ def test_single_source_placeholder_evidence_is_normalized():
         ),
         target_duration_seconds=120,
     )
-
-    from app.services.documentary.story_planner import _validate_generated_plan
 
     _validate_generated_plan(
         plan,
