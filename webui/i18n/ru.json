@@ -592,6 +592,15 @@
     "Documentary Source Hunter Low Confidence": "Низкая уверенность: сначала открой и проверь источник вручную.",
     "Documentary Source Hunter Embedded Media": "Медиа найдено на официальной странице: {count}",
     "Documentary Source Hunter Direct Video": "Прямое видео",
-    "Documentary Source Hunter Create Embedded Project": "Создать проект с этим медиа"
+    "Documentary Source Hunter Create Embedded Project": "Создать проект с этим медиа",
+    "Documentary Attach Local Copy": "Прикрепить локальную копию к найденному источнику",
+    "Documentary Attach Local Copy Help": "Используй это, если Source Hunter нашёл оригинальную страницу или видео, а сам файл ты получил отдельно. URL, publisher, происхождение и статус прав существующего источника сохраняются.",
+    "Documentary Attach Local Copy Source": "Найденный источник",
+    "Documentary Attach Local Copy Open Source": "Открыть оригинальный источник",
+    "Documentary Attach Local Copy File": "Локальная копия MP4/MOV",
+    "Documentary Attach Local Copy Button": "Прикрепить локальную копию",
+    "Documentary Attach Local Copy Failed": "Не удалось прикрепить локальную копию: {error}",
+    "Documentary Attach Local Copy Complete": "Локальная копия прикреплена к источнику {source_id}."
+
   }
 }
