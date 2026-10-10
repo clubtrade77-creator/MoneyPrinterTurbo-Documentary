@@ -18,6 +18,14 @@ def _project_snapshot(source: SourceAsset):
     )
 
 
+def _checkpoint_stub(project_id, state, *, stage, status="running", root=None, **updates):
+    result = dict(state)
+    result.update(updates)
+    result["stage"] = stage
+    result["status"] = status
+    return result
+
+
 def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Path):
     events = []
     calls = []
@@ -31,6 +39,7 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
     )
     project_snapshot = _project_snapshot(source)
 
+    monkeypatch.setattr(autopilot, "_checkpoint_autopilot", _checkpoint_stub)
     source_bundle = autopilot._SourceBundle(media_source=source)
     monkeypatch.setattr(
         autopilot,
@@ -174,6 +183,7 @@ def test_run_autopilot_renders_final_when_rights_are_cleared(
     project_snapshot = _project_snapshot(source)
     renders = []
 
+    monkeypatch.setattr(autopilot, "_checkpoint_autopilot", _checkpoint_stub)
     source_bundle = autopilot._SourceBundle(media_source=source)
     monkeypatch.setattr(
         autopilot,
@@ -495,3 +505,141 @@ def test_fetch_and_transcribe_skips_mismatched_story_source(monkeypatch):
     assert source.id == fallback.id
     assert "therapy center" in transcript.full_text.lower()
     assert len(attempts) == 2
+
+
+def test_run_autopilot_resume_reuses_saved_transcript_and_story_plan(
+    monkeypatch,
+    tmp_path: Path,
+):
+    source = SourceAsset(
+        id="youtube_resume",
+        source_type=SourceType.youtube,
+        source_url="https://www.youtube.com/watch?v=abcdefghijk",
+        rights_status=RightsStatus.unknown_review_required,
+    )
+    scene = SimpleNamespace(
+        id="scene_resume",
+        source_id=source.id,
+        story_beat_id="beat_01",
+        audio_mode=AudioMode.original,
+        narration_text="",
+    )
+    project = SimpleNamespace(
+        id="doc_resume",
+        title="Resume story",
+        master_language="en",
+        sources=[source],
+        plan=SimpleNamespace(
+            scenes=[scene],
+            story_plan_fingerprint="fingerprint",
+        ),
+    )
+    transcript = SimpleNamespace(
+        language="en",
+        full_text="This transcript matches the resume story.",
+    )
+    story = autopilot.StoryCandidate(
+        id="story_resume",
+        title=project.title,
+        url="https://example.com/story",
+        publisher="Example",
+        published_at="",
+        language="en",
+        source_country="United States",
+        image_url="",
+        discovery_query="",
+        score=90,
+        footage_score=40,
+        freshness_score=30,
+        story_score=20,
+        reasons=(),
+    )
+    state = {
+        "version": 1,
+        "status": "failed",
+        "stage": "story_plan",
+        "topic": "",
+        "story": autopilot._story_state_payload(story),
+        "source_id": source.id,
+        "source_verified": True,
+    }
+    calls = []
+
+    monkeypatch.setattr(autopilot, "_load_autopilot_state", lambda *a, **k: state)
+    monkeypatch.setattr(autopilot, "_checkpoint_autopilot", _checkpoint_stub)
+    monkeypatch.setattr(autopilot, "load_project", lambda *a, **k: project)
+    monkeypatch.setattr(
+        autopilot,
+        "load_source_transcript",
+        lambda *a, **k: transcript,
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "discover_stories",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("resume must not rediscover stories")
+        ),
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "transcribe_source",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("resume must not rerun Whisper")
+        ),
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "load_story_plan",
+        lambda *a, **k: SimpleNamespace(
+            beats=[
+                SimpleNamespace(
+                    id="beat_01",
+                    original_audio_priority=True,
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "load_clip_plan",
+        lambda *a, **k: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "_master_narration_is_complete",
+        lambda *a, **k: True,
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "_project_has_narrated_scenes",
+        lambda *a, **k: False,
+    )
+
+    def fake_render(project_id, *, language=None, preview=False, root=None):
+        calls.append((language, preview))
+        path = tmp_path / f"{language or 'master'}-{preview}.mp4"
+        path.write_bytes(b"video")
+        return path
+
+    monkeypatch.setattr(autopilot, "render_documentary", fake_render)
+    monkeypatch.setattr(
+        autopilot,
+        "load_localization_plan",
+        lambda *a, **k: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "_rights_review_source_ids",
+        lambda *a, **k: (source.id,),
+    )
+
+    result = autopilot.run_autopilot(
+        autopilot.AutopilotProfile(output_languages=("en",)),
+        root=tmp_path,
+        resume_project_id=project.id,
+    )
+
+    assert result.project_id == project.id
+    assert result.source_id == source.id
+    assert result.title == project.title
+    assert calls == [(None, True)]
