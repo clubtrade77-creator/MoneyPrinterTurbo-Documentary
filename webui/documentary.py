@@ -1390,7 +1390,6 @@ def _render_narration_writer(project, tr: Tr) -> None:
     if story_plan is None:
         return
 
-    beats = {beat.id: beat for beat in story_plan.beats}
     with st.expander(tr("Documentary Narration"), expanded=True):
         narration_required = 0
         narration_needed = 0
