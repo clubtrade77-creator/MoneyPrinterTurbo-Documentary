@@ -76,8 +76,13 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
         "transcribe_source",
         lambda *a, **k: (
             calls.append("transcribe")
-            or SimpleNamespace(language="en")
+            or SimpleNamespace(language="en", full_text="Matching story transcript.")
         ),
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "_story_transcript_matches",
+        lambda *a, **k: (True, "test match"),
     )
     monkeypatch.setattr(
         autopilot,
@@ -204,7 +209,15 @@ def test_run_autopilot_renders_final_when_rights_are_cleared(
     monkeypatch.setattr(
         autopilot,
         "transcribe_source",
-        lambda *a, **k: SimpleNamespace(language="ru"),
+        lambda *a, **k: SimpleNamespace(
+            language="ru",
+            full_text="Matching story transcript.",
+        ),
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "_story_transcript_matches",
+        lambda *a, **k: (True, "test match"),
     )
     monkeypatch.setattr(autopilot, "plan_story", lambda *a, **k: None)
     monkeypatch.setattr(autopilot, "select_clips", lambda *a, **k: None)
@@ -378,6 +391,11 @@ def test_fetch_and_transcribe_skips_source_without_recognizable_speech(
         return SimpleNamespace(language="en", full_text="Recognized speech.")
 
     monkeypatch.setattr(autopilot, "transcribe_source", fake_transcribe)
+    monkeypatch.setattr(
+        autopilot,
+        "_story_transcript_matches",
+        lambda *a, **k: (True, "test match"),
+    )
 
     source, transcript = autopilot._fetch_and_transcribe_first_available_source(
         "doc_speech_fallback",
@@ -391,3 +409,89 @@ def test_fetch_and_transcribe_skips_source_without_recognizable_speech(
     assert transcript.full_text == "Recognized speech."
     assert attempts == [primary.id, fallback.id]
     assert added == [primary.id, fallback.id]
+
+
+def test_story_transcript_verifier_rejects_different_venue():
+    story = SimpleNamespace(
+        title="Surveillance video shows alleged abuse at therapy center for kids"
+    )
+    transcript = SimpleNamespace(
+        full_text=(
+            "The report concerns a home daycare. Investigators reviewed video "
+            "from the daycare and described the incident."
+        )
+    )
+
+    matched, reason = autopilot._story_transcript_matches(
+        story,
+        transcript,
+        verify_fn=lambda prompt: (
+            '{"same_event": false, "reason": '
+            '"headline says therapy center but transcript says home daycare"}'
+        ),
+    )
+
+    assert matched is False
+    assert "home daycare" in reason
+
+
+def test_fetch_and_transcribe_skips_mismatched_story_source(monkeypatch):
+    story = SimpleNamespace(title="Therapy center surveillance story")
+    primary = SourceAsset(
+        id="youtube_wrong",
+        source_type=SourceType.youtube,
+        source_url="https://www.youtube.com/watch?v=abcdefghijk",
+    )
+    fallback = SourceAsset(
+        id="youtube_right",
+        source_type=SourceType.youtube,
+        source_url="https://www.youtube.com/watch?v=lmnopqrstuv",
+    )
+    attempts = []
+
+    monkeypatch.setattr(
+        autopilot,
+        "_fallback_video_sources",
+        lambda *a, **k: [fallback],
+    )
+    monkeypatch.setattr(autopilot, "add_source", lambda *a, **k: None)
+    monkeypatch.setattr(
+        autopilot,
+        "fetch_source_local_copy",
+        lambda project_id, source_id, *, root=None: (
+            primary if source_id == primary.id else fallback
+        ),
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "transcribe_source",
+        lambda project_id, source_id, **kwargs: SimpleNamespace(
+            language="en",
+            full_text=(
+                "This is a home daycare report."
+                if source_id == primary.id
+                else "This report concerns the therapy center."
+            ),
+        ),
+    )
+
+    def fake_match(story_arg, transcript_arg, **kwargs):
+        attempts.append(transcript_arg.full_text)
+        return (
+            ("therapy center" in transcript_arg.full_text.lower()),
+            "venue check",
+        )
+
+    monkeypatch.setattr(autopilot, "_story_transcript_matches", fake_match)
+
+    source, transcript = autopilot._fetch_and_transcribe_first_available_source(
+        "doc_story_match",
+        story,
+        primary,
+        source_limit=4,
+        model=object(),
+    )
+
+    assert source.id == fallback.id
+    assert "therapy center" in transcript.full_text.lower()
+    assert len(attempts) == 2
