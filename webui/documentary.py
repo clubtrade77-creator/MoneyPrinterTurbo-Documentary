@@ -28,6 +28,12 @@ from app.services.documentary.project import (
     project_manifest_path,
     update_scene_narration,
 )
+from app.services.documentary.localization import (
+    LocalizationError,
+    load_localization_plan,
+    localization_plan_path,
+    localize_project,
+)
 from app.services.documentary.narration_synthesis import (
     NarrationSynthesisError,
     synthesize_narration,
@@ -159,26 +165,56 @@ def _load_clip_plan_if_available(project_id: str):
         return None
 
 
-def _render_output_is_current(project_id: str) -> bool:
-    output = documentary_render_path(project_id)
+def _render_output_is_current(
+    project_id: str,
+    *,
+    language: str | None = None,
+) -> bool:
+    project = load_project(project_id)
+    master_language = project.master_language.lower()
+    render_language = (language or master_language).lower()
+    localized = render_language != master_language
+
+    output = documentary_render_path(
+        project_id,
+        language=render_language if localized else None,
+    )
     if not output.is_file():
         return False
 
-    project = load_project(project_id)
     metadata_dependencies = [
-        project_manifest_path(project_id),
         story_plan_path(project_id),
         clip_plan_path(project_id),
     ]
+    if localized:
+        metadata_dependencies.append(
+            localization_plan_path(project_id, render_language)
+        )
+
+    referenced_source_ids = {
+        scene.source_id
+        for scene in project.plan.scenes
+        if scene.source_id
+    }
+    narration_scene_ids = {
+        scene.id
+        for scene in project.plan.scenes
+        if scene.audio_mode in {AudioMode.narration, AudioMode.mixed}
+    }
+
     media_dependencies = [
         Path(source.local_path)
         for source in project.sources
-        if source.local_path
+        if source.local_path and source.id in referenced_source_ids
     ]
     media_dependencies.extend(
         Path(asset.local_path)
         for asset in project.narration_audio
-        if asset.local_path
+        if (
+            asset.local_path
+            and asset.language == render_language
+            and asset.scene_id in narration_scene_ids
+        )
     )
 
     if any(not dependency.is_file() for dependency in media_dependencies):
