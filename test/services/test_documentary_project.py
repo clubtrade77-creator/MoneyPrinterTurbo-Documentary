@@ -26,6 +26,7 @@ from app.services.documentary.project import (
     list_projects,
     project_dir,
     save_project,
+    update_scene_narration,
 )
 from app.services.documentary.youtube_source import (
     build_youtube_source_asset,
