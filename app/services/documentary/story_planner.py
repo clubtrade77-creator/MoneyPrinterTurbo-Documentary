@@ -258,6 +258,96 @@ def _repair_section_map_payload(
     return repaired_payload
 
 
+def _normalize_beat_durations_for_requested_target(
+    payload: dict,
+    *,
+    requested_target_seconds: float | None,
+) -> None:
+    if requested_target_seconds is None:
+        return
+
+    beats = payload.get("beats")
+    if not isinstance(beats, list) or not beats:
+        return
+
+    try:
+        target = float(requested_target_seconds)
+        declared_target = float(payload.get("target_duration_seconds"))
+    except (TypeError, ValueError):
+        return
+
+    # Never hide an LLM attempt to change the requested top-level duration.
+    if not math.isclose(
+        declared_target,
+        target,
+        rel_tol=0.0,
+        abs_tol=0.01,
+    ):
+        return
+
+    weights = []
+    for beat in beats:
+        if not isinstance(beat, dict):
+            return
+        try:
+            duration = float(beat.get("target_duration_seconds"))
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(duration) or duration <= 0:
+            return
+        weights.append(duration)
+
+    current_total = sum(weights)
+    minimum_total = target * 0.65
+    maximum_total = target * 1.35
+    if minimum_total <= current_total <= maximum_total:
+        return
+
+    max_per_beat = 180.0
+    if target > len(beats) * max_per_beat:
+        return
+
+    normalized = [0.0] * len(beats)
+    active = set(range(len(beats)))
+    remaining = target
+
+    while active:
+        weight_sum = sum(weights[index] for index in active)
+        if weight_sum <= 0:
+            return
+
+        scale = remaining / weight_sum
+        capped = [
+            index
+            for index in active
+            if weights[index] * scale > max_per_beat
+        ]
+        if not capped:
+            for index in active:
+                normalized[index] = weights[index] * scale
+            break
+
+        for index in capped:
+            normalized[index] = max_per_beat
+            remaining -= max_per_beat
+            active.remove(index)
+
+        if remaining <= 0 and active:
+            return
+
+    rounded = [round(value, 3) for value in normalized]
+    difference = round(target - sum(rounded), 3)
+    if abs(difference) > 0:
+        for index, value in enumerate(rounded):
+            adjusted = value + difference
+            if 0 < adjusted <= max_per_beat:
+                rounded[index] = round(adjusted, 3)
+                break
+
+    for beat, duration in zip(beats, rounded):
+        beat["target_duration_seconds"] = duration
+
+
 def parse_story_plan_response(
     response_text: str,
     *,
@@ -381,6 +471,11 @@ def parse_story_plan_response(
                     first.get("title"),
                     first.get("narration_goal"),
                 )
+
+    _normalize_beat_durations_for_requested_target(
+        payload,
+        requested_target_seconds=target_duration_seconds,
+    )
 
     try:
         return StoryPlan.model_validate(payload)
@@ -508,7 +603,9 @@ investigation beat, and "payoff" for a resolving/final beat.
 Build a clear progression using only the purposes needed by this story.
 The requested total length is exactly {target_duration_seconds:.0f} seconds.
 The sum of all beat "target_duration_seconds" values MUST stay between {target_duration_seconds * 0.65:.0f} and {target_duration_seconds * 1.35:.0f} seconds;
-aim as close as practical to {target_duration_seconds:.0f} seconds.
+aim as close as practical to {target_duration_seconds:.0f} seconds. Allocate the
+requested runtime across the beats; do not return a short outline whose beat
+durations add up to only a small fraction of the requested runtime.
 Do not pad weak evidence with invented facts just to fill time.
 For sparse evidence or very short targets, prefer one compact beat and wording
 that stays close to the transcript instead of adding dramatic framing.
