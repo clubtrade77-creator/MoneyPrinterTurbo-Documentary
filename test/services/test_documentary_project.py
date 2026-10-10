@@ -224,11 +224,18 @@ def test_update_scene_narration_changes_only_real_edits(tmp_path: Path):
         project_id="doc_narration_edits",
         root=tmp_path,
     )
+    source = SourceAsset(
+        id="source_edit",
+        source_type=SourceType.youtube,
+        source_url="https://www.youtube.com/watch?v=abcdefghijk",
+        rights_status=RightsStatus.unknown_review_required,
+    )
+    project.sources = [source]
     project.plan.scenes = [
         DocumentaryScene(
             id="scene_edit",
             scene_type=SceneType.narration_over_source,
-            source_id="",
+            source_id=source.id,
             source_start=0.0,
             source_end=3.0,
             narration_text="Original text",
