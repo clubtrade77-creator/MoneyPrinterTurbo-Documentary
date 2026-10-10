@@ -402,6 +402,50 @@ def test_synthesis_time_fits_small_overrun_without_second_tts(
     assert result.generated[0].duration_seconds == 4.9
 
 
+
+def test_synthesis_time_fits_boundary_overrun_within_safe_ratio(
+    tmp_path,
+    monkeypatch,
+):
+    project = _make_project(tmp_path)
+    project = load_project(project.id, tmp_path)
+    project.plan.scenes[0].source_end = 5.86
+    save_project(project, tmp_path)
+
+    duration_calls = iter([6.53, 5.86])
+    commands = []
+
+    def fake_tts(**kwargs):
+        Path(kwargs["voice_file"]).write_bytes(b"original-audio")
+        return object()
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        Path(command[-1]).write_bytes(b"fitted-audio")
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(narration_synthesis.voice_service, "tts", fake_tts)
+    monkeypatch.setattr(
+        narration_synthesis.voice_service,
+        "get_audio_duration",
+        lambda path: next(duration_calls),
+    )
+    monkeypatch.setattr(narration_synthesis.subprocess, "run", fake_run)
+    monkeypatch.setattr(audio_service, "_probe_audio", lambda path: (5.86, "mp3"))
+
+    result = narration_synthesis.synthesize_narration(
+        project.id,
+        "en-US-TestVoice",
+        root=tmp_path,
+    )
+
+    assert len(commands) == 1
+    filter_index = commands[0].index("-filter:a") + 1
+    ratio = float(commands[0][filter_index].split("=")[1])
+    assert ratio == pytest.approx(6.53 / 5.86, rel=1e-5)
+    assert len(result.generated) == 1
+    assert result.generated[0].duration_seconds == pytest.approx(5.86)
+
 def test_synthesis_rejects_large_overrun_without_time_fit(
     tmp_path,
     monkeypatch,
