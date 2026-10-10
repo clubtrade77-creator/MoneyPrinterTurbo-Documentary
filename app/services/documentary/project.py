@@ -367,6 +367,44 @@ def set_narrator_voice(
         return project
 
 
+def update_source_rights(
+    project_id: str,
+    source_id: str,
+    rights_status: RightsStatus,
+    *,
+    rights_note: str = "",
+    root: str | os.PathLike | None = None,
+) -> SourceAsset:
+    try:
+        resolved_status = RightsStatus(rights_status)
+    except ValueError as exc:
+        raise ValueError("invalid documentary rights status") from exc
+
+    note = str(rights_note or "").strip()
+    if len(note) > 4000:
+        raise ValueError("documentary rights note is too long")
+
+    with _project_lock(project_id, root):
+        project = _load_project_unlocked(project_id, root)
+        source = next(
+            (item for item in project.sources if item.id == source_id),
+            None,
+        )
+        if source is None:
+            raise ValueError(f"source not found in project: {source_id}")
+
+        if (
+            source.rights_status == resolved_status
+            and source.rights_note == note
+        ):
+            return source
+
+        source.rights_status = resolved_status
+        source.rights_note = note
+        _save_project_unlocked(project, root)
+        return source
+
+
 def update_scene_narration(
     project_id: str,
     updates: dict[str, str],
