@@ -172,6 +172,7 @@ def test_build_story_planner_prompt_keeps_evidence_ids_and_injection_boundary():
     assert "Do not pad weak evidence with invented facts" in prompt
     assert 'Every beat "id" MUST use the exact form "beat_<number>"' in prompt
     assert 'Never use shortened ids such as "b1" or "b2"' in prompt
+    assert 'Never invent synonyms such as "resolution"' in prompt
 
 
 def test_build_story_planner_prompt_accepts_short_grounded_smoke_target():
@@ -230,6 +231,15 @@ def test_parse_story_plan_response_normalizes_compact_beat_ids():
     plan = parse_story_plan_response(json.dumps(payload))
 
     assert [beat.id for beat in plan.beats] == ["beat_1", "beat_2", "beat_3"]
+
+
+def test_parse_story_plan_response_normalizes_resolution_to_payoff():
+    payload = _plan_payload()
+    payload["beats"][2]["purpose"] = "resolution"
+
+    plan = parse_story_plan_response(json.dumps(payload))
+
+    assert plan.beats[2].purpose == NarrativePurpose.payoff
 
 
 def test_parse_story_plan_response_rejects_non_json():
