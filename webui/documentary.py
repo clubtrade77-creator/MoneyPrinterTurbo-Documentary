@@ -19,6 +19,7 @@ from app.services.documentary.clip_selector import (
 )
 from app.services.documentary.project import (
     add_source,
+    attach_local_copy_to_source,
     attach_local_video,
     create_project,
     list_projects,
@@ -908,6 +909,89 @@ def _render_project_overview(project, tr: Tr) -> None:
     )
 
 
+def _render_external_source_local_copy(project, tr: Tr) -> None:
+    external_video_sources = [
+        source
+        for source in project.sources
+        if source.source_url
+        and not source.has_local_copy
+        and source.source_type
+        in {
+            SourceType.youtube,
+            SourceType.bodycam,
+            SourceType.cctv,
+            SourceType.court,
+            SourceType.interview,
+            SourceType.news,
+            SourceType.broll,
+        }
+    ]
+    if not external_video_sources:
+        return
+
+    with st.expander(
+        tr("Documentary Attach Local Copy"),
+        expanded=True,
+    ):
+        st.caption(tr("Documentary Attach Local Copy Help"))
+        source_by_id = {source.id: source for source in external_video_sources}
+        source_id = st.selectbox(
+            tr("Documentary Attach Local Copy Source"),
+            options=list(source_by_id),
+            format_func=lambda value: (
+                source_by_id[value].title
+                or source_by_id[value].publisher
+                or value
+            ),
+            key=f"documentary_attach_copy_source_{project.id}",
+        )
+        source = source_by_id[source_id]
+        if source.source_url:
+            st.link_button(
+                tr("Documentary Attach Local Copy Open Source"),
+                source.source_url,
+                width="stretch",
+            )
+
+        upload = st.file_uploader(
+            tr("Documentary Attach Local Copy File"),
+            type=["mp4", "mov"],
+            accept_multiple_files=False,
+            key=f"documentary_attach_copy_file_{project.id}_{source_id}",
+        )
+        if st.button(
+            tr("Documentary Attach Local Copy Button"),
+            type="primary",
+            width="stretch",
+            disabled=upload is None,
+            key=f"documentary_attach_copy_button_{project.id}_{source_id}",
+        ):
+            temp_path = None
+            try:
+                temp_path = _write_uploaded_video_to_temp(upload)
+                attached = attach_local_copy_to_source(
+                    project.id,
+                    source_id,
+                    temp_path,
+                )
+            except (OSError, ValueError) as exc:
+                st.error(
+                    tr("Documentary Attach Local Copy Failed").format(
+                        error=str(exc)
+                    )
+                )
+            else:
+                st.success(
+                    tr("Documentary Attach Local Copy Complete").format(
+                        source_id=attached.id
+                    )
+                )
+                st.rerun()
+            finally:
+                if temp_path is not None:
+                    temp_path.unlink(missing_ok=True)
+
+
 def _load_transcript_if_available(project_id: str, source_id: str):
     try:
         return load_source_transcript(project_id, source_id)
@@ -1611,6 +1695,7 @@ def render_documentary_application(tr: Tr) -> None:
     project = load_project(selected_project_id)
 
     _render_project_overview(project, tr)
+    _render_external_source_local_copy(project, tr)
     _render_source_upload(project, tr)
     _render_transcription(project, tr)
     _render_story_planner(project, tr)
