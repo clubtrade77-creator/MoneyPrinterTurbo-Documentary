@@ -34,6 +34,7 @@ from app.services.documentary.narration_synthesis import (
 )
 from app.services.documentary.narration import (
     NarrationWriterError,
+    scene_requires_narration,
     write_narration,
 )
 from app.services.documentary.story_discovery import (
@@ -1390,15 +1391,14 @@ def _render_narration_writer(project, tr: Tr) -> None:
     if story_plan is None:
         return
 
+    beats = {beat.id: beat for beat in story_plan.beats}
     with st.expander(tr("Documentary Narration"), expanded=True):
         narration_required = 0
         narration_needed = 0
         narration_updates: dict[str, str] = {}
         for index, scene in enumerate(project.plan.scenes, start=1):
-            requires_narration = scene.audio_mode in {
-                AudioMode.narration,
-                AudioMode.mixed,
-            }
+            beat = beats.get(scene.story_beat_id)
+            requires_narration = scene_requires_narration(scene, beat)
             if requires_narration:
                 narration_required += 1
 
