@@ -160,6 +160,21 @@ def _validate_scene(
             )
         except NarrationAudioError as exc:
             raise DocumentaryRenderError(str(exc)) from exc
+
+        expected_voice = project.narrator_voices.get(
+            project.master_language.lower(),
+            "",
+        )
+        if expected_voice:
+            if not narration_asset.voice_name:
+                raise DocumentaryRenderError(
+                    f"narration voice metadata is missing for scene {scene.id}"
+                )
+            if narration_asset.voice_name != expected_voice:
+                raise DocumentaryRenderError(
+                    f"narration audio uses a different narrator voice: {scene.id}"
+                )
+
         if (
             narration_asset.duration_seconds
             > duration + _NARRATION_DURATION_TOLERANCE_SECONDS
@@ -442,6 +457,19 @@ def documentary_render_readiness_issues(
             except (FileNotFoundError, NarrationAudioError) as exc:
                 issues.append(str(exc))
             else:
+                expected_voice = project.narrator_voices.get(
+                    project.master_language.lower(),
+                    "",
+                )
+                if expected_voice:
+                    if not narration.voice_name:
+                        issues.append(
+                            f"narration voice metadata is missing for scene {scene.id}"
+                        )
+                    elif narration.voice_name != expected_voice:
+                        issues.append(
+                            f"narration audio uses a different narrator voice: {scene.id}"
+                        )
                 if (
                     narration.duration_seconds
                     > duration + _NARRATION_DURATION_TOLERANCE_SECONDS
