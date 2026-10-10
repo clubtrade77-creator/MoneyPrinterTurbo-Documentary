@@ -27,6 +27,7 @@ from app.services.documentary.project import (
     project_dir,
     save_project,
     update_scene_narration,
+    update_source_rights,
 )
 from app.services.documentary.youtube_source import (
     build_youtube_source_asset,
@@ -216,6 +217,64 @@ def test_attach_local_copy_preserves_original_upload_filename(
     )
 
     assert attached.original_filename == "official-bodycam.mp4"
+
+
+def test_update_source_rights_persists_and_is_idempotent(tmp_path: Path):
+    project = create_project(
+        "Rights review",
+        project_id="doc_rights_review",
+        root=tmp_path,
+    )
+    source = SourceAsset(
+        id="source_rights",
+        source_type=SourceType.youtube,
+        source_url="https://www.youtube.com/watch?v=abcdefghijk",
+        rights_status=RightsStatus.unknown_review_required,
+    )
+    add_source(project.id, source, root=tmp_path)
+    before = load_project(project.id, tmp_path)
+
+    updated_source = update_source_rights(
+        project.id,
+        source.id,
+        RightsStatus.permission_confirmed,
+        rights_note="Permission confirmed by owner on 2026-10-10.",
+        root=tmp_path,
+    )
+    after = load_project(project.id, tmp_path)
+
+    assert updated_source.rights_status == RightsStatus.permission_confirmed
+    assert updated_source.rights_note.startswith("Permission confirmed")
+    assert after.revision == before.revision + 1
+    assert after.sources[0].rights_cleared_for_publish is True
+
+    same = update_source_rights(
+        project.id,
+        source.id,
+        RightsStatus.permission_confirmed,
+        rights_note="Permission confirmed by owner on 2026-10-10.",
+        root=tmp_path,
+    )
+    unchanged = load_project(project.id, tmp_path)
+
+    assert same.rights_status == RightsStatus.permission_confirmed
+    assert unchanged.revision == after.revision
+
+
+def test_update_source_rights_rejects_unknown_source(tmp_path: Path):
+    project = create_project(
+        "Rights review missing source",
+        project_id="doc_rights_missing",
+        root=tmp_path,
+    )
+
+    with pytest.raises(ValueError, match="source not found"):
+        update_source_rights(
+            project.id,
+            "source_missing",
+            RightsStatus.licensed,
+            root=tmp_path,
+        )
 
 
 def test_update_scene_narration_changes_only_real_edits(tmp_path: Path):
