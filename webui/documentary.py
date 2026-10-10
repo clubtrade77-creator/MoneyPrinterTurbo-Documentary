@@ -170,6 +170,11 @@ def _render_output_is_current(
     *,
     language: str | None = None,
 ) -> bool:
+    if language is None:
+        default_output = documentary_render_path(project_id)
+        if not default_output.is_file():
+            return False
+
     project = load_project(project_id)
     master_language = project.master_language.lower()
     render_language = (language or master_language).lower()
