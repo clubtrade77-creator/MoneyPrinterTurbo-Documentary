@@ -639,6 +639,7 @@
     "Documentary Preview Again": "Пересобрать технический preview",
     "Documentary Preview Current": "Технический preview актуален. Это не означает, что права на публикацию подтверждены.",
     "Documentary Preview Stale": "Технический preview устарел.",
-    "Documentary Preview Complete": "Технический preview готов: {filename}"
+    "Documentary Preview Complete": "Технический preview готов: {filename}",
+    "Documentary Rights Note Required": "Добавь краткую заметку с основанием: лицензия, разрешение или подтверждённый public domain — без этого очищенный статус не сохраняется."
   }
 }
