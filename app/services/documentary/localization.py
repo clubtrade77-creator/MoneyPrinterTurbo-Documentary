@@ -211,6 +211,9 @@ Do not add facts, explanations, dates, names, numbers, allegations, legal conclu
 or emotional framing that are absent from the source.
 Do not omit factual qualifications or uncertainty.
 Preserve names, numbers, dates, quoted claims, and attribution faithfully.
+For narration_text, keep the translation concise and close to the source's likely
+spoken duration. Prefer natural compact phrasing over expansion, while preserving
+every material fact, qualification, attribution, and uncertainty.
 An empty narration_text or on_screen_text must remain an empty string.
 Every source scene must appear exactly once and in the same order.
 Every subtitle segment must appear exactly once and in the same order.
