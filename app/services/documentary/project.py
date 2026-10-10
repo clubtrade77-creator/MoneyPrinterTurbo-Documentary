@@ -529,6 +529,7 @@ def attach_local_copy_to_source(
     source_id: str,
     source_path: str | os.PathLike,
     *,
+    original_filename: str = "",
     root: str | os.PathLike | None = None,
 ) -> SourceAsset:
     """Attach a local media copy to an existing external source asset.
@@ -567,7 +568,11 @@ def attach_local_copy_to_source(
             video_metadata = (
                 probe_video_metadata(target_path) if should_probe_video else old_video_metadata
             )
-            source.original_filename = source_path.name
+            source.original_filename = (
+                Path(original_filename).name
+                if original_filename
+                else source_path.name
+            )
             source.local_path = str(target_path)
             source.checksum_sha256 = sha256_file(target_path)
             source.video_metadata = video_metadata
