@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,11 @@ from app.services.documentary.localization import (
     load_localization_plan,
 )
 from app.services.documentary.project import load_project, set_narrator_voice
+from app.utils import utils
+
+
+_NARRATION_FIT_TOLERANCE_SECONDS = 0.05
+_MAX_LOCAL_TIME_COMPRESSION_RATIO = 1.12
 
 
 class NarrationSynthesisError(RuntimeError):
@@ -129,6 +135,78 @@ def _assert_narration_context_unchanged(
         raise NarrationSynthesisError(
             f"localization changed during narration synthesis: {snapshot.id}"
         )
+
+
+def _fit_narration_audio_to_scene(
+    path: Path,
+    *,
+    duration: float,
+    available: float,
+) -> tuple[Path, float]:
+    if duration <= available + _NARRATION_FIT_TOLERANCE_SECONDS:
+        return path, duration
+
+    target_duration = max(0.05, available - _NARRATION_FIT_TOLERANCE_SECONDS)
+    ratio = duration / target_duration
+    if ratio > _MAX_LOCAL_TIME_COMPRESSION_RATIO:
+        raise NarrationSynthesisError(
+            f"narration exceeds the scene by too much to fit safely: "
+            f"{duration:.2f}s > {available:.2f}s"
+        )
+
+    fitted = path.with_name(f"{path.stem}-fit{path.suffix}")
+    command = [
+        utils.get_ffmpeg_binary(),
+        "-y",
+        "-nostdin",
+        "-i",
+        str(path),
+        "-filter:a",
+        f"atempo={ratio:.6f}",
+        "-vn",
+        str(fitted),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise NarrationSynthesisError(
+            "could not time-fit narration audio"
+        ) from exc
+
+    if result.returncode != 0 or not fitted.is_file() or fitted.stat().st_size <= 0:
+        message = (result.stderr or result.stdout or "").strip()
+        if len(message) > 1200:
+            message = message[-1200:]
+        raise NarrationSynthesisError(
+            "could not time-fit narration audio"
+            + (f": {message}" if message else "")
+        )
+
+    try:
+        fitted_duration = float(
+            voice_service.get_audio_duration(str(fitted)) or 0
+        )
+    except Exception as exc:
+        raise NarrationSynthesisError(
+            "could not inspect time-fitted narration audio"
+        ) from exc
+    if (
+        fitted_duration <= 0
+        or fitted_duration > available + _NARRATION_FIT_TOLERANCE_SECONDS
+    ):
+        raise NarrationSynthesisError(
+            f"time-fitted narration still does not fit scene: "
+            f"{fitted_duration:.2f}s > {available:.2f}s"
+        )
+    return fitted, fitted_duration
 
 
 def _assert_scene_unchanged(
@@ -244,10 +322,15 @@ def synthesize_narration(
                 raise NarrationSynthesisError(
                     f"invalid narration duration for scene {scene.id}"
                 )
-            if available <= 0 or duration > available + 0.05:
+            if available <= 0:
                 raise NarrationSynthesisError(
-                    f"narration does not fit scene {scene.id}"
+                    f"narration scene has invalid duration: {scene.id}"
                 )
+            output, duration = _fit_narration_audio_to_scene(
+                output,
+                duration=duration,
+                available=available,
+            )
             _assert_narration_context_unchanged(
                 project_id,
                 scene,
