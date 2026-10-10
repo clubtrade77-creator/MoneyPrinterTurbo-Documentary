@@ -173,7 +173,8 @@ def test_build_story_planner_prompt_keeps_evidence_ids_and_injection_boundary():
     assert "Do not pad weak evidence with invented facts" in prompt
     assert 'Every beat "id" MUST use the exact form "beat_<number>"' in prompt
     assert 'Never use shortened ids such as "b1" or "b2"' in prompt
-    assert 'Never invent synonyms such as "resolution"' in prompt
+    assert 'Never invent synonyms such as' in prompt
+    assert '"revelation", "resolution", "conclusion"' in prompt
     assert 'Do NOT return top-level sections such as' in prompt
     assert '"investigation", "outcome", or "closing"' in prompt
     assert '"target_duration_seconds" (never' in prompt
