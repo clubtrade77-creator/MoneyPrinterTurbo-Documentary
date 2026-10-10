@@ -40,7 +40,11 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
             current_payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             current_payload = None
-        if current_payload == payload:
+        current_for_compare = dict(current_payload or {})
+        payload_for_compare = dict(payload)
+        current_for_compare.pop("created_at", None)
+        payload_for_compare.pop("created_at", None)
+        if current_for_compare == payload_for_compare:
             return
 
     temp_path = path.with_suffix(path.suffix + f".{uuid4().hex}.tmp")
