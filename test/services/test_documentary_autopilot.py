@@ -26,10 +26,29 @@ def _checkpoint_stub(project_id, state, *, stage, status="running", root=None, *
     return result
 
 
+def _story_candidate(title: str):
+    return autopilot.StoryCandidate(
+        id="story_test",
+        title=title,
+        url="https://example.com/story",
+        publisher="Example",
+        published_at="",
+        language="en",
+        source_country="United States",
+        image_url="",
+        discovery_query="",
+        score=90,
+        footage_score=40,
+        freshness_score=30,
+        story_score=20,
+        reasons=(),
+    )
+
+
 def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Path):
     events = []
     calls = []
-    story = SimpleNamespace(title="Autopilot story")
+    story = _story_candidate("Autopilot story")
     created = SimpleNamespace(id="doc_autopilot", title=story.title)
     source = SourceAsset(
         id="youtube_autopilot",
@@ -38,8 +57,11 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
         rights_status=RightsStatus.unknown_review_required,
     )
     project_snapshot = _project_snapshot(source)
+    project_snapshot.id = created.id
+    project_snapshot.title = created.title
 
     monkeypatch.setattr(autopilot, "_checkpoint_autopilot", _checkpoint_stub)
+    monkeypatch.setattr(autopilot, "save_project", lambda *a, **k: None)
     source_bundle = autopilot._SourceBundle(media_source=source)
     monkeypatch.setattr(
         autopilot,
@@ -172,7 +194,7 @@ def test_run_autopilot_renders_final_when_rights_are_cleared(
     monkeypatch,
     tmp_path: Path,
 ):
-    story = SimpleNamespace(title="Cleared story")
+    story = _story_candidate("Cleared story")
     created = SimpleNamespace(id="doc_cleared", title=story.title)
     source = SourceAsset(
         id="source_cleared",
@@ -181,9 +203,12 @@ def test_run_autopilot_renders_final_when_rights_are_cleared(
         rights_status=RightsStatus.user_owned,
     )
     project_snapshot = _project_snapshot(source)
+    project_snapshot.id = created.id
+    project_snapshot.title = created.title
     renders = []
 
     monkeypatch.setattr(autopilot, "_checkpoint_autopilot", _checkpoint_stub)
+    monkeypatch.setattr(autopilot, "save_project", lambda *a, **k: None)
     source_bundle = autopilot._SourceBundle(media_source=source)
     monkeypatch.setattr(
         autopilot,
