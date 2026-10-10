@@ -24,6 +24,7 @@ from app.services.documentary.project import (
     create_project,
     load_project,
     project_dir,
+    save_project,
     sha256_file,
 )
 from app.services.documentary.story_planner import plan_story
@@ -189,7 +190,7 @@ def test_write_narration_skips_original_audio_priority_scene(tmp_path: Path):
     assert after.plan.scenes[0].narration_text == ""
 
 
-def test_write_narration_generates_reviewed_text_for_muted_scene(tmp_path: Path):
+def test_write_narration_generates_reviewed_text_for_narration_scene(tmp_path: Path):
     project, _ = _setup_case(tmp_path, original_audio_priority=False)
     before = load_project(project.id, tmp_path)
     scene_id = before.plan.scenes[0].id
@@ -215,6 +216,62 @@ def test_write_narration_generates_reviewed_text_for_muted_scene(tmp_path: Path)
     assert scene.narration_text == "The officer approaches the vehicle."
     assert scene.audio_mode == AudioMode.narration
     assert scene.scene_type == SceneType.narration_over_source
+
+
+def test_write_narration_upgrades_legacy_muted_narration_scene(
+    tmp_path: Path,
+):
+    project, _ = _setup_case(tmp_path, original_audio_priority=False)
+    legacy = load_project(project.id, tmp_path)
+    legacy.plan.scenes[0].audio_mode = AudioMode.muted
+    save_project(legacy, tmp_path)
+    scene_id = legacy.plan.scenes[0].id
+
+    result = write_narration(
+        project.id,
+        root=tmp_path,
+        generate_fn=lambda prompt: json.dumps(
+            {
+                "scenes": [
+                    {
+                        "scene_id": scene_id,
+                        "narration_text": "The officer approaches the vehicle.",
+                    }
+                ]
+            }
+        ),
+        review_fn=_approve_review,
+    )
+
+    assert result.plan.scenes[0].audio_mode == AudioMode.narration
+    assert result.plan.scenes[0].narration_text
+
+
+def test_write_narration_preserves_mixed_audio_mode(tmp_path: Path):
+    project, _ = _setup_case(tmp_path, original_audio_priority=False)
+    mixed = load_project(project.id, tmp_path)
+    mixed.plan.scenes[0].audio_mode = AudioMode.mixed
+    save_project(mixed, tmp_path)
+    scene_id = mixed.plan.scenes[0].id
+
+    result = write_narration(
+        project.id,
+        root=tmp_path,
+        generate_fn=lambda prompt: json.dumps(
+            {
+                "scenes": [
+                    {
+                        "scene_id": scene_id,
+                        "narration_text": "The officer approaches the vehicle.",
+                    }
+                ]
+            }
+        ),
+        review_fn=_approve_review,
+    )
+
+    assert result.plan.scenes[0].audio_mode == AudioMode.mixed
+    assert result.plan.scenes[0].narration_text
 
 
 def test_write_narration_requires_reviewer_for_custom_generator(tmp_path: Path):
