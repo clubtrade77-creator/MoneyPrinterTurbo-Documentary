@@ -607,7 +607,8 @@
     "Documentary Narration Save": "Guardar cambios de narración",
     "Documentary Narration Save Failed": "No se pudieron guardar los cambios de narración: {error}",
     "Documentary Narration Saved": "Cambios de narración guardados.",
-    "Documentary Narration Ready": "El texto de narración está listo para generar la voz."
-
+    "Documentary Narration Ready": "El texto de narración está listo para generar la voz.",
+    "Documentary Source Hunter Article Agencies": "Contexto del artículo: {agencies}",
+    "Documentary Source Hunter Article Official Links": "enlaces oficiales encontrados en el artículo: {count}"
   }
 }
