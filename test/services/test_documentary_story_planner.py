@@ -183,6 +183,9 @@ def test_build_story_planner_prompt_keeps_evidence_ids_and_injection_boundary():
     assert '"target_duration_seconds" (never' in prompt
     assert 'evidence "segment_ids" (never "segments")' in prompt
     assert 'never use placeholders such as "user", "source", or "video"' in prompt
+    assert "NOT one transcript row" in prompt
+    assert 'Never use fields named "content" or "timestamp"' in prompt
+    assert '"evidence" MUST be an array of evidence objects' in prompt
 
 
 def test_build_story_planner_prompt_accepts_short_grounded_smoke_target():
@@ -782,6 +785,95 @@ def test_plan_story_repairs_invalid_duration_without_retry(tmp_path: Path):
     assert plan.title == "The Traffic Stop"
     assert len(prompts) == 1
     assert sum(beat.target_duration_seconds for beat in plan.beats) == pytest.approx(120)
+
+
+def test_plan_story_transcript_dump_uses_deterministic_fallback_once(
+    tmp_path: Path,
+):
+    project = create_project(
+        "Transcript dump fallback",
+        project_id="doc_transcript_dump_fallback",
+        root=tmp_path,
+    )
+    source_file = tmp_path / "long-source.wav"
+    source_file.write_bytes(b"long-audio-source")
+    source = attach_local_file(
+        project.id,
+        source_file,
+        source_type=SourceType.audio,
+        root=tmp_path,
+    )
+    segments = [
+        TranscriptSegment(
+            id=index,
+            start_seconds=float(index * 60),
+            end_seconds=float(index * 60 + 50),
+            text=f"Recorded statement number {index}.",
+        )
+        for index in range(20)
+    ]
+    transcript = DocumentaryTranscript(
+        source_id=source.id,
+        source_checksum_sha256=source.checksum_sha256,
+        language="en",
+        full_text=" ".join(segment.text for segment in segments),
+        segments=segments,
+    )
+    transcript_path(project.id, source.id, tmp_path).write_text(
+        json.dumps(
+            transcript.model_dump(mode="json"),
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    transcript_dump = {
+        "beats": [
+            {
+                "title": segment.text,
+                "content": segment.text,
+                "timestamp": segment.start_seconds,
+                "evidence": str(segment.id),
+            }
+            for segment in segments
+        ]
+    }
+    generation_calls = []
+
+    def generate(prompt: str) -> str:
+        generation_calls.append(prompt)
+        return json.dumps(transcript_dump)
+
+    def review(prompt: str) -> str:
+        raise AssertionError(
+            "transcript-dump fallback must not spend tokens on semantic review"
+        )
+
+    plan = plan_story(
+        project.id,
+        target_duration_seconds=600,
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=review,
+    )
+
+    assert len(generation_calls) == 1
+    assert plan.grounding_reviewed is True
+    assert plan.grounding_review_version == CURRENT_GROUNDING_REVIEW_VERSION
+    assert len(plan.beats) == 5
+    assert sum(beat.target_duration_seconds for beat in plan.beats) == pytest.approx(600)
+    assert plan.beats[0].purpose == NarrativePurpose.hook
+    assert all(
+        beat.purpose == NarrativePurpose.context
+        for beat in plan.beats[1:]
+    )
+    assert {
+        evidence.source_id
+        for beat in plan.beats
+        for evidence in beat.evidence
+    } == {source.id}
+    assert story_plan_path(project.id, tmp_path).is_file()
 
 
 def test_plan_story_does_not_retry_provider_error(tmp_path: Path):
