@@ -11,6 +11,11 @@ from app.config import config
 from app.models.documentary import AudioMode, RightsStatus, SourceType
 from app.services import subtitle as subtitle_service
 from app.services import voice as voice_service
+from app.services.documentary.autopilot import (
+    AutopilotError,
+    AutopilotProfile,
+    run_autopilot,
+)
 from app.services.documentary.clip_selector import (
     ClipSelectorError,
     clip_plan_path,
@@ -1017,6 +1022,102 @@ def _render_story_discovery(tr: Tr) -> None:
                                     )
                                 )
                                 st.rerun()
+
+
+def _autopilot_progress_label(stage: str, tr: Tr) -> str:
+    if stage.startswith("localize_"):
+        language = stage.removeprefix("localize_").upper()
+        return tr("Documentary Autopilot Stage Localization").format(
+            language=language
+        )
+    labels = {
+        "story": "Documentary Autopilot Stage Story",
+        "sources": "Documentary Autopilot Stage Sources",
+        "media": "Documentary Autopilot Stage Media",
+        "transcription": "Documentary Autopilot Stage Transcription",
+        "story_plan": "Documentary Autopilot Stage Script",
+        "clips": "Documentary Autopilot Stage Clips",
+        "narration": "Documentary Autopilot Stage Narration",
+        "voice": "Documentary Autopilot Stage Voice",
+        "preview": "Documentary Autopilot Stage Render",
+        "final": "Documentary Autopilot Stage Final",
+        "done": "Documentary Autopilot Stage Done",
+    }
+    return tr(labels.get(stage, "Documentary Autopilot Running"))
+
+
+def _render_autopilot(tr: Tr) -> None:
+    with st.container(border=True):
+        st.markdown(f"## {tr('Documentary Autopilot Title')}")
+        st.caption(tr("Documentary Autopilot Help"))
+        topic = st.text_input(
+            tr("Documentary Autopilot Topic"),
+            placeholder=tr("Documentary Autopilot Topic Placeholder"),
+            key="documentary_autopilot_topic",
+            help=tr("Documentary Autopilot Topic Help"),
+        )
+        st.caption(tr("Documentary Autopilot Defaults"))
+
+        if not st.button(
+            tr("Documentary Autopilot Start"),
+            type="primary",
+            width="stretch",
+            key="documentary_autopilot_start",
+        ):
+            return
+
+        progress_bar = st.progress(0.0)
+        status = st.status(
+            tr("Documentary Autopilot Starting"),
+            expanded=True,
+        )
+
+        def on_progress(event):
+            progress_bar.progress(event.fraction)
+            label = _autopilot_progress_label(event.stage, tr)
+            status.update(label=label, state="running", expanded=True)
+            status.write(label)
+
+        try:
+            result = run_autopilot(
+                AutopilotProfile(topic=topic.strip()),
+                progress=on_progress,
+            )
+        except AutopilotError as exc:
+            progress_bar.empty()
+            status.update(
+                label=tr("Documentary Autopilot Failed").format(
+                    stage=_autopilot_progress_label(exc.stage, tr),
+                ),
+                state="error",
+                expanded=True,
+            )
+            st.error(str(exc))
+            if exc.project_id:
+                st.session_state["documentary_project_id"] = exc.project_id
+            return
+
+        progress_bar.progress(1.0)
+        status.update(
+            label=tr("Documentary Autopilot Complete"),
+            state="complete",
+            expanded=False,
+        )
+        st.session_state["documentary_project_id"] = result.project_id
+        st.success(
+            tr("Documentary Autopilot Created").format(
+                title=result.title,
+                languages=", ".join(
+                    language.upper() for language in result.preview_paths
+                ),
+            )
+        )
+        if result.rights_review_required:
+            st.warning(
+                tr("Documentary Autopilot Rights Review").format(
+                    count=len(result.rights_review_required),
+                )
+            )
 
 
 def _render_create_project(tr: Tr) -> None:
@@ -2588,6 +2689,8 @@ def render_documentary_application(tr: Tr) -> None:
     st.header(tr("Documentary Mode"))
     st.caption(tr("Documentary Mode Description"))
 
+    _render_autopilot(tr)
+
     with st.expander(tr("Documentary Simple Advanced"), expanded=False):
         developer_mode = st.checkbox(
             tr("Documentary Developer Mode"),
@@ -2597,8 +2700,9 @@ def render_documentary_application(tr: Tr) -> None:
 
     projects = list_projects()
     if not projects:
-        _render_story_discovery(tr)
-        _render_create_project(tr)
+        with st.expander(tr("Documentary Manual Mode"), expanded=False):
+            _render_story_discovery(tr)
+            _render_create_project(tr)
         st.info(tr("Documentary No Projects"))
         return
 
