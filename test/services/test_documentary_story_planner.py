@@ -173,6 +173,8 @@ def test_build_story_planner_prompt_keeps_evidence_ids_and_injection_boundary():
     assert 'Every beat "id" MUST use the exact form "beat_<number>"' in prompt
     assert 'Never use shortened ids such as "b1" or "b2"' in prompt
     assert 'Never invent synonyms such as "resolution"' in prompt
+    assert 'Do NOT return top-level sections such as' in prompt
+    assert '"investigation", "outcome", or "closing"' in prompt
 
 
 def test_build_story_planner_prompt_accepts_short_grounded_smoke_target():
@@ -240,6 +242,94 @@ def test_parse_story_plan_response_normalizes_resolution_to_payoff():
     plan = parse_story_plan_response(json.dumps(payload))
 
     assert plan.beats[2].purpose == NarrativePurpose.payoff
+
+
+def test_parse_story_plan_response_repairs_section_map_shape():
+    payload = {
+        "hook": {
+            "title": "Surveillance video",
+            "summary": "The source opens with surveillance video.",
+            "duration": 120,
+            "narration": "Introduce only what the source establishes.",
+            "original_audio": True,
+            "source_id": "source_story",
+            "segment_ids": [0],
+        },
+        "context": {
+            "title": "What the report says",
+            "summary": "The report adds context from the recorded source.",
+            "duration_seconds": 120,
+            "original_audio": False,
+            "evidence": [
+                {
+                    "source_id": "source_story",
+                    "segment_ids": [1],
+                    "note": "Recorded context.",
+                }
+            ],
+        },
+        "conflict": {
+            "title": "Allegation",
+            "summary": "The source describes an allegation.",
+            "target_duration_seconds": 120,
+            "evidence": [
+                {
+                    "source_id": "source_story",
+                    "segment_ids": [1],
+                    "note": "Source wording.",
+                }
+            ],
+        },
+        "investigation": {
+            "title": "Investigation",
+            "summary": "The source describes an investigation.",
+            "target_duration_seconds": 120,
+            "evidence": [
+                {
+                    "source_id": "source_story",
+                    "segment_ids": [2],
+                    "note": "Source wording.",
+                }
+            ],
+        },
+        "closing": {
+            "title": "Closing",
+            "summary": "The source closes with the reported outcome.",
+            "target_duration_seconds": 120,
+            "evidence": [
+                {
+                    "source_id": "source_story",
+                    "segment_ids": [2],
+                    "note": "Recorded closing.",
+                }
+            ],
+        },
+    }
+
+    plan = parse_story_plan_response(
+        json.dumps(payload),
+        target_duration_seconds=600,
+    )
+
+    assert plan.target_duration_seconds == 600
+    assert plan.title == "Surveillance video"
+    assert plan.hook == "The source opens with surveillance video."
+    assert [beat.id for beat in plan.beats] == [
+        "beat_01",
+        "beat_02",
+        "beat_03",
+        "beat_04",
+        "beat_05",
+    ]
+    assert [beat.purpose for beat in plan.beats] == [
+        NarrativePurpose.hook,
+        NarrativePurpose.context,
+        NarrativePurpose.conflict,
+        NarrativePurpose.question,
+        NarrativePurpose.payoff,
+    ]
+    assert plan.beats[0].original_audio_priority is True
+    assert plan.beats[0].evidence[0].segment_ids == [0]
 
 
 def test_parse_story_plan_response_rejects_non_json():
