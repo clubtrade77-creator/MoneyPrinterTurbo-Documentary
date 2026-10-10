@@ -1158,16 +1158,21 @@ def _render_guided_materials(project, tr: Tr) -> None:
                     )
                 )
             )
-            cols[1].write(
-                "✅ " + tr("Documentary Guided Video Ready")
-                if source.has_local_copy
-                else "⬜ " + tr("Documentary Guided Video Missing")
-            )
-            cols[2].write(
-                "✅ " + tr("Documentary Guided Rights Ready")
-                if source.rights_cleared_for_publish
-                else "⚠️ " + tr("Documentary Guided Rights Review")
-            )
+            research_lead = source.id.startswith("story_")
+            if research_lead:
+                cols[1].write("ℹ️ " + tr("Documentary Guided Research Source"))
+                cols[2].write("—")
+            else:
+                cols[1].write(
+                    "✅ " + tr("Documentary Guided Video Ready")
+                    if source.has_local_copy
+                    else "⬜ " + tr("Documentary Guided Video Missing")
+                )
+                cols[2].write(
+                    "✅ " + tr("Documentary Guided Rights Ready")
+                    if source.rights_cleared_for_publish
+                    else "⚠️ " + tr("Documentary Guided Rights Review")
+                )
 
 
 def _render_project_overview(project, tr: Tr) -> None:
@@ -1221,7 +1226,12 @@ def _render_project_overview(project, tr: Tr) -> None:
     )
 
 
-def _render_rights_review(project, tr: Tr) -> None:
+def _render_rights_review(
+    project,
+    tr: Tr,
+    *,
+    simple: bool = False,
+) -> None:
     if not project.sources:
         return
 
@@ -1233,8 +1243,11 @@ def _render_rights_review(project, tr: Tr) -> None:
     review_sources = [
         source
         for source in project.sources
-        if source.id in referenced_source_ids
-        or source.rights_status == RightsStatus.unknown_review_required
+        if (
+            source.id in referenced_source_ids
+            or source.rights_status == RightsStatus.unknown_review_required
+        )
+        and (not simple or not source.id.startswith("story_"))
     ]
     if not review_sources:
         return
@@ -1338,6 +1351,7 @@ def _render_external_source_local_copy(project, tr: Tr) -> None:
         source
         for source in project.sources
         if source.source_url
+        and not source.id.startswith("story_")
         and not source.has_local_copy
         and source.source_type
         in {
@@ -1466,7 +1480,7 @@ def _render_transcription(project, tr: Tr, *, simple: bool = False) -> None:
         if transcript is None:
             st.caption(tr("Documentary Transcript Missing"))
         else:
-            cols = st.columns(3)
+            cols = st.columns(2 if simple else 3)
             cols[0].metric(
                 tr("Documentary Transcript Language"),
                 (transcript.language or "-").upper(),
@@ -1475,10 +1489,11 @@ def _render_transcription(project, tr: Tr, *, simple: bool = False) -> None:
                 tr("Documentary Transcript Segments"),
                 len(transcript.segments),
             )
-            cols[2].metric(
-                tr("Documentary Transcript Model"),
-                transcript.model_size or "-",
-            )
+            if not simple:
+                cols[2].metric(
+                    tr("Documentary Transcript Model"),
+                    transcript.model_size or "-",
+                )
             if transcript.full_text:
                 st.markdown(f"**{tr('Documentary Transcript Preview')}**")
                 for segment in transcript.segments:
@@ -2072,9 +2087,13 @@ def _render_master_video(
             require_publishable_rights=False,
         )
 
-        if final_issues:
+        if mode in {"both", "final"} and final_issues:
             st.warning(tr("Documentary Render Not Ready"))
             for issue in final_issues:
+                st.caption(f"• {issue}")
+        if mode == "preview" and preview_issues:
+            st.warning(tr("Documentary Render Not Ready"))
+            for issue in preview_issues:
                 st.caption(f"• {issue}")
 
         if mode in {"both", "preview"}:
@@ -2573,7 +2592,7 @@ def render_documentary_application(tr: Tr) -> None:
 
     if selected_step == "materials":
         _render_guided_materials(project, tr)
-        _render_rights_review(project, tr)
+        _render_rights_review(project, tr, simple=True)
         _render_external_source_local_copy(project, tr)
         _render_source_upload(project, tr)
         _render_transcription(project, tr, simple=True)
