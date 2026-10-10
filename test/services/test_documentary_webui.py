@@ -164,15 +164,14 @@ def test_documentary_clip_plan_lookup_returns_existing_plan(monkeypatch):
     assert _load_clip_plan_if_available("doc_test") is expected
 
 
-def test_documentary_render_currentness_tracks_project_and_plan_files(
+def test_documentary_render_currentness_tracks_plan_files(
     tmp_path, monkeypatch
 ):
     output = tmp_path / "master.mp4"
-    project_manifest = tmp_path / "project.json"
     story_plan = tmp_path / "story-plan.json"
     clip_plan = tmp_path / "clip-plan.json"
 
-    for path in (output, project_manifest, story_plan, clip_plan):
+    for path in (output, story_plan, clip_plan):
         path.write_bytes(b"x")
 
     monkeypatch.setattr(
@@ -203,7 +202,6 @@ def test_documentary_render_currentness_tracks_project_and_plan_files(
 
     import os
 
-    os.utime(project_manifest, (10, 10))
     os.utime(story_plan, (11, 11))
     os.utime(clip_plan, (12, 12))
     os.utime(output, (13, 13))
@@ -218,21 +216,14 @@ def test_documentary_render_currentness_rejects_missing_local_media(
     monkeypatch,
 ):
     output = tmp_path / "master.mp4"
-    project_manifest = tmp_path / "project.json"
     source_path = tmp_path / "source.mp4"
     output.write_bytes(b"render")
-    project_manifest.write_bytes(b"project")
     source_path.write_bytes(b"source")
 
     monkeypatch.setattr(
         documentary_ui,
         "documentary_render_path",
         lambda project_id, language=None: output,
-    )
-    monkeypatch.setattr(
-        documentary_ui,
-        "project_manifest_path",
-        lambda project_id: project_manifest,
     )
     monkeypatch.setattr(
         documentary_ui,
@@ -270,7 +261,6 @@ def test_documentary_render_currentness_rejects_missing_local_media(
 
     import os
 
-    os.utime(project_manifest, (10, 10))
     os.utime(source_path, (11, 11))
     os.utime(output, (12, 12))
     assert _render_output_is_current("doc_test") is True
