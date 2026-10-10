@@ -26,6 +26,7 @@ from app.services.documentary.project import (
     load_project,
     project_dir,
     update_scene_narration,
+    update_source_rights,
 )
 from app.services.documentary.localization import (
     LocalizationError,
@@ -65,6 +66,7 @@ from app.services.documentary.story_planner import (
 )
 from app.services.documentary.renderer import (
     DocumentaryRenderError,
+    documentary_preview_path,
     documentary_render_path,
     documentary_render_readiness_issues,
     render_documentary,
@@ -168,9 +170,14 @@ def _render_output_is_current(
     project_id: str,
     *,
     language: str | None = None,
+    preview: bool = False,
 ) -> bool:
     if language is None:
-        default_output = documentary_render_path(project_id)
+        default_output = (
+            documentary_preview_path(project_id)
+            if preview
+            else documentary_render_path(project_id)
+        )
         if not default_output.is_file():
             return False
 
@@ -188,9 +195,16 @@ def _render_output_is_current(
         except (FileNotFoundError, LocalizationError):
             return False
 
-    output = documentary_render_path(
-        project_id,
-        language=render_language if localized else None,
+    output = (
+        documentary_preview_path(
+            project_id,
+            language=render_language if localized else None,
+        )
+        if preview
+        else documentary_render_path(
+            project_id,
+            language=render_language if localized else None,
+        )
     )
     if not output.is_file():
         return False
@@ -209,6 +223,17 @@ def _render_output_is_current(
         for scene in project.plan.scenes
         if scene.source_id
     }
+    if not preview:
+        referenced_sources = [
+            source
+            for source in project.sources
+            if source.id in referenced_source_ids
+        ]
+        if any(
+            not source.rights_cleared_for_publish
+            for source in referenced_sources
+        ):
+            return False
     narration_scene_ids = {
         scene.id
         for scene in project.plan.scenes
