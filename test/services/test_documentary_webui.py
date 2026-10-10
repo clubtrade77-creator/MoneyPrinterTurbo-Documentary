@@ -255,6 +255,7 @@ def test_documentary_render_currentness_rejects_missing_local_media(
                 SimpleNamespace(
                     id="source_media",
                     local_path=str(source_path),
+                    rights_cleared_for_publish=True,
                 )
             ],
             narration_audio=[],
@@ -315,6 +316,7 @@ def test_documentary_render_currentness_ignores_other_language_audio(
                 SimpleNamespace(
                     id="source_media",
                     local_path=str(source_path),
+                    rights_cleared_for_publish=True,
                 )
             ],
             narration_audio=[
@@ -340,6 +342,71 @@ def test_documentary_render_currentness_ignores_other_language_audio(
     os.utime(ru_audio, (20, 20))
 
     assert _render_output_is_current("doc_test") is True
+
+
+def test_render_currentness_revoked_rights_only_invalidates_final_master(
+    tmp_path,
+    monkeypatch,
+):
+    master = tmp_path / "master.mp4"
+    preview = tmp_path / "preview.mp4"
+    source_path = tmp_path / "source.mp4"
+    for path in (master, preview, source_path):
+        path.write_bytes(b"x")
+
+    monkeypatch.setattr(
+        documentary_ui,
+        "documentary_render_path",
+        lambda project_id, language=None: master,
+    )
+    monkeypatch.setattr(
+        documentary_ui,
+        "documentary_preview_path",
+        lambda project_id, language=None: preview,
+    )
+    monkeypatch.setattr(
+        documentary_ui,
+        "story_plan_path",
+        lambda project_id: tmp_path / "missing-story.json",
+    )
+    monkeypatch.setattr(
+        documentary_ui,
+        "clip_plan_path",
+        lambda project_id: tmp_path / "missing-clip.json",
+    )
+    monkeypatch.setattr(
+        documentary_ui,
+        "load_project",
+        lambda project_id: SimpleNamespace(
+            master_language="en",
+            plan=SimpleNamespace(
+                scenes=[
+                    SimpleNamespace(
+                        id="scene_source",
+                        source_id="source_media",
+                        audio_mode=AudioMode.muted,
+                    )
+                ]
+            ),
+            sources=[
+                SimpleNamespace(
+                    id="source_media",
+                    local_path=str(source_path),
+                    rights_cleared_for_publish=False,
+                )
+            ],
+            narration_audio=[],
+        ),
+    )
+
+    import os
+
+    os.utime(source_path, (10, 10))
+    os.utime(master, (12, 12))
+    os.utime(preview, (12, 12))
+
+    assert _render_output_is_current("doc_test") is False
+    assert _render_output_is_current("doc_test", preview=True) is True
 
 
 def test_localized_render_currentness_requires_valid_localization(
