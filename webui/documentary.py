@@ -114,6 +114,15 @@ _RIGHTS_LABELS = {
     RightsStatus.public_domain: "Documentary Rights Public Domain",
 }
 
+_GUIDED_STEPS = (
+    ("story", "Documentary Guided Step Story"),
+    ("materials", "Documentary Guided Step Materials"),
+    ("script", "Documentary Guided Step Script"),
+    ("voice", "Documentary Guided Step Voice"),
+    ("preview", "Documentary Guided Step Preview"),
+    ("ready", "Documentary Guided Step Ready"),
+)
+
 
 def _source_duration(source) -> str:
     metadata = source.video_metadata
@@ -1048,6 +1057,119 @@ def _render_create_project(tr: Tr) -> None:
                 st.rerun()
 
 
+def _documentary_guided_step(project) -> str:
+    if not project.sources:
+        return "story"
+
+    local_sources = [source for source in project.sources if source.has_local_copy]
+    if not local_sources:
+        return "materials"
+
+    transcripts = {}
+    for source in local_sources:
+        try:
+            transcript = _load_transcript_if_available(project.id, source.id)
+        except TranscriptionError:
+            transcript = None
+        if transcript is not None and transcript.segments:
+            transcripts[source.id] = transcript
+    if not transcripts:
+        return "materials"
+
+    try:
+        story_plan = _load_story_plan_if_available(project.id)
+    except StoryPlannerError:
+        story_plan = None
+    if story_plan is None or not project.plan.scenes:
+        return "script"
+
+    narrated_scenes = [
+        scene
+        for scene in project.plan.scenes
+        if scene.audio_mode in {AudioMode.narration, AudioMode.mixed}
+    ]
+    if any(not scene.narration_text.strip() for scene in narrated_scenes):
+        return "script"
+
+    master_language = project.master_language.lower()
+    available_audio = {
+        (asset.scene_id, asset.language.lower())
+        for asset in project.narration_audio
+        if asset.local_path
+    }
+    if narrated_scenes and any(
+        (scene.id, master_language) not in available_audio
+        for scene in narrated_scenes
+    ):
+        return "voice"
+
+    if not _render_output_is_current(project.id, preview=True):
+        return "preview"
+    return "ready"
+
+
+def _render_guided_navigation(project, tr: Tr) -> str:
+    step_ids = [step_id for step_id, _ in _GUIDED_STEPS]
+    labels = {step_id: tr(label_key) for step_id, label_key in _GUIDED_STEPS}
+    recommended = _documentary_guided_step(project)
+    state_key = f"documentary_guided_step_{project.id}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = recommended
+
+    recommended_index = step_ids.index(recommended)
+    st.progress((recommended_index + 1) / len(step_ids))
+    st.caption(
+        tr("Documentary Guided Current Step").format(
+            step=labels[recommended]
+        )
+    )
+    return st.radio(
+        tr("Documentary Guided Navigation"),
+        options=step_ids,
+        horizontal=True,
+        format_func=lambda step_id: labels[step_id],
+        key=state_key,
+        label_visibility="collapsed",
+    )
+
+
+def _render_guided_project_summary(project, tr: Tr) -> None:
+    st.subheader(project.title)
+    local_count = sum(1 for source in project.sources if source.has_local_copy)
+    cols = st.columns(3)
+    cols[0].metric(tr("Documentary Sources"), len(project.sources))
+    cols[1].metric(tr("Documentary Guided Local Materials"), local_count)
+    cols[2].metric(tr("Documentary Scenes"), len(project.plan.scenes))
+
+
+def _render_guided_materials(project, tr: Tr) -> None:
+    st.markdown(f"### {tr('Documentary Guided Materials Title')}")
+    st.caption(tr("Documentary Guided Materials Help"))
+    for source in project.sources:
+        title = source.title or source.original_filename or tr("Documentary Source Other")
+        with st.container(border=True):
+            st.markdown(f"**{title}**")
+            cols = st.columns(3)
+            cols[0].caption(
+                tr(
+                    _SOURCE_TYPE_LABELS.get(
+                        source.source_type,
+                        "Documentary Source Other",
+                    )
+                )
+            )
+            cols[1].write(
+                "✅ " + tr("Documentary Guided Video Ready")
+                if source.has_local_copy
+                else "⬜ " + tr("Documentary Guided Video Missing")
+            )
+            cols[2].write(
+                "✅ " + tr("Documentary Guided Rights Ready")
+                if source.rights_cleared_for_publish
+                else "⚠️ " + tr("Documentary Guided Rights Review")
+            )
+
+
 def _render_project_overview(project, tr: Tr) -> None:
     st.subheader(project.title)
     cols = st.columns(4)
@@ -1302,7 +1424,7 @@ def _load_transcript_if_available(project_id: str, source_id: str):
         return None
 
 
-def _render_transcription(project, tr: Tr) -> None:
+def _render_transcription(project, tr: Tr, *, simple: bool = False) -> None:
     if not project.sources:
         return
 
@@ -1362,29 +1484,34 @@ def _render_transcription(project, tr: Tr) -> None:
                 for segment in transcript.segments:
                     st.write(_format_transcript_segment(segment))
 
-        language_mode = st.selectbox(
-            tr("Documentary Transcription Language"),
-            options=("auto", "en", "ru", "es"),
-            format_func=lambda code: {
-                "auto": tr("Documentary Language Auto"),
-                "en": "English",
-                "ru": "Русский",
-                "es": "Español",
-            }[code],
-            key=f"documentary_transcription_language_{project.id}_{source.id}",
-        )
-        whisper_model = st.selectbox(
-            tr("Documentary Whisper Model"),
-            options=("small", "large-v3"),
-            index=0,
-            format_func=lambda value: (
-                tr("Documentary Whisper Small")
-                if value == "small"
-                else tr("Documentary Whisper Large")
-            ),
-            key=f"documentary_whisper_model_{project.id}_{source.id}",
-            help=tr("Documentary Whisper Model Help"),
-        )
+        if simple:
+            language_mode = "auto"
+            whisper_model = "small"
+            st.caption(tr("Documentary Guided Analysis Help"))
+        else:
+            language_mode = st.selectbox(
+                tr("Documentary Transcription Language"),
+                options=("auto", "en", "ru", "es"),
+                format_func=lambda code: {
+                    "auto": tr("Documentary Language Auto"),
+                    "en": "English",
+                    "ru": "Русский",
+                    "es": "Español",
+                }[code],
+                key=f"documentary_transcription_language_{project.id}_{source.id}",
+            )
+            whisper_model = st.selectbox(
+                tr("Documentary Whisper Model"),
+                options=("small", "large-v3"),
+                index=0,
+                format_func=lambda value: (
+                    tr("Documentary Whisper Small")
+                    if value == "small"
+                    else tr("Documentary Whisper Large")
+                ),
+                key=f"documentary_whisper_model_{project.id}_{source.id}",
+                help=tr("Documentary Whisper Model Help"),
+            )
 
         button_label = (
             tr("Documentary Retranscribe")
@@ -1680,7 +1807,12 @@ def _render_clip_selector(project, tr: Tr) -> None:
                 st.rerun()
 
 
-def _render_narration_writer(project, tr: Tr) -> None:
+def _render_narration_writer(
+    project,
+    tr: Tr,
+    *,
+    show_voice: bool = True,
+) -> None:
     if not project.plan.scenes:
         return
 
@@ -1796,6 +1928,9 @@ def _render_narration_writer(project, tr: Tr) -> None:
             st.success(tr("Documentary Narration Not Needed"))
             return
 
+        if not show_voice:
+            return
+
         st.markdown(f"**{tr('Documentary Voice Preview')}**")
         voice_options = _documentary_voice_options(project.master_language)
         voice_by_id = dict(voice_options)
@@ -1890,7 +2025,12 @@ def _render_narration_writer(project, tr: Tr) -> None:
                     st.rerun()
 
 
-def _render_master_video(project, tr: Tr) -> None:
+def _render_master_video(
+    project,
+    tr: Tr,
+    *,
+    mode: str = "both",
+) -> None:
     if not project.plan.scenes:
         return
 
@@ -1903,14 +2043,14 @@ def _render_master_video(project, tr: Tr) -> None:
             preview=True,
         )
 
-        if output_path.is_file():
+        if mode in {"both", "final"} and output_path.is_file():
             if current_render:
                 st.success(tr("Documentary Render Current"))
                 st.video(str(output_path))
             else:
                 st.warning(tr("Documentary Render Stale"))
 
-        if preview_path.is_file():
+        if mode in {"both", "preview"} and preview_path.is_file():
             if current_preview:
                 st.info(tr("Documentary Preview Current"))
                 st.video(str(preview_path))
@@ -1937,60 +2077,62 @@ def _render_master_video(project, tr: Tr) -> None:
             for issue in final_issues:
                 st.caption(f"• {issue}")
 
-        if st.button(
-            (
-                tr("Documentary Preview Again")
-                if preview_path.is_file()
-                else tr("Documentary Preview Build")
-            ),
-            width="stretch",
-            disabled=bool(preview_issues),
-            key=f"documentary_preview_{project.id}",
-        ):
-            try:
-                with st.spinner(tr("Documentary Rendering")):
-                    result = render_documentary(
-                        project.id,
-                        preview=True,
+        if mode in {"both", "preview"}:
+            if st.button(
+                (
+                    tr("Documentary Preview Again")
+                    if preview_path.is_file()
+                    else tr("Documentary Preview Build")
+                ),
+                width="stretch",
+                disabled=bool(preview_issues),
+                key=f"documentary_preview_{project.id}",
+            ):
+                try:
+                    with st.spinner(tr("Documentary Rendering")):
+                        result = render_documentary(
+                            project.id,
+                            preview=True,
+                        )
+                except (OSError, ValueError, DocumentaryRenderError) as exc:
+                    st.error(
+                        tr("Documentary Render Failed").format(error=str(exc))
                     )
-            except (OSError, ValueError, DocumentaryRenderError) as exc:
-                st.error(
-                    tr("Documentary Render Failed").format(error=str(exc))
-                )
-            else:
-                st.success(
-                    tr("Documentary Preview Complete").format(
-                        filename=result.name
+                else:
+                    st.success(
+                        tr("Documentary Preview Complete").format(
+                            filename=result.name
+                        )
                     )
-                )
-                st.rerun()
+                    st.rerun()
 
-        button_label = (
-            tr("Documentary Render Again")
-            if output_path.is_file()
-            else tr("Documentary Render Build")
-        )
-        if st.button(
-            button_label,
-            type="primary",
-            width="stretch",
-            disabled=bool(final_issues),
-            key=f"documentary_render_{project.id}",
-        ):
-            try:
-                with st.spinner(tr("Documentary Rendering")):
-                    result = render_documentary(project.id)
-            except (OSError, ValueError, DocumentaryRenderError) as exc:
-                st.error(
-                    tr("Documentary Render Failed").format(error=str(exc))
-                )
-            else:
-                st.success(
-                    tr("Documentary Render Complete").format(
-                        filename=result.name
+        if mode in {"both", "final"}:
+            button_label = (
+                tr("Documentary Render Again")
+                if output_path.is_file()
+                else tr("Documentary Render Build")
+            )
+            if st.button(
+                button_label,
+                type="primary",
+                width="stretch",
+                disabled=bool(final_issues),
+                key=f"documentary_render_{project.id}",
+            ):
+                try:
+                    with st.spinner(tr("Documentary Rendering")):
+                        result = render_documentary(project.id)
+                except (OSError, ValueError, DocumentaryRenderError) as exc:
+                    st.error(
+                        tr("Documentary Render Failed").format(error=str(exc))
                     )
-                )
-                st.rerun()
+                else:
+                    st.success(
+                        tr("Documentary Render Complete").format(
+                            filename=result.name
+                        )
+                    )
+                    st.rerun()
 
 
 def _documentary_language_label(language: str) -> str:
@@ -2370,11 +2512,16 @@ def render_documentary_application(tr: Tr) -> None:
     st.header(tr("Documentary Mode"))
     st.caption(tr("Documentary Mode Description"))
 
-    _render_story_discovery(tr)
-    _render_create_project(tr)
+    developer_mode = st.checkbox(
+        tr("Documentary Developer Mode"),
+        value=False,
+        help=tr("Documentary Developer Mode Help"),
+    )
 
     projects = list_projects()
     if not projects:
+        _render_story_discovery(tr)
+        _render_create_project(tr)
         st.info(tr("Documentary No Projects"))
         return
 
@@ -2389,21 +2536,72 @@ def render_documentary_application(tr: Tr) -> None:
         options=project_ids,
         key="documentary_project_id",
         format_func=lambda project_id: (
-            f"{project_by_id[project_id].title} · {project_id}"
+            f"{project_by_id[project_id].title}"
+            if not developer_mode
+            else f"{project_by_id[project_id].title} · {project_id}"
         ),
     )
     project = load_project(selected_project_id)
 
-    _render_project_overview(project, tr)
-    _render_rights_review(project, tr)
-    _render_external_source_local_copy(project, tr)
-    _render_source_upload(project, tr)
-    _render_transcription(project, tr)
-    _render_story_planner(project, tr)
-    _render_clip_selector(project, tr)
-    project = load_project(selected_project_id)
-    _render_narration_writer(project, tr)
-    project = load_project(selected_project_id)
-    _render_master_video(project, tr)
+    if developer_mode:
+        _render_story_discovery(tr)
+        _render_create_project(tr)
+        _render_project_overview(project, tr)
+        _render_rights_review(project, tr)
+        _render_external_source_local_copy(project, tr)
+        _render_source_upload(project, tr)
+        _render_transcription(project, tr)
+        _render_story_planner(project, tr)
+        _render_clip_selector(project, tr)
+        project = load_project(selected_project_id)
+        _render_narration_writer(project, tr)
+        project = load_project(selected_project_id)
+        _render_master_video(project, tr)
+        project = load_project(selected_project_id)
+        _render_localized_versions(project, tr)
+        return
+
+    _render_guided_project_summary(project, tr)
+    selected_step = _render_guided_navigation(project, tr)
+
+    if selected_step == "story":
+        st.markdown(f"### {tr('Documentary Guided Story Title')}")
+        st.caption(tr("Documentary Guided Story Help"))
+        _render_story_discovery(tr)
+        _render_create_project(tr)
+        return
+
+    if selected_step == "materials":
+        _render_guided_materials(project, tr)
+        _render_rights_review(project, tr)
+        _render_external_source_local_copy(project, tr)
+        _render_source_upload(project, tr)
+        _render_transcription(project, tr, simple=True)
+        return
+
+    if selected_step == "script":
+        st.markdown(f"### {tr('Documentary Guided Script Title')}")
+        st.caption(tr("Documentary Guided Script Help"))
+        _render_story_planner(project, tr)
+        _render_clip_selector(project, tr)
+        project = load_project(selected_project_id)
+        _render_narration_writer(project, tr, show_voice=False)
+        return
+
+    if selected_step == "voice":
+        st.markdown(f"### {tr('Documentary Guided Voice Title')}")
+        st.caption(tr("Documentary Guided Voice Help"))
+        _render_narration_writer(project, tr, show_voice=True)
+        return
+
+    if selected_step == "preview":
+        st.markdown(f"### {tr('Documentary Guided Preview Title')}")
+        st.caption(tr("Documentary Guided Preview Help"))
+        _render_master_video(project, tr, mode="preview")
+        return
+
+    st.markdown(f"### {tr('Documentary Guided Ready Title')}")
+    st.caption(tr("Documentary Guided Ready Help"))
+    _render_master_video(project, tr, mode="final")
     project = load_project(selected_project_id)
     _render_localized_versions(project, tr)
