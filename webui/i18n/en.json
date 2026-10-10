@@ -681,6 +681,7 @@
     "Documentary Render Again": "Render master video again",
     "Documentary Rendering": "Rendering the documentary master with FFmpeg…",
     "Documentary Render Failed": "Documentary render failed: {error}",
+    "Documentary Render Not Ready": "Render is not ready yet. Fix the blockers below before starting FFmpeg.",
     "Documentary Render Complete": "Master render created: {filename}",
     "Documentary Narration": "Narration",
     "Documentary Narration Original": "Scene {index}: original audio priority — narrator not needed.",
