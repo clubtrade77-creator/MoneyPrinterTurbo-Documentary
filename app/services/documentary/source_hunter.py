@@ -1040,6 +1040,41 @@ def _normalize_embedded_media_url(
         return "vimeo", absolute
 
     path = parsed.path.lower()
+    if (
+        host in {"facebook.com", "www.facebook.com", "m.facebook.com", "fb.watch"}
+        and (
+            host == "fb.watch"
+            or "/watch" in path
+            or "/reel/" in path
+            or "/videos/" in path
+        )
+    ):
+        return "facebook", absolute
+
+    if (
+        host in {"x.com", "www.x.com", "twitter.com", "www.twitter.com"}
+        and "/status/" in path
+    ):
+        return "x", absolute
+
+    if (
+        host == "tiktok.com"
+        or host.endswith(".tiktok.com")
+    ) and ("/video/" in path or host in {"vm.tiktok.com", "vt.tiktok.com"}):
+        return "tiktok", absolute
+
+    if (
+        host in {"dailymotion.com", "www.dailymotion.com", "dai.ly"}
+        and ("/video/" in path or host == "dai.ly")
+    ):
+        return "dailymotion", absolute
+
+    if (
+        host in {"instagram.com", "www.instagram.com"}
+        and ("/reel/" in path or "/p/" in path)
+    ):
+        return "instagram", absolute
+
     if path.endswith((".mp4", ".mov", ".webm", ".m3u8")):
         return "direct_video", absolute
 
@@ -1571,10 +1606,19 @@ def embedded_media_to_source(
     *,
     title: str = "",
 ) -> SourceAsset:
-    """Convert media embedded on an official page into a traceable source asset."""
+    """Convert discovered media into a traceable source asset."""
+    official = _official_page_allowed_for_inspection(candidate.source_page_url)
+    provenance = (
+        ProvenanceType.official_public_source
+        if official
+        else ProvenanceType.third_party_platform
+    )
     rights_note = (
-        "Media discovered on an official source page. Verify reuse/publication "
+        "Media discovered on an official public source page. Verify reuse/publication "
         "rights separately before using the media in a published documentary."
+        if official
+        else "Media discovered automatically on a third-party page/platform. "
+        "Verify reuse/publication rights separately before publishing."
     )
 
     if candidate.platform == "youtube":
@@ -1592,7 +1636,7 @@ def embedded_media_to_source(
     return SourceAsset(
         id=source_id,
         source_type=SourceType.news,
-        provenance=ProvenanceType.official_public_source,
+        provenance=provenance,
         title=(title or candidate.label).strip(),
         source_url=candidate.url,
         publisher=(urlparse(candidate.source_page_url).hostname or ""),
