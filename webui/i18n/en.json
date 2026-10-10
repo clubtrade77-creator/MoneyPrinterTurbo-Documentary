@@ -823,6 +823,25 @@
     "Documentary Guided Preview Help": "Build a technical preview. You can keep working while publication rights are still under review.",
     "Documentary Guided Ready Title": "Final video",
     "Documentary Guided Ready Help": "Once rights for used materials are cleared, build the final master and localized versions.",
-    "Documentary Guided Research Source": "research source"
+    "Documentary Guided Research Source": "research source",
+    "Documentary Simple Section Story": "Story",
+    "Documentary Simple Section Materials": "Sources",
+    "Documentary Simple Section Production": "Script & voice",
+    "Documentary Simple Section Video": "Video",
+    "Documentary Simple Story Selected": "Story selected",
+    "Documentary Simple Materials Missing": "Add video sources",
+    "Documentary Simple Materials Status": "Videos ready: {ready} of {total}",
+    "Documentary Simple Script Missing": "Script not created yet",
+    "Documentary Simple Script Draft": "Finish the script",
+    "Documentary Simple Voice Missing": "Generate narration",
+    "Documentary Simple Production Ready": "Script and narration ready",
+    "Documentary Simple Final Ready": "Final video ready",
+    "Documentary Simple Preview Ready": "Video preview ready",
+    "Documentary Simple Video Missing": "Video not created yet",
+    "Documentary Simple Continue": "Continue",
+    "Documentary Simple Open": "Open",
+    "Documentary Simple Production Help": "Create the script, choose the source clips, and set the narrator voice here.",
+    "Documentary Simple Video Help": "Build the preview, final video, and localized versions here.",
+    "Documentary Simple Advanced": "Advanced"
   }
 }
