@@ -383,6 +383,15 @@ def update_source_rights(
     note = str(rights_note or "").strip()
     if len(note) > 4000:
         raise ValueError("documentary rights note is too long")
+    note_required_statuses = {
+        RightsStatus.licensed,
+        RightsStatus.permission_confirmed,
+        RightsStatus.public_domain,
+    }
+    if resolved_status in note_required_statuses and len(note) < 5:
+        raise ValueError(
+            "documentary rights note is required for this cleared status"
+        )
 
     with _project_lock(project_id, root):
         project = _load_project_unlocked(project_id, root)
