@@ -86,6 +86,10 @@ class _NonRetryableStoryPlannerError(StoryPlannerError):
     """Raised for provider/runtime failures that retries cannot repair."""
 
 
+class _TranscriptLikeStoryPlanError(StoryPlannerError):
+    """Raised when the model returns transcript rows instead of editorial beats."""
+
+
 def story_plan_path(
     project_id: str,
     root: str | os.PathLike | None = None,
@@ -126,6 +130,33 @@ def _first_nonempty_text(*values) -> str:
         if text:
             return text
     return ""
+
+
+def _looks_like_transcript_dump(payload: dict) -> bool:
+    beats = payload.get("beats")
+    if not isinstance(beats, list) or len(beats) < 3:
+        return False
+
+    objects = [beat for beat in beats if isinstance(beat, dict)]
+    if len(objects) < 3:
+        return False
+
+    transcript_like = 0
+    for beat in objects:
+        evidence = beat.get("evidence")
+        scalar_evidence = isinstance(evidence, (str, int, float))
+        has_transcript_fields = "content" in beat or "timestamp" in beat
+        missing_editorial_shape = (
+            "purpose" not in beat
+            and "target_duration_seconds" not in beat
+        )
+        if (
+            has_transcript_fields
+            or (scalar_evidence and missing_editorial_shape)
+        ):
+            transcript_like += 1
+
+    return transcript_like >= max(3, math.ceil(len(objects) * 0.6))
 
 
 def _repair_section_map_payload(
@@ -366,6 +397,11 @@ def parse_story_plan_response(
 
     if not isinstance(payload, dict):
         raise StoryPlannerError("story planner response must be one JSON object")
+
+    if _looks_like_transcript_dump(payload):
+        raise _TranscriptLikeStoryPlanError(
+            "story planner returned transcript rows instead of editorial story beats"
+        )
 
     payload = _repair_section_map_payload(
         payload,
@@ -620,6 +656,10 @@ Every beat "id" MUST use the exact form "beat_<number>", for example
 Use the exact field names from the schema: "target_duration_seconds" (never
 "duration" or "total_duration") and evidence "segment_ids" (never "segments").
 Every beat MUST include "title". The top-level "hook" MUST be a string.
+A beat is an editorial story section, NOT one transcript row. Do NOT emit one beat
+per transcript segment. Never use fields named "content" or "timestamp" in a beat.
+"evidence" MUST be an array of evidence objects; never return a scalar segment id
+such as "435" or 435 as the evidence value.
 For evidence "source_id", copy an exact source_id from TRANSCRIPT EVIDENCE;
 never use placeholders such as "user", "source", or "video".
 
@@ -1005,6 +1045,95 @@ def _build_sparse_story_plan(
     )
 
 
+def _build_deterministic_story_plan(
+    transcripts: list[DocumentaryTranscript],
+    *,
+    target_duration_seconds: float,
+) -> StoryPlan:
+    grounded = [
+        (transcript, segment)
+        for transcript in transcripts
+        for segment in transcript.segments
+        if segment.text.strip()
+    ]
+    if not grounded:
+        raise StoryPlannerError("available transcripts contain no usable segments")
+
+    minimum_beats = max(1, math.ceil(target_duration_seconds / 180))
+    preferred_beats = max(minimum_beats, math.ceil(target_duration_seconds / 120))
+    beat_count = min(30, preferred_beats, len(grounded))
+    if beat_count < minimum_beats:
+        raise StoryPlannerError(
+            "transcript evidence is too sparse for the requested documentary length"
+        )
+
+    target_per_beat = target_duration_seconds / beat_count
+    beats: list[StoryBeat] = []
+    lead_texts: list[str] = []
+
+    for index in range(beat_count):
+        region_start = math.floor(index * len(grounded) / beat_count)
+        region_end = math.floor((index + 1) * len(grounded) / beat_count)
+        region = grounded[region_start:max(region_start + 1, region_end)]
+
+        selected = []
+        first_start = None
+        for transcript, segment in region:
+            if first_start is None:
+                first_start = float(segment.start_seconds)
+            selected.append((transcript, segment))
+            span = float(segment.end_seconds) - first_start
+            if span >= target_per_beat:
+                break
+
+        if not selected:
+            selected = [grounded[min(region_start, len(grounded) - 1)]]
+
+        evidence_by_source: dict[str, list[int]] = {}
+        texts = []
+        for transcript, segment in selected:
+            evidence_by_source.setdefault(transcript.source_id, []).append(segment.id)
+            texts.append(segment.text.strip())
+
+        exact_text = _clip_grounded_text(" ".join(texts), 1500)
+        first_text = _clip_grounded_text(texts[0], 200)
+        lead_texts.append(texts[0])
+
+        beats.append(
+            StoryBeat(
+                id=f"beat_{index + 1:02d}",
+                purpose=(
+                    NarrativePurpose.hook
+                    if index == 0
+                    else NarrativePurpose.context
+                ),
+                title=first_text,
+                summary=exact_text,
+                target_duration_seconds=target_per_beat,
+                narration_goal=_clip_grounded_text(texts[0], 1500),
+                original_audio_priority=index == 0,
+                evidence=[
+                    StoryEvidence(
+                        source_id=source_id,
+                        segment_ids=segment_ids,
+                    )
+                    for source_id, segment_ids in evidence_by_source.items()
+                ],
+            )
+        )
+
+    # Keep all editorial text as exact transcript wording. This fallback adds
+    # structure and timing only; it does not add factual prose.
+    first_text = grounded[0][1].text.strip()
+    return StoryPlan(
+        title=_clip_grounded_text(first_text, 250),
+        angle=_clip_grounded_text(" ".join(lead_texts), 1500),
+        hook=_clip_grounded_text(first_text, 1500),
+        target_duration_seconds=target_duration_seconds,
+        beats=beats,
+    )
+
+
 def _review_story_plan(
     candidate: StoryPlan,
     *,
@@ -1130,12 +1259,42 @@ def plan_story(
                 candidate.grounding_review_version = CURRENT_GROUNDING_REVIEW_VERSION
                 plan = candidate
                 break
+            except _TranscriptLikeStoryPlanError:
+                # This is a recognizable schema failure, not a factual judgment.
+                # Retrying the same model tends to reproduce the transcript-row
+                # shape and wastes tokens, so switch immediately to a deterministic
+                # plan built only from exact transcript text.
+                candidate = _build_deterministic_story_plan(
+                    transcripts,
+                    target_duration_seconds=target_duration_seconds,
+                )
+                _validate_generated_plan(
+                    candidate,
+                    target_duration_seconds=target_duration_seconds,
+                    transcripts=transcripts,
+                )
+                candidate.grounding_reviewed = True
+                candidate.grounding_review_version = CURRENT_GROUNDING_REVIEW_VERSION
+                plan = candidate
+                break
             except _NonRetryableStoryPlannerError:
                 raise
             except StoryPlannerError as exc:
                 last_error = exc
                 if attempt >= MAX_STORY_PLAN_ATTEMPTS:
-                    raise
+                    candidate = _build_deterministic_story_plan(
+                        transcripts,
+                        target_duration_seconds=target_duration_seconds,
+                    )
+                    _validate_generated_plan(
+                        candidate,
+                        target_duration_seconds=target_duration_seconds,
+                        transcripts=transcripts,
+                    )
+                    candidate.grounding_reviewed = True
+                    candidate.grounding_review_version = CURRENT_GROUNDING_REVIEW_VERSION
+                    plan = candidate
+                    break
                 current_prompt = _retry_prompt(prompt, exc, attempt)
 
         if plan is None:
