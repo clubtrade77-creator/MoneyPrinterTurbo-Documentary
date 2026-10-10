@@ -64,7 +64,7 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(
         autopilot,
         "fetch_source_local_copy",
-        lambda *a, **k: calls.append("fetch"),
+        lambda *a, **k: (calls.append("fetch") or source),
     )
     monkeypatch.setattr(
         autopilot.subtitle_service,
@@ -191,7 +191,11 @@ def test_run_autopilot_renders_final_when_rights_are_cleared(
         ),
     )
     monkeypatch.setattr(autopilot, "add_source", lambda *a, **k: None)
-    monkeypatch.setattr(autopilot, "fetch_source_local_copy", lambda *a, **k: None)
+    monkeypatch.setattr(
+        autopilot,
+        "fetch_source_local_copy",
+        lambda *a, **k: source,
+    )
     monkeypatch.setattr(
         autopilot.subtitle_service,
         "get_whisper_model",
