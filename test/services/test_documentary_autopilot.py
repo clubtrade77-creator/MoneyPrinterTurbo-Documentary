@@ -328,3 +328,62 @@ def test_discover_autopilot_stories_expands_to_seven_days(monkeypatch):
 
     assert result == [strong]
     assert calls == [72, 168]
+
+
+def test_fetch_and_transcribe_skips_source_without_recognizable_speech(
+    monkeypatch,
+):
+    story = SimpleNamespace(title="Speech fallback story")
+    primary = SourceAsset(
+        id="youtube_silent",
+        source_type=SourceType.youtube,
+        source_url="https://www.youtube.com/watch?v=abcdefghijk",
+    )
+    fallback = SourceAsset(
+        id="youtube_spoken",
+        source_type=SourceType.youtube,
+        source_url="https://www.youtube.com/watch?v=lmnopqrstuv",
+    )
+    attempts = []
+    added = []
+
+    monkeypatch.setattr(
+        autopilot,
+        "_fallback_video_sources",
+        lambda *a, **k: [fallback],
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "add_source",
+        lambda project_id, source, *, root=None: added.append(source.id),
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "fetch_source_local_copy",
+        lambda project_id, source_id, *, root=None: (
+            primary if source_id == primary.id else fallback
+        ),
+    )
+
+    def fake_transcribe(project_id, source_id, **kwargs):
+        attempts.append(source_id)
+        if source_id == primary.id:
+            raise autopilot.TranscriptionError(
+                "Whisper detected no recognizable speech"
+            )
+        return SimpleNamespace(language="en", full_text="Recognized speech.")
+
+    monkeypatch.setattr(autopilot, "transcribe_source", fake_transcribe)
+
+    source, transcript = autopilot._fetch_and_transcribe_first_available_source(
+        "doc_speech_fallback",
+        story,
+        primary,
+        source_limit=4,
+        model=object(),
+    )
+
+    assert source.id == fallback.id
+    assert transcript.full_text == "Recognized speech."
+    assert attempts == [primary.id, fallback.id]
+    assert added == [primary.id, fallback.id]
