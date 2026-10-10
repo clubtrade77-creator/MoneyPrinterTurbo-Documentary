@@ -609,6 +609,23 @@
     "Documentary Narration Saved": "Cambios de narración guardados.",
     "Documentary Narration Ready": "El texto de narración está listo para generar la voz.",
     "Documentary Source Hunter Article Agencies": "Contexto del artículo: {agencies}",
-    "Documentary Source Hunter Article Official Links": "enlaces oficiales encontrados en el artículo: {count}"
+    "Documentary Source Hunter Article Official Links": "enlaces oficiales encontrados en el artículo: {count}",
+    "Documentary Localization": "Versiones en otros idiomas",
+    "Documentary Localization Help": "Crea versiones revisadas a partir de la misma línea de tiempo maestra. El metraje original no cambia; se localizan la narración y los subtítulos vinculados a la evidencia original.",
+    "Documentary Localization Master Narration Missing": "Primero completa la narración maestra. Aún faltan textos de narrador en {count} escena(s).",
+    "Documentary Localization Target": "Idioma de destino",
+    "Documentary Localization Current": "La localización en {language} está actualizada · escenas: {scenes}",
+    "Documentary Localization Stale": "La localización guardada está obsoleta o no es válida: {error}",
+    "Documentary Localization Missing": "Todavía no existe una localización revisada en {language}.",
+    "Documentary Localization Rebuild": "Reconstruir localización revisada",
+    "Documentary Localization Generate": "Crear localización revisada",
+    "Documentary Localization Generating": "Traduciendo y revisando semánticamente el documental…",
+    "Documentary Localization Failed": "No se pudo crear la versión localizada: {error}",
+    "Documentary Localization Complete": "La versión revisada en {language} está lista.",
+    "Documentary Localization Voice": "Voz del narrador para este idioma",
+    "Documentary Localization Audio Generate": "Generar narración localizada",
+    "Documentary Localization No Narration": "Esta versión no necesita una pista de narrador traducida; los subtítulos localizados cubrirán el habla original referenciada.",
+    "Documentary Localization Render Current": "El master en {language} está actualizado.",
+    "Documentary Localization Render Build": "Renderizar master localizado"
   }
 }
