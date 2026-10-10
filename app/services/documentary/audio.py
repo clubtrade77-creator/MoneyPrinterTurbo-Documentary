@@ -157,6 +157,7 @@ def attach_narration_audio(
     source_path: str | os.PathLike,
     *,
     language: str | None = None,
+    voice_name: str = "",
     root: str | os.PathLike | None = None,
 ) -> NarrationAudioAsset:
     """Copy validated narration audio into a project and track it in project.json."""
@@ -166,6 +167,9 @@ def attach_narration_audio(
         raise ValueError(f"documentary scene not found: {scene_id}")
 
     resolved_language = _normalize_language(language or project.master_language)
+    resolved_voice_name = str(voice_name or "").strip()
+    if len(resolved_voice_name) > 300:
+        raise ValueError("invalid documentary narration voice")
     source = Path(source_path).expanduser().resolve()
     if not source.is_file():
         raise FileNotFoundError(f"narration audio file not found: {source}")
@@ -204,6 +208,7 @@ def attach_narration_audio(
             duration_seconds=duration,
             audio_codec=codec,
             file_size_bytes=target.stat().st_size,
+            voice_name=resolved_voice_name,
         )
         project.narration_audio = [
             item
