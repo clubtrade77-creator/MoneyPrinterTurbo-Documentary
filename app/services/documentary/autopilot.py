@@ -129,7 +129,13 @@ def _choose_story(candidates: list[StoryCandidate]) -> StoryCandidate:
     )
 
 
-def _hunt_source(project_id: str, story: StoryCandidate, *, limit: int):
+def _hunt_source(
+    project_id: str,
+    story: StoryCandidate,
+    *,
+    limit: int,
+    root=None,
+):
     agency_hints = ()
     official_urls = ()
     try:
@@ -167,12 +173,12 @@ def _hunt_source(project_id: str, story: StoryCandidate, *, limit: int):
         if not embedded:
             continue
         web_source = candidate_to_web_source(web_candidate)
-        add_source(project_id, web_source)
+        add_source(project_id, web_source, root=root)
         media_source = embedded_media_to_source(
             embedded[0],
             title=web_candidate.title,
         )
-        add_source(project_id, media_source)
+        add_source(project_id, media_source, root=root)
         return media_source
 
     try:
@@ -211,7 +217,7 @@ def _hunt_source(project_id: str, story: StoryCandidate, *, limit: int):
         ),
     )
     source = candidate_to_youtube_source(selected)
-    add_source(project_id, source)
+    add_source(project_id, source, root=root)
     return source
 
 
@@ -281,7 +287,12 @@ def run_autopilot(
 
         stage = "sources"
         _emit(progress, stage, "Finding original or authoritative video", 0.13)
-        source = _hunt_source(project.id, story, limit=profile.source_limit)
+        source = _hunt_source(
+            project.id,
+            story,
+            limit=profile.source_limit,
+            root=root,
+        )
 
         stage = "media"
         _emit(progress, stage, "Downloading a technical review copy", 0.23)
