@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -1068,8 +1069,6 @@ def _render_autopilot(tr: Tr) -> None:
                     project_dir(resume_project_id) / "autopilot-state.json"
                 )
                 if resume_state_path.is_file():
-                    import json
-
                     resume_payload = json.loads(
                         resume_state_path.read_text(encoding="utf-8")
                     )
