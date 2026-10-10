@@ -626,6 +626,19 @@
     "Documentary Localization Audio Generate": "Создать озвучку на этом языке",
     "Documentary Localization No Narration": "Для этой версии отдельная озвучка рассказчика не нужна; переведённые субтитры будут использоваться для привязанной оригинальной речи.",
     "Documentary Localization Render Current": "Мастер-версия на {language} актуальна.",
-    "Documentary Localization Render Build": "Собрать мастер на этом языке"
+    "Documentary Localization Render Build": "Собрать мастер на этом языке",
+    "Documentary Rights Review": "Проверка прав на источник",
+    "Documentary Rights Review Help": "Проверяй права на публикацию отдельно от происхождения источника. То, что источник найден или скачан, не означает разрешение на публикацию.",
+    "Documentary Rights Review Source": "Источник для проверки",
+    "Documentary Rights Review Open Source": "Открыть страницу источника",
+    "Documentary Rights Confirmation Warning": "Отмечай источник как разрешённый только если у тебя есть реальное основание: собственность, лицензия, разрешение или проверенный public domain. Приложение само это не подтверждает.",
+    "Documentary Rights Save": "Сохранить проверку прав",
+    "Documentary Rights Save Failed": "Не удалось сохранить статус прав: {error}",
+    "Documentary Rights Saved": "Проверка прав на источник сохранена.",
+    "Documentary Preview Build": "Собрать технический preview",
+    "Documentary Preview Again": "Пересобрать технический preview",
+    "Documentary Preview Current": "Технический preview актуален. Это не означает, что права на публикацию подтверждены.",
+    "Documentary Preview Stale": "Технический preview устарел.",
+    "Documentary Preview Complete": "Технический preview готов: {filename}"
   }
 }
