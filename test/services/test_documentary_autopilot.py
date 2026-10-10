@@ -192,6 +192,7 @@ def test_run_autopilot_renders_final_when_rights_are_cleared(
     monkeypatch.setattr(autopilot, "select_clips", lambda *a, **k: None)
     monkeypatch.setattr(autopilot, "write_narration", lambda *a, **k: None)
     monkeypatch.setattr(autopilot, "load_project", lambda *a, **k: project_snapshot)
+    monkeypatch.setattr(autopilot, "save_project", lambda *a, **k: None)
     monkeypatch.setattr(autopilot, "_resolve_voice", lambda *a, **k: "voice:ru")
     monkeypatch.setattr(autopilot, "synthesize_narration", lambda *a, **k: None)
 
