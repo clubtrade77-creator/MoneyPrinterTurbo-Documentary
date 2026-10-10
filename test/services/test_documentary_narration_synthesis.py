@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from app.models.documentary import (
 )
 from app.services.documentary import audio as audio_service
 from app.services.documentary import narration_synthesis
+from app.services.documentary.localization import localize_project
 from app.services.documentary.project import create_project, load_project, save_project
 
 
@@ -232,3 +234,132 @@ def test_synthesis_rejects_scene_changed_while_tts_is_running(
 
     updated = load_project(project.id, tmp_path)
     assert updated.narration_audio == []
+
+
+def test_synthesis_uses_localized_narration_text_for_target_language(
+    tmp_path,
+    monkeypatch,
+):
+    project = _make_project(tmp_path)
+    localized_text = "Короткий русский текст."
+
+    localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: json.dumps(
+            {
+                "scenes": [
+                    {
+                        "scene_id": "scene_narrated",
+                        "narration_text": localized_text,
+                        "on_screen_text": "",
+                        "subtitle_segments": [],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        review_fn=lambda prompt: json.dumps(
+            {"supported": True, "issues": []}
+        ),
+    )
+
+    spoken = []
+
+    def fake_tts(**kwargs):
+        spoken.append(kwargs["text"])
+        Path(kwargs["voice_file"]).write_bytes(b"audio")
+        return object()
+
+    monkeypatch.setattr(narration_synthesis.voice_service, "tts", fake_tts)
+    monkeypatch.setattr(
+        narration_synthesis.voice_service,
+        "get_audio_duration",
+        lambda path: 2.0,
+    )
+    monkeypatch.setattr(audio_service, "_probe_audio", lambda path: (2.0, "mp3"))
+
+    result = narration_synthesis.synthesize_narration(
+        project.id,
+        "cartesia:ru-test:ru",
+        language="ru",
+        root=tmp_path,
+    )
+
+    assert spoken == [localized_text]
+    assert len(result.generated) == 1
+    assert result.generated[0].language == "ru"
+    assert result.generated[0].voice_name == "cartesia:ru-test:ru"
+
+    loaded = audio_service.load_narration_audio(
+        project.id,
+        "scene_narrated",
+        language="ru",
+        root=tmp_path,
+    )
+    assert loaded == result.generated[0]
+
+
+def test_localized_audio_becomes_stale_after_relocalization(
+    tmp_path,
+    monkeypatch,
+):
+    project = _make_project(tmp_path)
+
+    def localize(text):
+        return localize_project(
+            project.id,
+            "ru",
+            root=tmp_path,
+            generate_fn=lambda prompt: json.dumps(
+                {
+                    "scenes": [
+                        {
+                            "scene_id": "scene_narrated",
+                            "narration_text": text,
+                            "on_screen_text": "",
+                            "subtitle_segments": [],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            review_fn=lambda prompt: json.dumps(
+                {"supported": True, "issues": []}
+            ),
+        )
+
+    localize("Первая версия.")
+
+    def fake_tts(**kwargs):
+        Path(kwargs["voice_file"]).write_bytes(b"audio")
+        return object()
+
+    monkeypatch.setattr(narration_synthesis.voice_service, "tts", fake_tts)
+    monkeypatch.setattr(
+        narration_synthesis.voice_service,
+        "get_audio_duration",
+        lambda path: 2.0,
+    )
+    monkeypatch.setattr(audio_service, "_probe_audio", lambda path: (2.0, "mp3"))
+
+    narration_synthesis.synthesize_narration(
+        project.id,
+        "cartesia:ru-test:ru",
+        language="ru",
+        root=tmp_path,
+    )
+
+    localize("Вторая версия.")
+
+    with pytest.raises(
+        audio_service.NarrationAudioError,
+        match="narration audio is stale",
+    ):
+        audio_service.load_narration_audio(
+            project.id,
+            "scene_narrated",
+            language="ru",
+            root=tmp_path,
+        )
