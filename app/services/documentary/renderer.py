@@ -17,7 +17,7 @@ from app.services.documentary.audio import NarrationAudioError, load_narration_a
 from app.services.documentary.clip_selector import story_plan_fingerprint
 from app.services.documentary.metadata import MediaProbeError, probe_video_metadata
 from app.services.documentary.project import load_project, project_dir, sha256_file
-from app.services.documentary.story_planner import load_story_plan
+from app.services.documentary.story_planner import StoryPlannerError, load_story_plan
 from app.utils import utils
 
 DEFAULT_RENDER_WIDTH = 1920
@@ -367,7 +367,7 @@ def documentary_render_readiness_issues(
     if project.plan.story_plan_fingerprint:
         try:
             current_story_plan = load_story_plan(project_id, root=root)
-        except (FileNotFoundError, OSError, ValueError) as exc:
+        except (FileNotFoundError, OSError, ValueError, StoryPlannerError) as exc:
             issues.append(f"story plan is unavailable: {exc}")
         else:
             if (
