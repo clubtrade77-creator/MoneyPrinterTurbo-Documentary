@@ -214,3 +214,50 @@ def test_run_autopilot_renders_final_when_rights_are_cleared(
     assert result.rights_review_required == ()
     assert result.final_master_created is True
     assert renders == [True, False]
+
+
+def test_fetch_first_available_source_uses_fallback_after_download_failure(
+    monkeypatch,
+):
+    story = SimpleNamespace(title="Fallback story")
+    primary = SourceAsset(
+        id="youtube_primary",
+        source_type=SourceType.youtube,
+        source_url="https://www.youtube.com/watch?v=abcdefghijk",
+    )
+    fallback = SourceAsset(
+        id="youtube_fallback",
+        source_type=SourceType.youtube,
+        source_url="https://www.youtube.com/watch?v=lmnopqrstuv",
+    )
+    attempts = []
+    added = []
+
+    def fake_fetch(project_id, source_id, *, root=None):
+        attempts.append(source_id)
+        if source_id == primary.id:
+            raise autopilot.DocumentaryMediaFetchError("format unavailable")
+        return fallback
+
+    monkeypatch.setattr(autopilot, "fetch_source_local_copy", fake_fetch)
+    monkeypatch.setattr(
+        autopilot,
+        "_fallback_video_sources",
+        lambda *a, **k: [fallback],
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "add_source",
+        lambda project_id, source, *, root=None: added.append(source.id),
+    )
+
+    result = autopilot._fetch_first_available_source(
+        "doc_fallback",
+        story,
+        primary,
+        source_limit=4,
+    )
+
+    assert result.id == fallback.id
+    assert attempts == [primary.id, fallback.id]
+    assert added == [fallback.id]
