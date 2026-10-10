@@ -669,6 +669,25 @@
     "Documentary Guided Preview Help": "Crea una vista previa técnica. Puedes seguir trabajando mientras se revisan los derechos de publicación.",
     "Documentary Guided Ready Title": "Vídeo final",
     "Documentary Guided Ready Help": "Cuando los derechos de los materiales estén confirmados, crea el máster final y las versiones en otros idiomas.",
-    "Documentary Guided Research Source": "fuente de investigación"
+    "Documentary Guided Research Source": "fuente de investigación",
+    "Documentary Simple Section Story": "Historia",
+    "Documentary Simple Section Materials": "Fuentes",
+    "Documentary Simple Section Production": "Guion y voz",
+    "Documentary Simple Section Video": "Vídeo",
+    "Documentary Simple Story Selected": "Historia seleccionada",
+    "Documentary Simple Materials Missing": "Añade fuentes de vídeo",
+    "Documentary Simple Materials Status": "Vídeos listos: {ready} de {total}",
+    "Documentary Simple Script Missing": "El guion aún no está creado",
+    "Documentary Simple Script Draft": "Completa el guion",
+    "Documentary Simple Voice Missing": "Genera la narración",
+    "Documentary Simple Production Ready": "Guion y narración listos",
+    "Documentary Simple Final Ready": "Vídeo final listo",
+    "Documentary Simple Preview Ready": "Vista previa lista",
+    "Documentary Simple Video Missing": "El vídeo aún no está creado",
+    "Documentary Simple Continue": "Continuar",
+    "Documentary Simple Open": "Abrir",
+    "Documentary Simple Production Help": "Aquí se crea el guion, se eligen los fragmentos de las fuentes y se configura la voz del narrador.",
+    "Documentary Simple Video Help": "Aquí se crean la vista previa, el vídeo final y las versiones en otros idiomas.",
+    "Documentary Simple Advanced": "Avanzado"
   }
 }
