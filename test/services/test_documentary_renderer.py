@@ -207,6 +207,10 @@ def test_localized_render_uses_target_language_narration(
         "app.services.documentary.renderer.load_narration_audio",
         fake_load_narration,
     )
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.write_localized_subtitles",
+        lambda *args, **kwargs: None,
+    )
 
     command = build_documentary_render_command(
         project.id,
@@ -216,6 +220,48 @@ def test_localized_render_uses_target_language_narration(
 
     assert languages == ["ru"]
     assert command[-1].endswith("master-ru.mp4")
+
+
+def test_localized_render_burns_generated_subtitles(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _project_with_video_source(tmp_path, has_audio=True)
+    _save_scene(
+        project,
+        source,
+        tmp_path,
+        audio_mode=AudioMode.original,
+    )
+    subtitle_dir = tmp_path / "subtitle dir"
+    subtitle_dir.mkdir()
+    subtitle_path = subtitle_dir / "localized:ru.srt"
+    subtitle_path.write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\nТест\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.load_localization_plan",
+        lambda *args, **kwargs: SimpleNamespace(
+            reviewed_content_fingerprint="a" * 64
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.write_localized_subtitles",
+        lambda *args, **kwargs: subtitle_path,
+    )
+
+    command = build_documentary_render_command(
+        project.id,
+        language="ru",
+        root=tmp_path,
+    )
+    joined = " ".join(command)
+
+    assert "subtitles=filename='" in joined
+    assert "localized\\:ru.srt" in joined
+    assert "[vsub]" in command
 
 
 def test_localized_render_readiness_requires_localization_plan(
