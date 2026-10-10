@@ -14,6 +14,7 @@ from app.services import voice as voice_service
 from app.services.documentary.autopilot import (
     AutopilotError,
     AutopilotProfile,
+    find_resumable_autopilot_project_id,
     run_autopilot,
 )
 from app.services.documentary.clip_selector import (
@@ -1031,6 +1032,7 @@ def _autopilot_progress_label(stage: str, tr: Tr) -> str:
             language=language
         )
     labels = {
+        "resume": "Documentary Autopilot Stage Resume",
         "story": "Documentary Autopilot Stage Story",
         "sources": "Documentary Autopilot Stage Sources",
         "media": "Documentary Autopilot Stage Media",
@@ -1058,8 +1060,39 @@ def _render_autopilot(tr: Tr) -> None:
         )
         st.caption(tr("Documentary Autopilot Defaults"))
 
+        resume_project_id = find_resumable_autopilot_project_id()
+        resume_topic = ""
+        if resume_project_id:
+            try:
+                resume_state_path = (
+                    project_dir(resume_project_id) / "autopilot-state.json"
+                )
+                if resume_state_path.is_file():
+                    import json
+
+                    resume_payload = json.loads(
+                        resume_state_path.read_text(encoding="utf-8")
+                    )
+                    if isinstance(resume_payload, dict):
+                        resume_topic = str(
+                            resume_payload.get("topic") or ""
+                        ).strip()
+            except (OSError, ValueError):
+                resume_topic = ""
+
+        can_resume = bool(resume_project_id) and (
+            not resume_topic or resume_topic == topic.strip()
+        )
+        if can_resume:
+            st.info(tr("Documentary Autopilot Resume Available"))
+
+        button_label = (
+            tr("Documentary Autopilot Resume")
+            if can_resume
+            else tr("Documentary Autopilot Start")
+        )
         if not st.button(
-            tr("Documentary Autopilot Start"),
+            button_label,
             type="primary",
             width="stretch",
             key="documentary_autopilot_start",
@@ -1082,6 +1115,7 @@ def _render_autopilot(tr: Tr) -> None:
             result = run_autopilot(
                 AutopilotProfile(topic=topic.strip()),
                 progress=on_progress,
+                resume_project_id=resume_project_id if can_resume else "",
             )
         except AutopilotError as exc:
             progress_bar.empty()
