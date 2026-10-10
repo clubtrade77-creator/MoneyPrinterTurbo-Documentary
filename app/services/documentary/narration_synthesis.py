@@ -146,7 +146,10 @@ def _fit_narration_audio_to_scene(
     if duration <= available + _NARRATION_FIT_TOLERANCE_SECONDS:
         return path, duration
 
-    target_duration = max(0.05, available - _NARRATION_FIT_TOLERANCE_SECONDS)
+    # Fit to the actual scene duration. The post-fit validation already allows
+    # a small technical tolerance, so subtracting that tolerance here would make
+    # the safe compression threshold stricter than configured.
+    target_duration = max(0.05, available)
     ratio = duration / target_duration
     if ratio > _MAX_LOCAL_TIME_COMPRESSION_RATIO:
         raise NarrationSynthesisError(
