@@ -973,6 +973,7 @@ def _render_external_source_local_copy(project, tr: Tr) -> None:
                     project.id,
                     source_id,
                     temp_path,
+                    original_filename=upload.name,
                 )
             except (OSError, ValueError) as exc:
                 st.error(
