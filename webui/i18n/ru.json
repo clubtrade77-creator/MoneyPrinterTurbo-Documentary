@@ -694,7 +694,7 @@
     "Documentary Autopilot Topic": "Тема, необязательно",
     "Documentary Autopilot Topic Placeholder": "Оставь пустым — система сама выберет лучшую свежую историю",
     "Documentary Autopilot Topic Help": "Если укажешь тему, поиск будет ограничен ей. Пустое поле включает автоматический выбор истории.",
-    "Documentary Autopilot Defaults": "Язык оригинала определяется автоматически · на выходе RU + EN + ES · 10 минут · Cartesia при наличии ключа · поиск за 72 часа.",
+    "Documentary Autopilot Defaults": "Язык оригинала определяется автоматически · на выходе RU + EN + ES · 10 минут · Cartesia при наличии ключа · сначала поиск за 72 часа, при необходимости — до 7 дней.",
     "Documentary Autopilot Start": "СОЗДАТЬ ФИЛЬМ АВТОМАТИЧЕСКИ",
     "Documentary Autopilot Starting": "Запускаю автопилот…",
     "Documentary Autopilot Running": "Автопилот работает…",
