@@ -19,6 +19,11 @@ from app.services.documentary.localization import (
     LocalizationError,
     load_localization_plan,
 )
+from app.services.documentary.localized_subtitles import (
+    LocalizedSubtitleError,
+    build_localized_subtitle_cues,
+    write_localized_subtitles,
+)
 from app.services.documentary.metadata import MediaProbeError, probe_video_metadata
 from app.services.documentary.project import load_project, project_dir, sha256_file
 from app.services.documentary.story_planner import StoryPlannerError, load_story_plan
@@ -75,6 +80,15 @@ def documentary_render_path(
         safe_language = _normalize_render_language(language).replace("-", "_")
         filename = f"master-{safe_language}.mp4"
     return project_dir(project_id, root) / "renders" / filename
+
+
+def _escape_subtitle_filter_path(path: Path) -> str:
+    """Escape an absolute subtitle path for FFmpeg's subtitles filter parser."""
+    value = str(path.expanduser().resolve())
+    value = value.replace("\\", "\\\\")
+    value = value.replace(":", "\\:")
+    value = value.replace("'", "\\'")
+    return value
 
 
 def _validate_render_settings(width: int, height: int, fps: int) -> None:
@@ -229,6 +243,7 @@ def _build_documentary_render_command_and_expectations(
     narration_language = _normalize_render_language(
         language or master_language
     )
+    localized_subtitle_path = None
     if narration_language != master_language:
         try:
             load_localization_plan(
@@ -236,7 +251,18 @@ def _build_documentary_render_command_and_expectations(
                 narration_language,
                 root=root,
             )
-        except (FileNotFoundError, LocalizationError) as exc:
+            localized_subtitle_path = write_localized_subtitles(
+                project_id,
+                narration_language,
+                root=root,
+            )
+        except (
+            FileNotFoundError,
+            LocalizationError,
+            LocalizedSubtitleError,
+            OSError,
+            ValueError,
+        ) as exc:
             raise DocumentaryRenderError(
                 f"documentary localization is unavailable for "
                 f"{narration_language}: {exc}"
@@ -390,6 +416,15 @@ def _build_documentary_render_command_and_expectations(
         video_label = "[vout]"
         audio_label = "[aout]"
 
+    if localized_subtitle_path is not None:
+        escaped_subtitle_path = _escape_subtitle_filter_path(
+            localized_subtitle_path
+        )
+        filters.append(
+            f"{video_label}subtitles=filename='{escaped_subtitle_path}'[vsub]"
+        )
+        video_label = "[vsub]"
+
     command.extend(
         [
             "-filter_complex",
@@ -445,7 +480,18 @@ def documentary_render_readiness_issues(
                 narration_language,
                 root=root,
             )
-        except (FileNotFoundError, LocalizationError) as exc:
+            build_localized_subtitle_cues(
+                project_id,
+                narration_language,
+                root=root,
+            )
+        except (
+            FileNotFoundError,
+            LocalizationError,
+            LocalizedSubtitleError,
+            OSError,
+            ValueError,
+        ) as exc:
             issues.append(
                 f"localization is unavailable for {narration_language}: {exc}"
             )
