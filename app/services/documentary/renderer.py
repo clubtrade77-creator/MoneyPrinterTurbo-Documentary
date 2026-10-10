@@ -15,6 +15,10 @@ from app.models.documentary import (
 )
 from app.services.documentary.audio import NarrationAudioError, load_narration_audio
 from app.services.documentary.clip_selector import story_plan_fingerprint
+from app.services.documentary.localization import (
+    LocalizationError,
+    load_localization_plan,
+)
 from app.services.documentary.metadata import MediaProbeError, probe_video_metadata
 from app.services.documentary.project import load_project, project_dir, sha256_file
 from app.services.documentary.story_planner import StoryPlannerError, load_story_plan
@@ -44,11 +48,33 @@ class DocumentaryRenderError(RuntimeError):
     """Raised when a documentary timeline cannot be rendered safely."""
 
 
+def _normalize_render_language(value: str) -> str:
+    language = str(value or "").strip().lower()
+    parts = language.split("-")
+    if not (
+        1 <= len(parts) <= 4
+        and 2 <= len(parts[0]) <= 8
+        and parts[0].isalpha()
+        and all(
+            1 <= len(part) <= 8 and part.isalnum()
+            for part in parts[1:]
+        )
+    ):
+        raise ValueError("invalid documentary render language")
+    return language
+
+
 def documentary_render_path(
     project_id: str,
     root: str | os.PathLike | None = None,
+    *,
+    language: str | None = None,
 ) -> Path:
-    return project_dir(project_id, root) / "renders" / "master.mp4"
+    filename = "master.mp4"
+    if language:
+        safe_language = _normalize_render_language(language).replace("-", "_")
+        filename = f"master-{safe_language}.mp4"
+    return project_dir(project_id, root) / "renders" / filename
 
 
 def _validate_render_settings(width: int, height: int, fps: int) -> None:
@@ -103,6 +129,7 @@ def _validate_scene(
     project: DocumentaryProject,
     scene,
     *,
+    narration_language: str,
     root: str | os.PathLike | None,
     source_cache: dict[str, SourceAsset] | None = None,
 ) -> tuple[SourceAsset, float, NarrationAudioAsset | None]:
@@ -155,14 +182,14 @@ def _validate_scene(
             narration_asset = load_narration_audio(
                 project.id,
                 scene.id,
-                language=project.master_language,
+                language=narration_language,
                 root=root,
             )
         except NarrationAudioError as exc:
             raise DocumentaryRenderError(str(exc)) from exc
 
         expected_voice = project.narrator_voices.get(
-            project.master_language.lower(),
+            narration_language,
             "",
         )
         if expected_voice:
@@ -189,6 +216,7 @@ def _validate_scene(
 def _build_documentary_render_command_and_expectations(
     project_id: str,
     *,
+    language: str | None = None,
     root: str | os.PathLike | None = None,
     output_path: str | os.PathLike | None = None,
     width: int = DEFAULT_RENDER_WIDTH,
@@ -197,6 +225,23 @@ def _build_documentary_render_command_and_expectations(
 ) -> tuple[list[str], float, int, int]:
     _validate_render_settings(width, height, fps)
     project = load_project(project_id, root)
+    master_language = _normalize_render_language(project.master_language)
+    narration_language = _normalize_render_language(
+        language or master_language
+    )
+    if narration_language != master_language:
+        try:
+            load_localization_plan(
+                project_id,
+                narration_language,
+                root=root,
+            )
+        except (FileNotFoundError, LocalizationError) as exc:
+            raise DocumentaryRenderError(
+                f"documentary localization is unavailable for "
+                f"{narration_language}: {exc}"
+            ) from exc
+
     if not project.plan.scenes:
         raise DocumentaryRenderError("documentary project has no scenes to render")
 
@@ -216,6 +261,7 @@ def _build_documentary_render_command_and_expectations(
         source, duration, narration_asset = _validate_scene(
             project,
             scene,
+            narration_language=narration_language,
             root=root,
             source_cache=source_cache,
         )
@@ -224,7 +270,15 @@ def _build_documentary_render_command_and_expectations(
     target = (
         Path(output_path).expanduser().resolve()
         if output_path is not None
-        else documentary_render_path(project_id, root).resolve()
+        else documentary_render_path(
+            project_id,
+            root,
+            language=(
+                narration_language
+                if narration_language != master_language
+                else None
+            ),
+        ).resolve()
     )
 
     command = [utils.get_ffmpeg_binary(), "-y", "-nostdin"]
@@ -366,6 +420,7 @@ def _build_documentary_render_command_and_expectations(
 def documentary_render_readiness_issues(
     project_id: str,
     *,
+    language: str | None = None,
     root: str | os.PathLike | None = None,
 ) -> list[str]:
     """Return cheap, user-facing blockers before starting an expensive render.
@@ -375,10 +430,26 @@ def documentary_render_readiness_issues(
     narration, invalid scene ranges, or a timeline that no longer matches Story Plan.
     """
     project = load_project(project_id, root)
+    master_language = _normalize_render_language(project.master_language)
+    narration_language = _normalize_render_language(
+        language or master_language
+    )
     if not project.plan.scenes:
         return ["documentary project has no scenes to render"]
 
     issues: list[str] = []
+    if narration_language != master_language:
+        try:
+            load_localization_plan(
+                project_id,
+                narration_language,
+                root=root,
+            )
+        except (FileNotFoundError, LocalizationError) as exc:
+            issues.append(
+                f"localization is unavailable for {narration_language}: {exc}"
+            )
+
     if project.plan.story_plan_fingerprint:
         try:
             current_story_plan = load_story_plan(project_id, root=root)
@@ -451,14 +522,14 @@ def documentary_render_readiness_issues(
                 narration = load_narration_audio(
                     project.id,
                     scene.id,
-                    language=project.master_language,
+                    language=narration_language,
                     root=root,
                 )
             except (FileNotFoundError, NarrationAudioError) as exc:
                 issues.append(str(exc))
             else:
                 expected_voice = project.narrator_voices.get(
-                    project.master_language.lower(),
+                    narration_language,
                     "",
                 )
                 if expected_voice:
@@ -482,6 +553,7 @@ def documentary_render_readiness_issues(
 def build_documentary_render_command(
     project_id: str,
     *,
+    language: str | None = None,
     root: str | os.PathLike | None = None,
     output_path: str | os.PathLike | None = None,
     width: int = DEFAULT_RENDER_WIDTH,
@@ -491,6 +563,7 @@ def build_documentary_render_command(
     """Build one shell-free FFmpeg command for the current documentary timeline."""
     command, _, _, _ = _build_documentary_render_command_and_expectations(
         project_id,
+        language=language,
         root=root,
         output_path=output_path,
         width=width,
@@ -544,17 +617,46 @@ def _validate_rendered_output(
 def render_documentary(
     project_id: str,
     *,
+    language: str | None = None,
     root: str | os.PathLike | None = None,
     width: int = DEFAULT_RENDER_WIDTH,
     height: int = DEFAULT_RENDER_HEIGHT,
     fps: int = DEFAULT_RENDER_FPS,
     timeout_seconds: int = DEFAULT_RENDER_TIMEOUT_SECONDS,
 ) -> Path:
-    """Render the current source-backed documentary timeline to renders/master.mp4."""
+    """Render the current documentary timeline in the requested narration language."""
     if timeout_seconds <= 0:
         raise ValueError("documentary render timeout must be positive")
 
-    output_path = documentary_render_path(project_id, root).resolve()
+    initial_project = load_project(project_id, root)
+    master_language = _normalize_render_language(initial_project.master_language)
+    narration_language = _normalize_render_language(
+        language or master_language
+    )
+    localization_fingerprint = ""
+    if narration_language != master_language:
+        try:
+            localization = load_localization_plan(
+                project_id,
+                narration_language,
+                root=root,
+            )
+        except (FileNotFoundError, LocalizationError) as exc:
+            raise DocumentaryRenderError(
+                f"documentary localization is unavailable for "
+                f"{narration_language}: {exc}"
+            ) from exc
+        localization_fingerprint = localization.reviewed_content_fingerprint
+
+    output_path = documentary_render_path(
+        project_id,
+        root,
+        language=(
+            narration_language
+            if narration_language != master_language
+            else None
+        ),
+    ).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     descriptor, staged_name = tempfile.mkstemp(
@@ -569,6 +671,7 @@ def render_documentary(
         command, expected_duration, scene_count, project_revision = (
             _build_documentary_render_command_and_expectations(
                 project_id,
+                language=narration_language,
                 root=root,
                 output_path=staged_path,
                 width=width,
@@ -629,6 +732,26 @@ def render_documentary(
                 "documentary project changed while rendering; "
                 "discarding stale render"
             )
+
+        if localization_fingerprint:
+            try:
+                current_localization = load_localization_plan(
+                    project_id,
+                    narration_language,
+                    root=root,
+                )
+            except (FileNotFoundError, LocalizationError) as exc:
+                raise DocumentaryRenderError(
+                    "documentary localization changed while rendering"
+                ) from exc
+            if (
+                current_localization.reviewed_content_fingerprint
+                != localization_fingerprint
+            ):
+                raise DocumentaryRenderError(
+                    "documentary localization changed while rendering; "
+                    "discarding stale render"
+                )
 
         os.replace(staged_path, output_path)
         return output_path
