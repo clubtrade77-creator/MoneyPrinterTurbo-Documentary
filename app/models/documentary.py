@@ -613,7 +613,7 @@ class NarrationAudioAsset(BaseModel):
     duration_seconds: float = Field(gt=0)
     audio_codec: str = ""
     file_size_bytes: int = Field(default=0, ge=0)
-    voice_name: str = ""
+    voice_name: str = Field(default="", max_length=300)
 
     @field_validator("checksum_sha256")
     @classmethod
