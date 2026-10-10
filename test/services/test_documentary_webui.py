@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from io import BytesIO
 
 import pytest
@@ -194,6 +195,11 @@ def test_documentary_render_currentness_tracks_project_and_plan_files(
         "clip_plan_path",
         lambda project_id: clip_plan,
     )
+    monkeypatch.setattr(
+        documentary_ui,
+        "load_project",
+        lambda project_id: SimpleNamespace(sources=[], narration_audio=[]),
+    )
 
     import os
 
@@ -204,6 +210,57 @@ def test_documentary_render_currentness_tracks_project_and_plan_files(
     assert _render_output_is_current("doc_test") is True
 
     os.utime(clip_plan, (14, 14))
+    assert _render_output_is_current("doc_test") is False
+
+
+def test_documentary_render_currentness_rejects_missing_local_media(
+    tmp_path,
+    monkeypatch,
+):
+    output = tmp_path / "master.mp4"
+    project_manifest = tmp_path / "project.json"
+    source_path = tmp_path / "source.mp4"
+    output.write_bytes(b"render")
+    project_manifest.write_bytes(b"project")
+    source_path.write_bytes(b"source")
+
+    monkeypatch.setattr(
+        documentary_ui,
+        "documentary_render_path",
+        lambda project_id: output,
+    )
+    monkeypatch.setattr(
+        documentary_ui,
+        "project_manifest_path",
+        lambda project_id: project_manifest,
+    )
+    monkeypatch.setattr(
+        documentary_ui,
+        "story_plan_path",
+        lambda project_id: tmp_path / "missing-story.json",
+    )
+    monkeypatch.setattr(
+        documentary_ui,
+        "clip_plan_path",
+        lambda project_id: tmp_path / "missing-clip.json",
+    )
+    monkeypatch.setattr(
+        documentary_ui,
+        "load_project",
+        lambda project_id: SimpleNamespace(
+            sources=[SimpleNamespace(local_path=str(source_path))],
+            narration_audio=[],
+        ),
+    )
+
+    import os
+
+    os.utime(project_manifest, (10, 10))
+    os.utime(source_path, (11, 11))
+    os.utime(output, (12, 12))
+    assert _render_output_is_current("doc_test") is True
+
+    source_path.unlink()
     assert _render_output_is_current("doc_test") is False
 
 
