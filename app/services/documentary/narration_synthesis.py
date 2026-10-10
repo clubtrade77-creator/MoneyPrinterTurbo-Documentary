@@ -12,7 +12,7 @@ from app.services.documentary.audio import (
     attach_narration_audio,
     load_narration_audio,
 )
-from app.services.documentary.project import load_project, save_project, set_narrator_voice
+from app.services.documentary.project import load_project, set_narrator_voice
 
 
 class NarrationSynthesisError(RuntimeError):
@@ -25,33 +25,6 @@ class NarrationSynthesisResult:
     reused: tuple[NarrationAudioAsset, ...]
     voice_name: str
     language: str
-
-
-def _record_asset_voice(
-    project_id: str,
-    scene_id: str,
-    *,
-    language: str,
-    voice_name: str,
-    root: str | os.PathLike | None,
-) -> NarrationAudioAsset:
-    project = load_project(project_id, root)
-    asset = next(
-        (
-            item
-            for item in project.narration_audio
-            if item.scene_id == scene_id and item.language == language
-        ),
-        None,
-    )
-    if asset is None:
-        raise NarrationSynthesisError(
-            f"registered narration audio is missing for scene {scene_id}"
-        )
-    asset.voice_name = voice_name
-    project.narrator_voices[language] = voice_name
-    save_project(project, root)
-    return asset
 
 
 def synthesize_narration(
