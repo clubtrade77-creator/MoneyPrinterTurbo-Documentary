@@ -848,7 +848,7 @@
     "Documentary Autopilot Topic": "Topic, optional",
     "Documentary Autopilot Topic Placeholder": "Leave blank and Autopilot will choose the best fresh story",
     "Documentary Autopilot Topic Help": "Enter a topic to constrain discovery. Leave it blank for automatic story selection.",
-    "Documentary Autopilot Defaults": "Source language is detected automatically · outputs RU + EN + ES · 10 minutes · Cartesia when configured · 72-hour discovery window.",
+    "Documentary Autopilot Defaults": "Source language is detected automatically · outputs RU + EN + ES · 10 minutes · Cartesia when configured · searches 72 hours first, then up to 7 days if needed.",
     "Documentary Autopilot Start": "CREATE DOCUMENTARY AUTOMATICALLY",
     "Documentary Autopilot Starting": "Starting Autopilot…",
     "Documentary Autopilot Running": "Autopilot is working…",
