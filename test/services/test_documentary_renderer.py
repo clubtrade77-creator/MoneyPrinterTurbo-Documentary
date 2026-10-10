@@ -149,6 +149,99 @@ def test_render_readiness_reports_missing_local_source_copy(tmp_path: Path):
     assert any("has no local video copy" in issue for issue in issues)
 
 
+def test_localized_render_path_uses_language_suffix(tmp_path: Path):
+    project, _, _ = _project_with_video_source(tmp_path)
+
+    assert documentary_render_path(
+        project.id,
+        tmp_path,
+        language="ru",
+    ).name == "master-ru.mp4"
+    assert documentary_render_path(
+        project.id,
+        tmp_path,
+        language="es-US",
+    ).name == "master-es_us.mp4"
+
+
+def test_localized_render_uses_target_language_narration(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _project_with_video_source(tmp_path)
+    _save_scene(
+        project,
+        source,
+        tmp_path,
+        audio_mode=AudioMode.narration,
+    )
+    tracked = load_project(project.id, tmp_path)
+    tracked.narrator_voices["ru"] = "voice-ru"
+    save_project(tracked, tmp_path)
+
+    narration_path = tmp_path / "narration-ru.wav"
+    narration_path.write_bytes(b"narration")
+    languages = []
+
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.load_localization_plan",
+        lambda *args, **kwargs: SimpleNamespace(
+            reviewed_content_fingerprint="a" * 64
+        ),
+    )
+
+    def fake_load_narration(*args, **kwargs):
+        languages.append(kwargs["language"])
+        return NarrationAudioAsset(
+            scene_id="scene_renderer",
+            language="ru",
+            local_path=str(narration_path.resolve()),
+            checksum_sha256="0" * 64,
+            duration_seconds=2.0,
+            audio_codec="pcm_s16le",
+            file_size_bytes=narration_path.stat().st_size,
+            voice_name="voice-ru",
+        )
+
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.load_narration_audio",
+        fake_load_narration,
+    )
+
+    command = build_documentary_render_command(
+        project.id,
+        language="ru",
+        root=tmp_path,
+    )
+
+    assert languages == ["ru"]
+    assert command[-1].endswith("master-ru.mp4")
+
+
+def test_localized_render_readiness_requires_localization_plan(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _project_with_video_source(tmp_path)
+    _save_scene(project, source, tmp_path, audio_mode=AudioMode.muted)
+
+    def missing_localization(*args, **kwargs):
+        raise FileNotFoundError("missing localization")
+
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.load_localization_plan",
+        missing_localization,
+    )
+
+    issues = documentary_render_readiness_issues(
+        project.id,
+        language="ru",
+        root=tmp_path,
+    )
+
+    assert any("localization is unavailable for ru" in issue for issue in issues)
+
+
 def test_build_render_command_uses_exact_source_range_and_original_audio(tmp_path: Path):
     project, source, local_path = _project_with_video_source(tmp_path, has_audio=True)
     _save_scene(project, source, tmp_path)
