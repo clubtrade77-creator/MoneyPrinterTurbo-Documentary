@@ -41,7 +41,7 @@ from app.services.documentary.story_discovery import (
     discover_stories,
 )
 from app.services.documentary.story_planner import plan_story
-from app.services.documentary.transcription import transcribe_source
+from app.services.documentary.transcription import TranscriptionError, transcribe_source
 
 
 ProgressCallback = Callable[["AutopilotProgress"], None]
@@ -483,6 +483,78 @@ def _fetch_first_available_source(
     )
 
 
+def _fetch_and_transcribe_first_available_source(
+    project_id: str,
+    story: StoryCandidate,
+    primary_source: SourceAsset,
+    *,
+    source_limit: int,
+    model,
+    root=None,
+):
+    errors = []
+    candidates = [primary_source] + _fallback_video_sources(
+        story,
+        exclude_source_id=primary_source.id,
+        limit=source_limit,
+    )
+    seen_ids = set()
+
+    for source in candidates:
+        if source.id in seen_ids:
+            continue
+        seen_ids.add(source.id)
+
+        try:
+            add_source(project_id, source, root=root)
+        except ValueError as exc:
+            if "source already exists in project" not in str(exc).lower():
+                raise
+
+        try:
+            fetched = fetch_source_local_copy(
+                project_id,
+                source.id,
+                root=root,
+            )
+        except DocumentaryMediaFetchError as exc:
+            errors.append(f"{source.id}: download failed: {exc}")
+            logger.warning(
+                "Documentary Autopilot source download failed; trying next source: "
+                f"source={source.id}, error={exc}"
+            )
+            continue
+
+        try:
+            transcript = transcribe_source(
+                project_id,
+                fetched.id,
+                root=root,
+                language=None,
+                model_override=model,
+                model_name="small",
+            )
+        except TranscriptionError as exc:
+            errors.append(f"{source.id}: transcription failed: {exc}")
+            logger.warning(
+                "Documentary Autopilot source has no usable speech; "
+                f"trying next source: source={source.id}, error={exc}"
+            )
+            continue
+
+        return fetched, transcript
+
+    detail = " | ".join(errors)
+    if len(detail) > 3000:
+        detail = detail[-3000:]
+    raise AutopilotError(
+        "transcription",
+        "autopilot could not find a downloadable source with recognizable speech"
+        + (f": {detail}" if detail else ""),
+        project_id=project_id,
+    )
+
+
 def _project_has_narrated_scenes(project_id: str, *, root=None) -> bool:
     project = load_project(project_id, root)
     return any(
@@ -557,27 +629,95 @@ def run_autopilot(
             root=root,
         )
 
-        stage = "media"
-        _emit(progress, stage, "Downloading a technical review copy", 0.23)
-        source = _fetch_first_available_source(
-            project.id,
-            story,
-            source,
-            source_limit=profile.source_limit,
-            root=root,
-        )
-
         stage = "transcription"
-        _emit(progress, stage, "Analyzing speech and timecodes", 0.34)
-        model = subtitle_service.get_whisper_model("small")
-        transcript = transcribe_source(
-            project.id,
-            source.id,
-            root=root,
-            language=None,
-            model_override=model,
-            model_name="small",
+        _emit(
+            progress,
+            stage,
+            "Downloading and validating source speech",
+            0.23,
         )
+        model = subtitle_service.get_whisper_model("small")
+
+        story_attempts = [story] + [
+            candidate
+            for candidate in _published_footage_stories(stories)
+            if candidate is not story
+        ]
+        transcription_errors = []
+        transcript = None
+
+        for index, candidate_story in enumerate(story_attempts):
+            candidate_source = source
+            if index:
+                try:
+                    candidate_bundle = _discover_source_bundle(
+                        candidate_story,
+                        limit=profile.source_limit,
+                    )
+                except AutopilotError as exc:
+                    transcription_errors.append(
+                        f"{candidate_story.title}: source search failed: {exc}"
+                    )
+                    continue
+
+                try:
+                    add_source(
+                        project.id,
+                        candidate_to_source(candidate_story),
+                        root=root,
+                    )
+                except ValueError as exc:
+                    if "source already exists in project" not in str(exc).lower():
+                        raise
+                candidate_source = _persist_source_bundle(
+                    project.id,
+                    candidate_bundle,
+                    root=root,
+                )
+
+            try:
+                candidate_source, candidate_transcript = (
+                    _fetch_and_transcribe_first_available_source(
+                        project.id,
+                        candidate_story,
+                        candidate_source,
+                        source_limit=profile.source_limit,
+                        model=model,
+                        root=root,
+                    )
+                )
+            except AutopilotError as exc:
+                transcription_errors.append(
+                    f"{candidate_story.title}: {exc}"
+                )
+                logger.info(
+                    "Documentary Autopilot skipped story without usable speech: "
+                    f"title={candidate_story.title!r}, reason={exc}"
+                )
+                continue
+
+            story = candidate_story
+            source = candidate_source
+            transcript = candidate_transcript
+            if project.title != story.title:
+                current_project = load_project(project.id, root)
+                current_project.title = story.title
+                save_project(current_project, root)
+            break
+
+        if transcript is None:
+            detail = " | ".join(transcription_errors)
+            if len(detail) > 3000:
+                detail = detail[-3000:]
+            raise AutopilotError(
+                "transcription",
+                "autopilot checked available stories but found no downloadable "
+                "source with recognizable speech"
+                + (f": {detail}" if detail else ""),
+                project_id=project.id,
+            )
+
+        _emit(progress, stage, "Analyzing speech and timecodes", 0.34)
         detected_language = str(transcript.language or "").split("-", 1)[0].lower()
         master_language = (
             detected_language
