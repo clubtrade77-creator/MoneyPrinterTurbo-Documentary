@@ -173,6 +173,50 @@ def test_youtube_asset_keeps_provenance_separate_from_rights(
     assert attached.checksum_sha256
 
 
+def test_attach_local_copy_preserves_original_upload_filename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    project = create_project(
+        "External copy filename",
+        project_id="doc_external_copy_filename",
+        root=tmp_path,
+    )
+    source = build_youtube_source_asset(
+        "https://youtu.be/dQw4w9WgXcQ",
+        title="Reference footage",
+    )
+    add_source(project.id, source, root=tmp_path)
+
+    staged_file = tmp_path / "tmp-abcd.mp4"
+    staged_file.write_bytes(b"video")
+    monkeypatch.setattr(
+        project_service,
+        "probe_video_metadata",
+        lambda path: VideoMetadata(
+            duration_seconds=4,
+            width=1280,
+            height=720,
+            fps=30,
+            has_audio=True,
+            video_codec="h264",
+            audio_codec="aac",
+            container="mov,mp4",
+            file_size_bytes=Path(path).stat().st_size,
+        ),
+    )
+
+    attached = attach_local_copy_to_source(
+        project.id,
+        source.id,
+        staged_file,
+        original_filename="official-bodycam.mp4",
+        root=tmp_path,
+    )
+
+    assert attached.original_filename == "official-bodycam.mp4"
+
+
 def test_attach_local_file_copies_and_registers_source(tmp_path: Path):
     project = create_project(
         "Local Case", project_id="doc_local_case", root=tmp_path
