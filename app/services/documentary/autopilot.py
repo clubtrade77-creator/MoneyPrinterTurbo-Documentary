@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from uuid import uuid4
 from pathlib import Path
 from typing import Callable
 
@@ -12,18 +14,28 @@ from app.models.documentary import AudioMode, SourceAsset
 from app.services import llm as llm_service
 from app.services import subtitle as subtitle_service
 from app.services import voice as voice_service
-from app.services.documentary.clip_selector import select_clips
-from app.services.documentary.localization import localize_project
+from app.services.documentary.clip_selector import (
+    ClipSelectorError,
+    load_clip_plan,
+    select_clips,
+)
+from app.services.documentary.localization import (
+    LocalizationError,
+    load_localization_plan,
+    localize_project,
+)
 from app.services.documentary.media_fetcher import (
     DocumentaryMediaFetchError,
     fetch_source_local_copy,
 )
-from app.services.documentary.narration import write_narration
+from app.services.documentary.narration import scene_requires_narration, write_narration
 from app.services.documentary.narration_synthesis import synthesize_narration
 from app.services.documentary.project import (
     add_source,
     create_project,
+    list_projects,
     load_project,
+    project_dir,
     save_project,
 )
 from app.services.documentary.renderer import render_documentary
@@ -43,8 +55,17 @@ from app.services.documentary.story_discovery import (
     candidate_to_source,
     discover_stories,
 )
-from app.services.documentary.story_planner import plan_story
-from app.services.documentary.transcription import TranscriptionError, transcribe_source
+from app.services.documentary.story_planner import (
+    StoryPlannerError,
+    load_story_plan,
+    plan_story,
+)
+from app.services.documentary.transcription import (
+    TranscriptionError,
+    load_source_transcript,
+    transcript_path,
+    transcribe_source,
+)
 
 
 ProgressCallback = Callable[["AutopilotProgress"], None]
@@ -84,6 +105,164 @@ class AutopilotError(RuntimeError):
         super().__init__(message)
         self.stage = stage
         self.project_id = project_id
+
+
+_AUTOPILOT_STATE_VERSION = 1
+_AUTOPILOT_STATE_FILENAME = "autopilot-state.json"
+
+
+def _autopilot_state_path(
+    project_id: str,
+    root: str | Path | None = None,
+) -> Path:
+    return project_dir(project_id, root) / _AUTOPILOT_STATE_FILENAME
+
+
+def _load_autopilot_state(
+    project_id: str,
+    root: str | Path | None = None,
+) -> dict:
+    path = _autopilot_state_path(project_id, root)
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    if payload.get("version") != _AUTOPILOT_STATE_VERSION:
+        return {}
+    return payload
+
+
+def _save_autopilot_state(
+    project_id: str,
+    payload: dict,
+    *,
+    root: str | Path | None = None,
+) -> None:
+    path = _autopilot_state_path(project_id, root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    state = dict(payload)
+    state["version"] = _AUTOPILOT_STATE_VERSION
+    temp = path.with_suffix(path.suffix + f".{uuid4().hex}.tmp")
+    try:
+        temp.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def _story_state_payload(story: StoryCandidate) -> dict:
+    return asdict(story)
+
+
+def _story_from_state(payload: dict, *, fallback_title: str) -> StoryCandidate:
+    raw = payload.get("story")
+    if isinstance(raw, dict):
+        fields = {
+            "id": str(raw.get("id") or "resume_story"),
+            "title": str(raw.get("title") or fallback_title),
+            "url": str(raw.get("url") or ""),
+            "publisher": str(raw.get("publisher") or ""),
+            "published_at": str(raw.get("published_at") or ""),
+            "language": str(raw.get("language") or ""),
+            "source_country": str(raw.get("source_country") or ""),
+            "image_url": str(raw.get("image_url") or ""),
+            "discovery_query": str(raw.get("discovery_query") or ""),
+            "score": int(raw.get("score") or 0),
+            "footage_score": int(raw.get("footage_score") or 0),
+            "freshness_score": int(raw.get("freshness_score") or 0),
+            "story_score": int(raw.get("story_score") or 0),
+            "reasons": tuple(raw.get("reasons") or ()),
+        }
+        return StoryCandidate(**fields)
+
+    return StoryCandidate(
+        id="resume_story",
+        title=fallback_title,
+        url="",
+        publisher="",
+        published_at="",
+        language="",
+        source_country="",
+        image_url="",
+        discovery_query="",
+        score=100,
+        footage_score=40,
+        freshness_score=0,
+        story_score=0,
+        reasons=("resumed from existing documentary project",),
+    )
+
+
+def _latest_saved_transcript(project_id: str, *, root=None):
+    project = load_project(project_id, root)
+    candidates = []
+    for source in project.sources:
+        path = transcript_path(project_id, source.id, root)
+        if not path.is_file():
+            continue
+        try:
+            transcript = load_source_transcript(
+                project_id,
+                source.id,
+                root=root,
+            )
+        except (FileNotFoundError, TranscriptionError, ValueError):
+            continue
+        try:
+            modified = path.stat().st_mtime
+        except OSError:
+            modified = 0.0
+        candidates.append((modified, source, transcript))
+    if not candidates:
+        return None
+    _, source, transcript = max(candidates, key=lambda item: item[0])
+    return source, transcript
+
+
+def find_resumable_autopilot_project_id(
+    *,
+    root: str | Path | None = None,
+) -> str:
+    projects = list_projects(root)
+    for project in projects:
+        state = _load_autopilot_state(project.id, root)
+        if state and state.get("status") != "done":
+            return project.id
+
+    # Backward-compatible recovery for projects created before persistent
+    # Autopilot state existed. Only consider projects that have a research lead
+    # and at least one persisted transcript.
+    for project in projects:
+        if not any(source.id.startswith("story_") for source in project.sources):
+            continue
+        if _latest_saved_transcript(project.id, root=root) is not None:
+            return project.id
+    return ""
+
+
+def _master_narration_is_complete(project_id: str, *, root=None) -> bool:
+    try:
+        story_plan = load_story_plan(project_id, root=root)
+    except (FileNotFoundError, StoryPlannerError):
+        return False
+    project = load_project(project_id, root)
+    if not project.plan.scenes:
+        return False
+    beats = {beat.id: beat for beat in story_plan.beats}
+    for scene in project.plan.scenes:
+        beat = beats.get(scene.story_beat_id)
+        if beat is None:
+            return False
+        if scene_requires_narration(scene, beat) and not scene.narration_text.strip():
+            return False
+    return True
 
 
 def _emit(
