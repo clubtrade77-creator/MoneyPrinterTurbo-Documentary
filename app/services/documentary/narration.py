@@ -36,6 +36,17 @@ def _strip_code_fence(text: str) -> str:
     return "\n".join(lines).strip()
 
 
+def scene_requires_narration(scene, beat=None) -> bool:
+    if scene.audio_mode in {AudioMode.narration, AudioMode.mixed}:
+        return True
+    return (
+        scene.audio_mode == AudioMode.muted
+        and scene.scene_type == SceneType.narration_over_source
+        and beat is not None
+        and not beat.original_audio_priority
+    )
+
+
 def _scene_context(project_id: str, root: str | os.PathLike | None = None):
     project = load_project(project_id, root)
     story_plan = load_story_plan(project_id, root=root)
@@ -56,7 +67,7 @@ def _scene_context(project_id: str, root: str | os.PathLike | None = None):
                 f"scene references unknown story beat: {scene.id}"
             )
 
-        if beat.original_audio_priority and scene.audio_mode == AudioMode.original:
+        if not scene_requires_narration(scene, beat):
             continue
 
         transcript = transcripts.get(scene.source_id)
@@ -323,7 +334,8 @@ def write_narration(
             continue
         scene.narration_text = by_id[scene.id]
         scene.scene_type = SceneType.narration_over_source
-        scene.audio_mode = AudioMode.narration
+        if scene.audio_mode == AudioMode.muted:
+            scene.audio_mode = AudioMode.narration
 
     save_project(latest, root)
     return latest
