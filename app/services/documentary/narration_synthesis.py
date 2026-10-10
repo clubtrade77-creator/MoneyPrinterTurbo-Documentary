@@ -12,6 +12,10 @@ from app.services.documentary.audio import (
     attach_narration_audio,
     load_narration_audio,
 )
+from app.services.documentary.localization import (
+    LocalizationError,
+    load_localization_plan,
+)
 from app.services.documentary.project import load_project, set_narrator_voice
 
 
@@ -25,6 +29,106 @@ class NarrationSynthesisResult:
     reused: tuple[NarrationAudioAsset, ...]
     voice_name: str
     language: str
+
+
+def _normalize_language(value: str) -> str:
+    language = str(value or "").strip().lower()
+    parts = language.split("-")
+    if not (
+        1 <= len(parts) <= 4
+        and 2 <= len(parts[0]) <= 8
+        and parts[0].isalpha()
+        and all(
+            1 <= len(part) <= 8 and part.isalnum()
+            for part in parts[1:]
+        )
+    ):
+        raise ValueError("invalid documentary narration language")
+    return language
+
+
+def _narration_text_context(
+    project,
+    language: str,
+    *,
+    root: str | os.PathLike | None,
+) -> tuple[dict[str, str], str]:
+    master_language = _normalize_language(project.master_language)
+    if language == master_language:
+        return (
+            {
+                scene.id: scene.narration_text
+                for scene in project.plan.scenes
+            },
+            "",
+        )
+
+    try:
+        plan = load_localization_plan(
+            project.id,
+            language,
+            root=root,
+        )
+    except (FileNotFoundError, LocalizationError) as exc:
+        raise NarrationSynthesisError(
+            f"localization plan is unavailable for language {language}"
+        ) from exc
+
+    return (
+        {
+            scene.scene_id: scene.narration_text
+            for scene in plan.scenes
+        },
+        plan.reviewed_content_fingerprint,
+    )
+
+
+def _assert_narration_context_unchanged(
+    project_id: str,
+    snapshot,
+    *,
+    language: str,
+    expected_text: str,
+    localization_fingerprint: str,
+    root: str | os.PathLike | None,
+) -> None:
+    _assert_scene_unchanged(
+        project_id,
+        snapshot,
+        root=root,
+    )
+
+    current_project = load_project(project_id, root)
+    if language == _normalize_language(current_project.master_language):
+        if snapshot.narration_text != expected_text:
+            raise NarrationSynthesisError(
+                f"narration text changed during synthesis: {snapshot.id}"
+            )
+        return
+
+    try:
+        plan = load_localization_plan(
+            project_id,
+            language,
+            root=root,
+        )
+    except (FileNotFoundError, LocalizationError) as exc:
+        raise NarrationSynthesisError(
+            f"localization changed during narration synthesis: {snapshot.id}"
+        ) from exc
+
+    if plan.reviewed_content_fingerprint != localization_fingerprint:
+        raise NarrationSynthesisError(
+            f"localization changed during narration synthesis: {snapshot.id}"
+        )
+    localized = next(
+        (item for item in plan.scenes if item.scene_id == snapshot.id),
+        None,
+    )
+    if localized is None or localized.narration_text != expected_text:
+        raise NarrationSynthesisError(
+            f"localization changed during narration synthesis: {snapshot.id}"
+        )
 
 
 def _assert_scene_unchanged(
@@ -62,16 +166,21 @@ def synthesize_narration(
     root: str | os.PathLike | None = None,
 ) -> NarrationSynthesisResult:
     project = load_project(project_id, root)
-    language = str(language or project.master_language).strip().lower()
+    language = _normalize_language(language or project.master_language)
     voice_name = str(voice_name or "").strip()
     if not language or not voice_name:
         raise ValueError("narration language and voice are required")
 
+    narration_texts, localization_fingerprint = _narration_text_context(
+        project,
+        language,
+        root=root,
+    )
     scenes = [
         scene
         for scene in project.plan.scenes
         if scene.audio_mode in {AudioMode.narration, AudioMode.mixed}
-        and scene.narration_text.strip()
+        and narration_texts.get(scene.id, "").strip()
     ]
     if not scenes:
         raise NarrationSynthesisError("no narrated scenes are available")
@@ -96,15 +205,19 @@ def synthesize_narration(
     generated: list[NarrationAudioAsset] = []
     with tempfile.TemporaryDirectory(prefix="documentary-narration-") as temp_dir:
         for scene in pending:
-            _assert_scene_unchanged(
+            narration_text = narration_texts[scene.id]
+            _assert_narration_context_unchanged(
                 project_id,
                 scene,
+                language=language,
+                expected_text=narration_text,
+                localization_fingerprint=localization_fingerprint,
                 root=root,
             )
             output = Path(temp_dir) / f"{scene.id}.mp3"
             try:
                 result = voice_service.tts(
-                    text=scene.narration_text,
+                    text=narration_text,
                     voice_name=voice_name,
                     voice_rate=1.0,
                     voice_file=str(output),
@@ -135,9 +248,12 @@ def synthesize_narration(
                 raise NarrationSynthesisError(
                     f"narration does not fit scene {scene.id}"
                 )
-            _assert_scene_unchanged(
+            _assert_narration_context_unchanged(
                 project_id,
                 scene,
+                language=language,
+                expected_text=narration_text,
+                localization_fingerprint=localization_fingerprint,
                 root=root,
             )
             try:
