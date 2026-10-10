@@ -35,6 +35,14 @@ def clip_plan_path(
 
 def _atomic_write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file():
+        try:
+            current_payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            current_payload = None
+        if current_payload == payload:
+            return
+
     temp_path = path.with_suffix(path.suffix + f".{uuid4().hex}.tmp")
     try:
         temp_path.write_text(
