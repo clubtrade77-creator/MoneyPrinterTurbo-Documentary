@@ -104,24 +104,16 @@ def synthesize_narration(
                     f"narration does not fit scene {scene.id}"
                 )
             try:
-                attach_narration_audio(
-                    project_id,
-                    scene.id,
-                    output,
-                    language=language,
-                    root=root,
-                )
                 generated.append(
-                    _record_asset_voice(
+                    attach_narration_audio(
                         project_id,
                         scene.id,
+                        output,
                         language=language,
                         voice_name=voice_name,
                         root=root,
                     )
                 )
-            except NarrationSynthesisError:
-                raise
             except Exception as exc:
                 raise NarrationSynthesisError(
                     f"could not register narration audio for scene {scene.id}: {exc}"
