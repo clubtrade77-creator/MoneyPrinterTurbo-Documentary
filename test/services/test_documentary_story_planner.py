@@ -170,6 +170,8 @@ def test_build_story_planner_prompt_keeps_evidence_ids_and_injection_boundary():
     assert "The requested total length is exactly 120 seconds." in prompt
     assert "between 78 and 162 seconds" in prompt
     assert "Do not pad weak evidence with invented facts" in prompt
+    assert 'Every beat "id" MUST use the exact form "beat_<number>"' in prompt
+    assert 'Never use shortened ids such as "b1" or "b2"' in prompt
 
 
 def test_build_story_planner_prompt_accepts_short_grounded_smoke_target():
@@ -217,6 +219,17 @@ def test_parse_story_plan_response_accepts_json_code_fence():
     assert plan.title == "The Traffic Stop"
     assert plan.beats[0].purpose == NarrativePurpose.hook
     assert len(plan.beats) == 3
+
+
+def test_parse_story_plan_response_normalizes_compact_beat_ids():
+    payload = _plan_payload()
+    payload["beats"][0]["id"] = "b1"
+    payload["beats"][1]["id"] = "b2"
+    payload["beats"][2]["id"] = "b3"
+
+    plan = parse_story_plan_response(json.dumps(payload))
+
+    assert [beat.id for beat in plan.beats] == ["beat_1", "beat_2", "beat_3"]
 
 
 def test_parse_story_plan_response_rejects_non_json():
