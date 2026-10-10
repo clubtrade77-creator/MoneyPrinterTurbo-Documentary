@@ -217,6 +217,56 @@ def test_attach_local_copy_preserves_original_upload_filename(
     assert attached.original_filename == "official-bodycam.mp4"
 
 
+def test_update_scene_narration_changes_only_real_edits(tmp_path: Path):
+    project = create_project(
+        "Narration edits",
+        project_id="doc_narration_edits",
+        root=tmp_path,
+    )
+    project.plan.scenes = [
+        DocumentaryScene(
+            id="scene_edit",
+            scene_type=SceneType.narration_over_source,
+            source_id="",
+            source_start=0.0,
+            source_end=3.0,
+            narration_text="Original text",
+        )
+    ]
+    save_project(project, tmp_path)
+    before = load_project(project.id, tmp_path)
+
+    changed = update_scene_narration(
+        project.id,
+        {"scene_edit": "Shorter narration"},
+        root=tmp_path,
+    )
+    assert changed.plan.scenes[0].narration_text == "Shorter narration"
+    assert changed.revision == before.revision + 1
+
+    unchanged = update_scene_narration(
+        project.id,
+        {"scene_edit": "Shorter narration"},
+        root=tmp_path,
+    )
+    assert unchanged.revision == changed.revision
+
+
+def test_update_scene_narration_rejects_unknown_scene(tmp_path: Path):
+    project = create_project(
+        "Narration unknown scene",
+        project_id="doc_narration_unknown",
+        root=tmp_path,
+    )
+
+    with pytest.raises(ValueError, match="unknown scene"):
+        update_scene_narration(
+            project.id,
+            {"missing_scene": "Text"},
+            root=tmp_path,
+        )
+
+
 def test_attach_local_file_copies_and_registers_source(tmp_path: Path):
     project = create_project(
         "Local Case", project_id="doc_local_case", root=tmp_path
