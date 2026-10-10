@@ -1099,6 +1099,110 @@ def _render_project_overview(project, tr: Tr) -> None:
     )
 
 
+def _render_rights_review(project, tr: Tr) -> None:
+    if not project.sources:
+        return
+
+    referenced_source_ids = {
+        scene.source_id
+        for scene in project.plan.scenes
+        if scene.source_id
+    }
+    review_sources = [
+        source
+        for source in project.sources
+        if source.id in referenced_source_ids
+        or source.rights_status == RightsStatus.unknown_review_required
+    ]
+    if not review_sources:
+        return
+
+    with st.expander(
+        tr("Documentary Rights Review"),
+        expanded=any(
+            source.rights_status == RightsStatus.unknown_review_required
+            for source in review_sources
+        ),
+    ):
+        st.caption(tr("Documentary Rights Review Help"))
+        source_by_id = {source.id: source for source in review_sources}
+        source_id = st.selectbox(
+            tr("Documentary Rights Review Source"),
+            options=list(source_by_id),
+            format_func=lambda value: (
+                source_by_id[value].title
+                or source_by_id[value].original_filename
+                or value
+            ),
+            key=f"documentary_rights_review_source_{project.id}",
+        )
+        source = source_by_id[source_id]
+
+        if source.source_url:
+            st.link_button(
+                tr("Documentary Rights Review Open Source"),
+                source.source_url,
+                width="stretch",
+            )
+
+        statuses = list(_RIGHTS_STATUSES)
+        current_index = (
+            statuses.index(source.rights_status)
+            if source.rights_status in statuses
+            else 0
+        )
+        rights_status = st.selectbox(
+            tr("Documentary Rights"),
+            options=statuses,
+            index=current_index,
+            format_func=lambda value: tr(_RIGHTS_LABELS[value]),
+            key=(
+                "documentary_rights_review_status_"
+                f"{project.id}_{source.id}_{project.revision}"
+            ),
+        )
+        rights_note = st.text_area(
+            tr("Documentary Rights Note"),
+            value=source.rights_note,
+            height=100,
+            key=(
+                "documentary_rights_review_note_"
+                f"{project.id}_{source.id}_{project.revision}"
+            ),
+        )
+
+        changed = (
+            rights_status != source.rights_status
+            or rights_note.strip() != source.rights_note
+        )
+        if rights_status != RightsStatus.unknown_review_required:
+            st.warning(tr("Documentary Rights Confirmation Warning"))
+
+        if st.button(
+            tr("Documentary Rights Save"),
+            type="primary",
+            width="stretch",
+            disabled=not changed,
+            key=f"documentary_rights_review_save_{project.id}_{source.id}",
+        ):
+            try:
+                update_source_rights(
+                    project.id,
+                    source.id,
+                    rights_status,
+                    rights_note=rights_note,
+                )
+            except (OSError, ValueError) as exc:
+                st.error(
+                    tr("Documentary Rights Save Failed").format(
+                        error=str(exc)
+                    )
+                )
+            else:
+                st.success(tr("Documentary Rights Saved"))
+                st.rerun()
+
+
 def _render_external_source_local_copy(project, tr: Tr) -> None:
     external_video_sources = [
         source
@@ -1784,7 +1888,12 @@ def _render_master_video(project, tr: Tr) -> None:
 
     with st.expander(tr("Documentary Render"), expanded=True):
         output_path = documentary_render_path(project.id)
+        preview_path = documentary_preview_path(project.id)
         current_render = _render_output_is_current(project.id)
+        current_preview = _render_output_is_current(
+            project.id,
+            preview=True,
+        )
 
         if output_path.is_file():
             if current_render:
@@ -1792,6 +1901,13 @@ def _render_master_video(project, tr: Tr) -> None:
                 st.video(str(output_path))
             else:
                 st.warning(tr("Documentary Render Stale"))
+
+        if preview_path.is_file():
+            if current_preview:
+                st.info(tr("Documentary Preview Current"))
+                st.video(str(preview_path))
+            else:
+                st.warning(tr("Documentary Preview Stale"))
 
         st.caption(
             tr("Documentary Render Settings").format(
@@ -1802,11 +1918,44 @@ def _render_master_video(project, tr: Tr) -> None:
             )
         )
 
-        readiness_issues = documentary_render_readiness_issues(project.id)
-        if readiness_issues:
+        final_issues = documentary_render_readiness_issues(project.id)
+        preview_issues = documentary_render_readiness_issues(
+            project.id,
+            require_publishable_rights=False,
+        )
+
+        if final_issues:
             st.warning(tr("Documentary Render Not Ready"))
-            for issue in readiness_issues:
+            for issue in final_issues:
                 st.caption(f"• {issue}")
+
+        if st.button(
+            (
+                tr("Documentary Preview Again")
+                if preview_path.is_file()
+                else tr("Documentary Preview Build")
+            ),
+            width="stretch",
+            disabled=bool(preview_issues),
+            key=f"documentary_preview_{project.id}",
+        ):
+            try:
+                with st.spinner(tr("Documentary Rendering")):
+                    result = render_documentary(
+                        project.id,
+                        preview=True,
+                    )
+            except (OSError, ValueError, DocumentaryRenderError) as exc:
+                st.error(
+                    tr("Documentary Render Failed").format(error=str(exc))
+                )
+            else:
+                st.success(
+                    tr("Documentary Preview Complete").format(
+                        filename=result.name
+                    )
+                )
+                st.rerun()
 
         button_label = (
             tr("Documentary Render Again")
@@ -1817,7 +1966,7 @@ def _render_master_video(project, tr: Tr) -> None:
             button_label,
             type="primary",
             width="stretch",
-            disabled=bool(readiness_issues),
+            disabled=bool(final_issues),
             key=f"documentary_render_{project.id}",
         ):
             try:
@@ -2238,6 +2387,7 @@ def render_documentary_application(tr: Tr) -> None:
     project = load_project(selected_project_id)
 
     _render_project_overview(project, tr)
+    _render_rights_review(project, tr)
     _render_external_source_local_copy(project, tr)
     _render_source_upload(project, tr)
     _render_transcription(project, tr)
