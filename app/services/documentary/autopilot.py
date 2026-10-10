@@ -6,7 +6,7 @@ from typing import Callable
 
 from loguru import logger
 
-from app.models.documentary import AudioMode
+from app.models.documentary import AudioMode, SourceAsset
 from app.services import subtitle as subtitle_service
 from app.services import voice as voice_service
 from app.services.documentary.clip_selector import select_clips
@@ -137,13 +137,17 @@ def _choose_story(candidates: list[StoryCandidate]) -> StoryCandidate:
     )
 
 
-def _hunt_source(
-    project_id: str,
+@dataclass(frozen=True)
+class _SourceBundle:
+    media_source: SourceAsset
+    supporting_sources: tuple[SourceAsset, ...] = ()
+
+
+def _discover_source_bundle(
     story: StoryCandidate,
     *,
     limit: int,
-    root=None,
-):
+) -> _SourceBundle:
     agency_hints = ()
     official_urls = ()
     try:
@@ -165,8 +169,7 @@ def _hunt_source(
     except (OSError, ValueError, SourceHunterError):
         web_candidates = []
 
-    # Embedded media on an official source page has the strongest provenance signal,
-    # so prefer it before a generic platform search.
+    # Prefer media embedded on an official source page when available.
     for web_candidate in web_candidates[:3]:
         if web_candidate.official_score < 35:
             continue
@@ -180,14 +183,13 @@ def _hunt_source(
             continue
         if not embedded:
             continue
-        web_source = candidate_to_web_source(web_candidate)
-        add_source(project_id, web_source, root=root)
-        media_source = embedded_media_to_source(
-            embedded[0],
-            title=web_candidate.title,
+        return _SourceBundle(
+            media_source=embedded_media_to_source(
+                embedded[0],
+                title=web_candidate.title,
+            ),
+            supporting_sources=(candidate_to_web_source(web_candidate),),
         )
-        add_source(project_id, media_source, root=root)
-        return media_source
 
     try:
         video_candidates = find_source_videos(
@@ -198,35 +200,99 @@ def _hunt_source(
     except (OSError, ValueError, SourceHunterError) as exc:
         raise AutopilotError(
             "sources",
-            f"autopilot could not find source video: {exc}",
-            project_id=project_id,
+            f"autopilot could not search source video: {exc}",
         ) from exc
 
-    usable = [
-        candidate
-        for candidate in video_candidates
-        if candidate.source_quality_score > 0 or candidate.score >= 50
-    ]
-    if not usable:
+    # find_source_videos() already performs strict event matching and rejects
+    # ordinary news recaps. Do not apply a second arbitrary score threshold here.
+    if not video_candidates:
         raise AutopilotError(
             "sources",
-            "autopilot found no source video with enough confidence",
-            project_id=project_id,
+            "autopilot found no matching source video for this story",
         )
 
     selected = max(
-        usable,
+        video_candidates,
         key=lambda item: (
             item.source_quality_score > 0,
             item.score,
             item.source_quality_score,
             item.video_signal_score,
             item.freshness_score,
+            item.title_overlap_score,
         ),
     )
-    source = candidate_to_youtube_source(selected)
-    add_source(project_id, source, root=root)
-    return source
+    return _SourceBundle(
+        media_source=candidate_to_youtube_source(selected),
+    )
+
+
+def _persist_source_bundle(
+    project_id: str,
+    bundle: _SourceBundle,
+    *,
+    root=None,
+) -> SourceAsset:
+    for source in (*bundle.supporting_sources, bundle.media_source):
+        try:
+            add_source(project_id, source, root=root)
+        except ValueError as exc:
+            if "source already exists in project" not in str(exc).lower():
+                raise
+    return bundle.media_source
+
+
+def _hunt_source(
+    project_id: str,
+    story: StoryCandidate,
+    *,
+    limit: int,
+    root=None,
+):
+    bundle = _discover_source_bundle(story, limit=limit)
+    return _persist_source_bundle(project_id, bundle, root=root)
+
+
+def _rank_stories(candidates: list[StoryCandidate]) -> list[StoryCandidate]:
+    return sorted(
+        candidates,
+        key=lambda item: (
+            item.score,
+            item.footage_score,
+            item.freshness_score,
+            item.story_score,
+        ),
+        reverse=True,
+    )
+
+
+def _choose_story_with_source(
+    candidates: list[StoryCandidate],
+    *,
+    source_limit: int,
+    max_story_attempts: int = 5,
+) -> tuple[StoryCandidate, _SourceBundle]:
+    errors = []
+    for story in _rank_stories(candidates)[:max_story_attempts]:
+        try:
+            bundle = _discover_source_bundle(story, limit=source_limit)
+            return story, bundle
+        except AutopilotError as exc:
+            errors.append(f"{story.title}: {exc}")
+            logger.info(
+                "Documentary Autopilot skipped story without source video: "
+                f"title={story.title!r}, reason={exc}"
+            )
+
+    detail = " | ".join(errors)
+    if len(detail) > 3000:
+        detail = detail[-3000:]
+    raise AutopilotError(
+        "sources",
+        "autopilot could not find a story with usable source video"
+        + (f": {detail}" if detail else ""),
+    )
+
 
 
 def _fallback_video_sources(
@@ -384,7 +450,18 @@ def run_autopilot(
             lookback_hours=profile.lookback_hours,
             limit=profile.discovery_limit,
         )
-        story = _choose_story(stories)
+        if not stories:
+            raise AutopilotError(
+                "story",
+                "autopilot found no usable story candidates",
+            )
+
+        stage = "sources"
+        _emit(progress, stage, "Finding a story with source video", 0.13)
+        story, source_bundle = _choose_story_with_source(
+            stories,
+            source_limit=profile.source_limit,
+        )
 
         project = create_project(
             story.title,
@@ -393,13 +470,9 @@ def run_autopilot(
         )
         project_id = project.id
         add_source(project.id, candidate_to_source(story), root=root)
-
-        stage = "sources"
-        _emit(progress, stage, "Finding original or authoritative video", 0.13)
-        source = _hunt_source(
+        source = _persist_source_bundle(
             project.id,
-            story,
-            limit=profile.source_limit,
+            source_bundle,
             root=root,
         )
 
