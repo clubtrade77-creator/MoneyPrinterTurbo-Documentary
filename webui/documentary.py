@@ -114,13 +114,11 @@ _RIGHTS_LABELS = {
     RightsStatus.public_domain: "Documentary Rights Public Domain",
 }
 
-_GUIDED_STEPS = (
-    ("story", "Documentary Guided Step Story"),
-    ("materials", "Documentary Guided Step Materials"),
-    ("script", "Documentary Guided Step Script"),
-    ("voice", "Documentary Guided Step Voice"),
-    ("preview", "Documentary Guided Step Preview"),
-    ("ready", "Documentary Guided Step Ready"),
+_SIMPLE_SECTIONS = (
+    ("story", "Documentary Simple Section Story"),
+    ("materials", "Documentary Simple Section Materials"),
+    ("production", "Documentary Simple Section Production"),
+    ("video", "Documentary Simple Section Video"),
 )
 
 
@@ -1108,39 +1106,98 @@ def _documentary_guided_step(project) -> str:
     return "ready"
 
 
-def _render_guided_navigation(project, tr: Tr) -> str:
-    step_ids = [step_id for step_id, _ in _GUIDED_STEPS]
-    labels = {step_id: tr(label_key) for step_id, label_key in _GUIDED_STEPS}
-    recommended = _documentary_guided_step(project)
-    state_key = f"documentary_guided_step_{project.id}"
-    if state_key not in st.session_state:
+def _documentary_simple_section(project) -> str:
+    guided_step = _documentary_guided_step(project)
+    if guided_step == "story":
+        return "story"
+    if guided_step == "materials":
+        return "materials"
+    if guided_step in {"script", "voice"}:
+        return "production"
+    return "video"
+
+
+def _documentary_section_status(project, section_id: str, tr: Tr) -> str:
+    if section_id == "story":
+        return tr("Documentary Simple Story Selected")
+
+    if section_id == "materials":
+        media_sources = [
+            source
+            for source in project.sources
+            if not source.id.startswith("story_")
+        ]
+        local_count = sum(1 for source in media_sources if source.has_local_copy)
+        if not media_sources:
+            return tr("Documentary Simple Materials Missing")
+        return tr("Documentary Simple Materials Status").format(
+            ready=local_count,
+            total=len(media_sources),
+        )
+
+    if section_id == "production":
+        if not project.plan.scenes:
+            return tr("Documentary Simple Script Missing")
+        narrated_scenes = [
+            scene
+            for scene in project.plan.scenes
+            if scene.audio_mode in {AudioMode.narration, AudioMode.mixed}
+        ]
+        if any(not scene.narration_text.strip() for scene in narrated_scenes):
+            return tr("Documentary Simple Script Draft")
+        master_language = project.master_language.lower()
+        available_audio = {
+            (asset.scene_id, asset.language.lower())
+            for asset in project.narration_audio
+            if asset.local_path
+        }
+        if narrated_scenes and any(
+            (scene.id, master_language) not in available_audio
+            for scene in narrated_scenes
+        ):
+            return tr("Documentary Simple Voice Missing")
+        return tr("Documentary Simple Production Ready")
+
+    if _render_output_is_current(project.id):
+        return tr("Documentary Simple Final Ready")
+    if _render_output_is_current(project.id, preview=True):
+        return tr("Documentary Simple Preview Ready")
+    return tr("Documentary Simple Video Missing")
+
+
+def _render_simple_dashboard(project, tr: Tr) -> str:
+    recommended = _documentary_simple_section(project)
+    state_key = f"documentary_simple_section_{project.id}"
+    if st.session_state.get(state_key) not in {
+        section_id for section_id, _ in _SIMPLE_SECTIONS
+    }:
         st.session_state[state_key] = recommended
 
-    recommended_index = step_ids.index(recommended)
-    st.progress((recommended_index + 1) / len(step_ids))
-    st.caption(
-        tr("Documentary Guided Current Step").format(
-            step=labels[recommended]
-        )
-    )
-    return st.radio(
-        tr("Documentary Guided Navigation"),
-        options=step_ids,
-        horizontal=True,
-        format_func=lambda step_id: labels[step_id],
-        key=state_key,
-        label_visibility="collapsed",
-    )
+    cols = st.columns(4)
+    for index, (section_id, label_key) in enumerate(_SIMPLE_SECTIONS):
+        with cols[index]:
+            with st.container(border=True):
+                st.markdown(f"### {tr(label_key)}")
+                st.caption(_documentary_section_status(project, section_id, tr))
+                button_label = (
+                    tr("Documentary Simple Continue")
+                    if section_id == recommended
+                    else tr("Documentary Simple Open")
+                )
+                if st.button(
+                    button_label,
+                    type="primary" if section_id == recommended else "secondary",
+                    width="stretch",
+                    key=f"documentary_simple_open_{project.id}_{section_id}",
+                ):
+                    st.session_state[state_key] = section_id
+                    st.rerun()
+
+    return st.session_state[state_key]
 
 
 def _render_guided_project_summary(project, tr: Tr) -> None:
     st.subheader(project.title)
-    local_count = sum(1 for source in project.sources if source.has_local_copy)
-    cols = st.columns(3)
-    cols[0].metric(tr("Documentary Sources"), len(project.sources))
-    cols[1].metric(tr("Documentary Guided Local Materials"), local_count)
-    cols[2].metric(tr("Documentary Scenes"), len(project.plan.scenes))
-
 
 def _render_guided_materials(project, tr: Tr) -> None:
     st.markdown(f"### {tr('Documentary Guided Materials Title')}")
@@ -2531,11 +2588,12 @@ def render_documentary_application(tr: Tr) -> None:
     st.header(tr("Documentary Mode"))
     st.caption(tr("Documentary Mode Description"))
 
-    developer_mode = st.checkbox(
-        tr("Documentary Developer Mode"),
-        value=False,
-        help=tr("Documentary Developer Mode Help"),
-    )
+    with st.expander(tr("Documentary Simple Advanced"), expanded=False):
+        developer_mode = st.checkbox(
+            tr("Documentary Developer Mode"),
+            value=False,
+            help=tr("Documentary Developer Mode Help"),
+        )
 
     projects = list_projects()
     if not projects:
@@ -2580,8 +2638,7 @@ def render_documentary_application(tr: Tr) -> None:
         _render_localized_versions(project, tr)
         return
 
-    _render_guided_project_summary(project, tr)
-    selected_step = _render_guided_navigation(project, tr)
+    selected_step = _render_simple_dashboard(project, tr)
 
     if selected_step == "story":
         st.markdown(f"### {tr('Documentary Guided Story Title')}")
@@ -2598,29 +2655,17 @@ def render_documentary_application(tr: Tr) -> None:
         _render_transcription(project, tr, simple=True)
         return
 
-    if selected_step == "script":
-        st.markdown(f"### {tr('Documentary Guided Script Title')}")
-        st.caption(tr("Documentary Guided Script Help"))
+    if selected_step == "production":
+        st.markdown(f"### {tr('Documentary Simple Section Production')}")
+        st.caption(tr("Documentary Simple Production Help"))
         _render_story_planner(project, tr)
         _render_clip_selector(project, tr)
         project = load_project(selected_project_id)
-        _render_narration_writer(project, tr, show_voice=False)
-        return
-
-    if selected_step == "voice":
-        st.markdown(f"### {tr('Documentary Guided Voice Title')}")
-        st.caption(tr("Documentary Guided Voice Help"))
         _render_narration_writer(project, tr, show_voice=True)
         return
 
-    if selected_step == "preview":
-        st.markdown(f"### {tr('Documentary Guided Preview Title')}")
-        st.caption(tr("Documentary Guided Preview Help"))
-        _render_master_video(project, tr, mode="preview")
-        return
-
-    st.markdown(f"### {tr('Documentary Guided Ready Title')}")
-    st.caption(tr("Documentary Guided Ready Help"))
-    _render_master_video(project, tr, mode="final")
+    st.markdown(f"### {tr('Documentary Simple Section Video')}")
+    st.caption(tr("Documentary Simple Video Help"))
+    _render_master_video(project, tr)
     project = load_project(selected_project_id)
     _render_localized_versions(project, tr)
