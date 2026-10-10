@@ -647,11 +647,12 @@ def run_autopilot(
         )
         model = subtitle_service.get_whisper_model("small")
 
-        story_attempts = [story] + [
-            candidate
-            for candidate in _published_footage_stories(stories)
-            if candidate is not story
+        remaining_stories = [
+            candidate for candidate in stories if candidate is not story
         ]
+        story_attempts = [story] + _published_footage_stories(
+            remaining_stories
+        )
         transcription_errors = []
         transcript = None
 
