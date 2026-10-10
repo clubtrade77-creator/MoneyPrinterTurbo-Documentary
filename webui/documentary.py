@@ -977,7 +977,7 @@ def _render_external_source_local_copy(project, tr: Tr) -> None:
                     temp_path,
                     original_filename=upload.name,
                 )
-            except (OSError, ValueError) as exc:
+            except Exception as exc:
                 st.error(
                     tr("Documentary Attach Local Copy Failed").format(
                         error=str(exc)
