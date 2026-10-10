@@ -267,17 +267,98 @@ def parse_story_plan_response(
         target_duration_seconds=target_duration_seconds,
     )
 
+    if target_duration_seconds is not None:
+        payload["target_duration_seconds"] = float(target_duration_seconds)
+    elif "target_duration_seconds" not in payload:
+        for alias in ("total_duration", "total_duration_seconds", "duration"):
+            if alias in payload:
+                payload["target_duration_seconds"] = payload[alias]
+                break
+    payload.pop("total_duration", None)
+    payload.pop("total_duration_seconds", None)
+    if "beats" in payload:
+        payload.pop("duration", None)
+
     beats = payload.get("beats")
     if isinstance(beats, list):
-        for beat in beats:
+        for index, beat in enumerate(beats, start=1):
             if not isinstance(beat, dict):
                 continue
+
             beat_id = str(beat.get("id") or "").strip()
-            if re.fullmatch(r"b\d{1,3}", beat_id, re.IGNORECASE):
+            if not beat_id:
+                beat["id"] = f"beat_{index:02d}"
+            elif re.fullmatch(r"b\d{1,3}", beat_id, re.IGNORECASE):
                 beat["id"] = f"beat_{beat_id[1:]}"
+
             purpose = str(beat.get("purpose") or "").strip().lower()
             if purpose in _PURPOSE_ALIASES:
                 beat["purpose"] = _PURPOSE_ALIASES[purpose]
+
+            raw_original_audio = beat.pop("original_audio", None)
+            if (
+                "original_audio_priority" not in beat
+                and raw_original_audio is not None
+            ):
+                beat["original_audio_priority"] = (
+                    raw_original_audio
+                    if isinstance(raw_original_audio, bool)
+                    else str(raw_original_audio).strip().lower() == "true"
+                )
+
+            if "target_duration_seconds" not in beat:
+                for alias in ("duration_seconds", "duration"):
+                    if alias in beat:
+                        beat["target_duration_seconds"] = beat[alias]
+                        break
+            beat.pop("duration_seconds", None)
+            beat.pop("duration", None)
+
+            if "narration_goal" not in beat and "narration" in beat:
+                beat["narration_goal"] = beat["narration"]
+            beat.pop("narration", None)
+
+            if "summary" not in beat:
+                beat["summary"] = _first_nonempty_text(
+                    beat.get("description"),
+                    beat.get("narration_goal"),
+                    beat.get("title"),
+                )
+            beat.pop("description", None)
+
+            if "title" not in beat:
+                beat["title"] = _first_nonempty_text(
+                    beat.get("summary"),
+                    beat.get("narration_goal"),
+                    beat.get("purpose"),
+                )[:200]
+
+            if "narration_goal" not in beat:
+                beat["narration_goal"] = _first_nonempty_text(
+                    beat.get("summary"),
+                    beat.get("title"),
+                )
+
+            evidence = beat.get("evidence")
+            if isinstance(evidence, list):
+                for item in evidence:
+                    if not isinstance(item, dict):
+                        continue
+                    if "segment_ids" not in item and "segments" in item:
+                        item["segment_ids"] = item["segments"]
+                    item.pop("segments", None)
+
+        if not isinstance(payload.get("hook"), str) or not payload["hook"].strip():
+            first = next(
+                (beat for beat in beats if isinstance(beat, dict)),
+                None,
+            )
+            if first is not None:
+                payload["hook"] = _first_nonempty_text(
+                    first.get("summary"),
+                    first.get("title"),
+                    first.get("narration_goal"),
+                )
 
     try:
         return StoryPlan.model_validate(payload)
@@ -412,6 +493,11 @@ dramatic, or similar unless the transcript itself supports that descriptor.
 Each beat "target_duration_seconds" must be greater than 0 and at most 180.
 Every beat "id" MUST use the exact form "beat_<number>", for example
 "beat_01", "beat_02", "beat_03". Never use shortened ids such as "b1" or "b2".
+Use the exact field names from the schema: "target_duration_seconds" (never
+"duration" or "total_duration") and evidence "segment_ids" (never "segments").
+Every beat MUST include "title". The top-level "hook" MUST be a string.
+For evidence "source_id", copy an exact source_id from TRANSCRIPT EVIDENCE;
+never use placeholders such as "user", "source", or "video".
 
 OUTPUT:
 Return exactly one JSON object and nothing else, with this shape.
@@ -682,12 +768,36 @@ def _load_transcripts_for_planning(
     return transcripts
 
 
+def _normalize_single_source_evidence_aliases(
+    plan: StoryPlan,
+    transcripts: list[DocumentaryTranscript],
+) -> None:
+    if len(transcripts) != 1:
+        return
+
+    actual_source_id = transcripts[0].source_id
+    placeholders = {
+        "user",
+        "source",
+        "video",
+        "input",
+        "transcript",
+        "source_video",
+        "user_video",
+    }
+    for beat in plan.beats:
+        for evidence in beat.evidence:
+            if evidence.source_id.strip().lower() in placeholders:
+                evidence.source_id = actual_source_id
+
+
 def _validate_generated_plan(
     plan: StoryPlan,
     *,
     target_duration_seconds: float,
     transcripts: list[DocumentaryTranscript],
 ) -> None:
+    _normalize_single_source_evidence_aliases(plan, transcripts)
     if not math.isclose(
         plan.target_duration_seconds,
         target_duration_seconds,
