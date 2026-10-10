@@ -179,6 +179,15 @@ def _render_output_is_current(
     render_language = (language or master_language).lower()
     localized = render_language != master_language
 
+    if localized:
+        try:
+            load_localization_plan(
+                project_id,
+                render_language,
+            )
+        except (FileNotFoundError, LocalizationError):
+            return False
+
     output = documentary_render_path(
         project_id,
         language=render_language if localized else None,
