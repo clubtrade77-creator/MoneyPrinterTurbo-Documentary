@@ -194,3 +194,41 @@ def test_synthesis_wraps_tts_provider_errors(tmp_path, monkeypatch):
             "en-US-TestVoice",
             root=tmp_path,
         )
+
+
+def test_synthesis_rejects_scene_changed_while_tts_is_running(
+    tmp_path,
+    monkeypatch,
+):
+    project = _make_project(tmp_path)
+
+    def mutating_tts(**kwargs):
+        Path(kwargs["voice_file"]).write_bytes(b"audio")
+        changed = load_project(project.id, tmp_path)
+        changed.plan.scenes[0].narration_text = "Changed while TTS was running."
+        save_project(changed, tmp_path)
+        return object()
+
+    monkeypatch.setattr(
+        narration_synthesis.voice_service,
+        "tts",
+        mutating_tts,
+    )
+    monkeypatch.setattr(
+        narration_synthesis.voice_service,
+        "get_audio_duration",
+        lambda path: 2.0,
+    )
+
+    with pytest.raises(
+        narration_synthesis.NarrationSynthesisError,
+        match="scene changed during narration synthesis",
+    ):
+        narration_synthesis.synthesize_narration(
+            project.id,
+            "en-US-TestVoice",
+            root=tmp_path,
+        )
+
+    updated = load_project(project.id, tmp_path)
+    assert updated.narration_audio == []
