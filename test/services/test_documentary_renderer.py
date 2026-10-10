@@ -23,6 +23,7 @@ from app.services.documentary.project import (
 from app.services.documentary.renderer import (
     DocumentaryRenderError,
     build_documentary_render_command,
+    documentary_preview_path,
     documentary_render_path,
     documentary_render_readiness_issues,
     render_documentary,
@@ -96,6 +97,60 @@ def test_render_readiness_accepts_valid_original_scene(tmp_path: Path):
         project.id,
         root=tmp_path,
     ) == []
+
+
+def test_final_render_requires_cleared_publication_rights(tmp_path: Path):
+    project, source, _ = _project_with_video_source(tmp_path, has_audio=True)
+    source.rights_status = RightsStatus.unknown_review_required
+    project.sources = [source]
+    _save_scene(project, source, tmp_path)
+
+    issues = documentary_render_readiness_issues(
+        project.id,
+        root=tmp_path,
+    )
+    assert any("publication rights require review" in issue for issue in issues)
+
+    preview_issues = documentary_render_readiness_issues(
+        project.id,
+        require_publishable_rights=False,
+        root=tmp_path,
+    )
+    assert preview_issues == []
+
+    with pytest.raises(
+        DocumentaryRenderError,
+        match="publication rights require review",
+    ):
+        build_documentary_render_command(
+            project.id,
+            root=tmp_path,
+        )
+
+    preview_command = build_documentary_render_command(
+        project.id,
+        require_publishable_rights=False,
+        root=tmp_path,
+    )
+    assert preview_command
+
+
+def test_preview_render_path_is_separate_from_final_master(tmp_path: Path):
+    project, _, _ = _project_with_video_source(tmp_path)
+
+    assert documentary_render_path(
+        project.id,
+        tmp_path,
+    ).name == "master.mp4"
+    assert documentary_preview_path(
+        project.id,
+        tmp_path,
+    ).name == "preview.mp4"
+    assert documentary_preview_path(
+        project.id,
+        tmp_path,
+        language="ru",
+    ).name == "preview-ru.mp4"
 
 
 def test_render_readiness_reports_missing_narration_audio(tmp_path: Path):
