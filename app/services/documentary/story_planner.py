@@ -145,17 +145,26 @@ def _repair_section_map_payload(
             _PURPOSE_ALIASES.get(raw_purpose, raw_purpose),
         )
 
-        if "original_audio_priority" not in repaired and "original_audio" in repaired:
-            repaired["original_audio_priority"] = bool(repaired.pop("original_audio"))
+        raw_original_audio = repaired.pop("original_audio", None)
+        if "original_audio_priority" not in repaired and raw_original_audio is not None:
+            if isinstance(raw_original_audio, bool):
+                repaired["original_audio_priority"] = raw_original_audio
+            else:
+                repaired["original_audio_priority"] = (
+                    str(raw_original_audio).strip().lower() == "true"
+                )
 
         if "target_duration_seconds" not in repaired:
             for alias in ("duration_seconds", "duration"):
                 if alias in repaired:
-                    repaired["target_duration_seconds"] = repaired.pop(alias)
+                    repaired["target_duration_seconds"] = repaired[alias]
                     break
+        repaired.pop("duration_seconds", None)
+        repaired.pop("duration", None)
 
         if "narration_goal" not in repaired and "narration" in repaired:
-            repaired["narration_goal"] = repaired.pop("narration")
+            repaired["narration_goal"] = repaired["narration"]
+        repaired.pop("narration", None)
 
         if "summary" not in repaired:
             repaired["summary"] = _first_nonempty_text(
@@ -171,9 +180,9 @@ def _repair_section_map_payload(
                 repaired.get("title"),
             )
 
+        source_id = repaired.pop("source_id", None)
+        segment_ids = repaired.pop("segment_ids", None)
         if "evidence" not in repaired:
-            source_id = repaired.pop("source_id", None)
-            segment_ids = repaired.pop("segment_ids", None)
             if source_id and isinstance(segment_ids, list) and segment_ids:
                 repaired["evidence"] = [
                     {
