@@ -170,6 +170,7 @@ def test_build_story_planner_prompt_keeps_evidence_ids_and_injection_boundary():
     assert "Do not invent events" in prompt
     assert "The requested total length is exactly 120 seconds." in prompt
     assert "between 78 and 162 seconds" in prompt
+    assert "do not return a short outline" in prompt
     assert "Do not pad weak evidence with invented facts" in prompt
     assert 'Every beat "id" MUST use the exact form "beat_<number>"' in prompt
     assert 'Never use shortened ids such as "b1" or "b2"' in prompt
@@ -530,6 +531,22 @@ def test_story_plan_rejects_duration_far_from_target():
         parse_story_plan_response(json.dumps(payload))
 
 
+def test_story_plan_normalizes_duration_far_from_requested_target():
+    payload = _plan_payload()
+    for beat in payload["beats"]:
+        beat["target_duration_seconds"] = 5
+
+    plan = parse_story_plan_response(
+        json.dumps(payload),
+        target_duration_seconds=120,
+    )
+
+    assert sum(beat.target_duration_seconds for beat in plan.beats) == pytest.approx(120)
+    assert [beat.target_duration_seconds for beat in plan.beats] == pytest.approx(
+        [40, 40, 40]
+    )
+
+
 def test_validate_story_plan_evidence_rejects_unknown_segment():
     transcript = _transcript()
     plan = StoryPlan(
@@ -740,19 +757,17 @@ def test_plan_story_rejects_llm_target_duration_change(tmp_path: Path):
     assert not story_plan_path(project.id, tmp_path).exists()
 
 
-def test_plan_story_retries_invalid_duration_then_succeeds(tmp_path: Path):
+def test_plan_story_repairs_invalid_duration_without_retry(tmp_path: Path):
     project, source, _ = _register_transcript(tmp_path)
     invalid = _plan_payload(source.id)
     invalid["beats"][0]["target_duration_seconds"] = 70
     invalid["beats"][1]["target_duration_seconds"] = 70
     invalid["beats"][2]["target_duration_seconds"] = 70
-    valid = _plan_payload(source.id)
-    responses = [json.dumps(invalid), json.dumps(valid)]
     prompts = []
 
     def generate(prompt: str) -> str:
         prompts.append(prompt)
-        return responses.pop(0)
+        return json.dumps(invalid)
 
     plan = plan_story(
         project.id,
@@ -763,9 +778,8 @@ def test_plan_story_retries_invalid_duration_then_succeeds(tmp_path: Path):
     )
 
     assert plan.title == "The Traffic Stop"
-    assert len(prompts) == 2
-    assert "CORRECTION REQUIRED" in prompts[1]
-    assert "failed validation" in prompts[1]
+    assert len(prompts) == 1
+    assert sum(beat.target_duration_seconds for beat in plan.beats) == pytest.approx(120)
 
 
 def test_plan_story_does_not_retry_provider_error(tmp_path: Path):
