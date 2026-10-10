@@ -694,7 +694,7 @@
     "Documentary Autopilot Topic": "Tema, opcional",
     "Documentary Autopilot Topic Placeholder": "Déjalo vacío y el sistema elegirá la mejor historia reciente",
     "Documentary Autopilot Topic Help": "Introduce un tema para limitar la búsqueda. Déjalo vacío para selección automática.",
-    "Documentary Autopilot Defaults": "El idioma original se detecta automáticamente · salidas RU + EN + ES · 10 minutos · Cartesia si está configurado · búsqueda de 72 horas.",
+    "Documentary Autopilot Defaults": "El idioma original se detecta automáticamente · salidas RU + EN + ES · 10 minutos · Cartesia si está configurado · primero busca 72 horas y, si hace falta, hasta 7 días.",
     "Documentary Autopilot Start": "CREAR DOCUMENTAL AUTOMÁTICAMENTE",
     "Documentary Autopilot Starting": "Iniciando el autopiloto…",
     "Documentary Autopilot Running": "El autopiloto está trabajando…",
