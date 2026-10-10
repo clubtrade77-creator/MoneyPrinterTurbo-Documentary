@@ -112,7 +112,9 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
     )
 
     def fake_render(project_id, *, language=None, preview=False, root=None):
-        label = language or "ru"
+        # The source transcript is English in this test, so Autopilot promotes
+        # English to the master language and passes language=None for that preview.
+        label = language or "en"
         calls.append(f"render:{label}:{preview}")
         path = tmp_path / f"{label}-preview.mp4"
         path.write_bytes(b"preview")
