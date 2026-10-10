@@ -261,6 +261,41 @@ def test_update_source_rights_persists_and_is_idempotent(tmp_path: Path):
     assert unchanged.revision == after.revision
 
 
+def test_update_source_rights_requires_note_for_cleared_external_status(
+    tmp_path: Path,
+):
+    project = create_project(
+        "Rights note required",
+        project_id="doc_rights_note_required",
+        root=tmp_path,
+    )
+    source = SourceAsset(
+        id="source_rights_note",
+        source_type=SourceType.youtube,
+        source_url="https://www.youtube.com/watch?v=abcdefghijk",
+        rights_status=RightsStatus.unknown_review_required,
+    )
+    add_source(project.id, source, root=tmp_path)
+
+    with pytest.raises(ValueError, match="rights note is required"):
+        update_source_rights(
+            project.id,
+            source.id,
+            RightsStatus.permission_confirmed,
+            rights_note="",
+            root=tmp_path,
+        )
+
+    updated = update_source_rights(
+        project.id,
+        source.id,
+        RightsStatus.user_owned,
+        rights_note="",
+        root=tmp_path,
+    )
+    assert updated.rights_status == RightsStatus.user_owned
+
+
 def test_update_source_rights_rejects_unknown_source(tmp_path: Path):
     project = create_project(
         "Rights review missing source",
