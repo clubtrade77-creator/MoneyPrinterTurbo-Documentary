@@ -70,7 +70,10 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(
         autopilot,
         "transcribe_source",
-        lambda *a, **k: calls.append("transcribe"),
+        lambda *a, **k: (
+            calls.append("transcribe")
+            or SimpleNamespace(language="en")
+        ),
     )
     monkeypatch.setattr(
         autopilot,
@@ -120,7 +123,7 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
     result = autopilot.run_autopilot(
         autopilot.AutopilotProfile(
             topic="test",
-            target_languages=("en", "es"),
+            output_languages=("ru", "en", "es"),
         ),
         root=tmp_path,
         progress=events.append,
@@ -180,7 +183,11 @@ def test_run_autopilot_renders_final_when_rights_are_cleared(
         "get_whisper_model",
         lambda size: object(),
     )
-    monkeypatch.setattr(autopilot, "transcribe_source", lambda *a, **k: None)
+    monkeypatch.setattr(
+        autopilot,
+        "transcribe_source",
+        lambda *a, **k: SimpleNamespace(language="ru"),
+    )
     monkeypatch.setattr(autopilot, "plan_story", lambda *a, **k: None)
     monkeypatch.setattr(autopilot, "select_clips", lambda *a, **k: None)
     monkeypatch.setattr(autopilot, "write_narration", lambda *a, **k: None)
@@ -197,7 +204,7 @@ def test_run_autopilot_renders_final_when_rights_are_cleared(
     monkeypatch.setattr(autopilot, "render_documentary", fake_render)
 
     result = autopilot.run_autopilot(
-        autopilot.AutopilotProfile(target_languages=()),
+        autopilot.AutopilotProfile(output_languages=("ru",)),
         root=tmp_path,
     )
 
