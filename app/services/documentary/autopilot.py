@@ -30,6 +30,7 @@ from app.services.documentary.source_hunter import (
     candidate_to_youtube_source,
     embedded_media_to_source,
     find_embedded_media,
+    find_public_page_media,
     find_source_videos,
     find_web_sources,
     inspect_story_article,
@@ -169,16 +170,22 @@ def _discover_source_bundle(
     except (OSError, ValueError, SourceHunterError):
         web_candidates = []
 
-    # Prefer media embedded on an official source page when available.
-    for web_candidate in web_candidates[:3]:
-        if web_candidate.official_score < 35:
-            continue
+    # First inspect official pages, then any other high-confidence public
+    # Source-Hunter result for embedded Vimeo/direct video media.
+    for web_candidate in web_candidates[:5]:
         try:
-            embedded = find_embedded_media(
-                web_candidate.url,
-                limit=4,
-                timeout_seconds=6.0,
-            )
+            if web_candidate.official_score >= 35:
+                embedded = find_embedded_media(
+                    web_candidate.url,
+                    limit=4,
+                    timeout_seconds=6.0,
+                )
+            else:
+                embedded = find_public_page_media(
+                    web_candidate.url,
+                    limit=4,
+                    timeout_seconds=6.0,
+                )
         except (OSError, ValueError, SourceHunterError):
             continue
         if not embedded:
