@@ -592,7 +592,15 @@
     "Documentary Source Hunter Low Confidence": "Coincidencia de baja confianza: revisa primero la fuente manualmente.",
     "Documentary Source Hunter Embedded Media": "Contenido multimedia encontrado en la página oficial: {count}",
     "Documentary Source Hunter Direct Video": "Video directo",
-    "Documentary Source Hunter Create Embedded Project": "Crear proyecto con este contenido"
+    "Documentary Source Hunter Create Embedded Project": "Crear proyecto con este contenido",
+    "Documentary Attach Local Copy": "Adjuntar copia local a la fuente encontrada",
+    "Documentary Attach Local Copy Help": "Úsalo si Source Hunter encontró la página o el video original y obtuviste el archivo por separado. Se conservan la URL, el editor, la procedencia y el estado de derechos de la fuente existente.",
+    "Documentary Attach Local Copy Source": "Fuente encontrada",
+    "Documentary Attach Local Copy Open Source": "Abrir fuente original",
+    "Documentary Attach Local Copy File": "Copia local MP4/MOV",
+    "Documentary Attach Local Copy Button": "Adjuntar copia local",
+    "Documentary Attach Local Copy Failed": "No se pudo adjuntar la copia local: {error}",
+    "Documentary Attach Local Copy Complete": "Copia local adjuntada a la fuente {source_id}."
 
   }
 }
