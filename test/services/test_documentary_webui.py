@@ -3,6 +3,7 @@ from io import BytesIO
 
 import pytest
 
+from app.models.documentary import AudioMode
 from app.services.documentary.localization import LocalizationError
 import webui.documentary as documentary_ui
 from webui.documentary import (
