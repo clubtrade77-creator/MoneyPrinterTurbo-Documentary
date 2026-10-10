@@ -924,11 +924,13 @@ def run_autopilot(
     *,
     root: str | Path | None = None,
     progress: ProgressCallback | None = None,
+    resume_project_id: str = "",
 ) -> AutopilotResult:
-    """Create a documentary technical preview from a topic or automatic discovery.
+    """Create or resume a documentary Autopilot run.
 
-    The run intentionally produces technical previews when publication rights are
-    still unverified. Final masters stay gated by the existing renderer rights checks.
+    Expensive, validated artifacts are treated as checkpoints. A resumed run reuses
+    an existing transcript, reviewed Story Plan, deterministic Clip Plan, reviewed
+    narration, and reviewed localization plans whenever they are still current.
     """
     profile = profile or AutopilotProfile()
     initial_master_language = (
@@ -944,131 +946,275 @@ def run_autopilot(
     )
     project_id = ""
     stage = "story"
+    state: dict = {}
+    project = None
+    story = None
+    source = None
+    transcript = None
+    resumed = False
 
     try:
-        _emit(progress, "story", "Searching for the best story", 0.04)
-        stories = _discover_autopilot_stories(profile)
+        resume_id = str(resume_project_id or "").strip()
+        if resume_id:
+            try:
+                project = load_project(resume_id, root)
+            except (FileNotFoundError, ValueError):
+                project = None
 
-        stage = "sources"
-        _emit(progress, stage, "Finding a story with source video", 0.13)
-        story, source_bundle = _choose_story_with_source(
-            stories,
-            source_limit=profile.source_limit,
-        )
+            if project is not None:
+                project_id = project.id
+                state = _load_autopilot_state(project.id, root)
+                state_topic = str(state.get("topic") or "").strip()
+                requested_topic = str(profile.topic or "").strip()
+                if state_topic and requested_topic and state_topic != requested_topic:
+                    raise AutopilotError(
+                        "resume",
+                        "saved Autopilot project belongs to a different topic",
+                        project_id=project.id,
+                    )
 
-        project = create_project(
-            story.title,
-            master_language=initial_master_language,
-            root=root,
-        )
-        project_id = project.id
-        add_source(project.id, candidate_to_source(story), root=root)
-        source = _persist_source_bundle(
-            project.id,
-            source_bundle,
-            root=root,
-        )
+                story = _story_from_state(
+                    state,
+                    fallback_title=project.title,
+                )
 
-        stage = "transcription"
-        _emit(
-            progress,
-            stage,
-            "Downloading and validating source speech",
-            0.23,
-        )
-        model = subtitle_service.get_whisper_model("small")
+                saved_source_id = str(state.get("source_id") or "").strip()
+                if saved_source_id:
+                    source = next(
+                        (
+                            item
+                            for item in project.sources
+                            if item.id == saved_source_id
+                        ),
+                        None,
+                    )
+                    if source is not None:
+                        try:
+                            transcript = load_source_transcript(
+                                project.id,
+                                source.id,
+                                root=root,
+                            )
+                        except (
+                            FileNotFoundError,
+                            TranscriptionError,
+                            ValueError,
+                        ):
+                            transcript = None
 
-        remaining_stories = [
-            candidate for candidate in stories if candidate is not story
-        ]
-        story_attempts = [story] + _published_footage_stories(
-            remaining_stories
-        )
-        transcription_errors = []
-        transcript = None
+                if transcript is None:
+                    saved = _latest_saved_transcript(
+                        project.id,
+                        root=root,
+                    )
+                    if saved is not None:
+                        source, transcript = saved
 
-        for index, candidate_story in enumerate(story_attempts):
-            candidate_source = source
-            if index:
+                if source is not None and transcript is not None:
+                    source_verified = bool(state.get("source_verified"))
+                    if not (
+                        source_verified
+                        and str(state.get("source_id") or "") == source.id
+                    ):
+                        same_event, reason = _story_transcript_matches(
+                            story,
+                            transcript,
+                        )
+                        if same_event:
+                            state = _checkpoint_autopilot(
+                                project.id,
+                                state,
+                                stage="transcription",
+                                root=root,
+                                topic=requested_topic or state_topic,
+                                story=_story_state_payload(story),
+                                source_id=source.id,
+                                source_verified=True,
+                            )
+                        else:
+                            logger.warning(
+                                "Legacy Autopilot resume candidate has a mismatched "
+                                f"source and cannot be reused: {reason}"
+                            )
+                            transcript = None
+                            source = None
+
+                if source is not None and transcript is not None:
+                    resumed = True
+                    _emit(
+                        progress,
+                        "resume",
+                        "Resuming from saved transcript checkpoint",
+                        0.34,
+                    )
+
+        if not resumed:
+            _emit(progress, "story", "Searching for the best story", 0.04)
+            stories = _discover_autopilot_stories(profile)
+
+            stage = "sources"
+            _emit(progress, stage, "Finding a story with source video", 0.13)
+            story, source_bundle = _choose_story_with_source(
+                stories,
+                source_limit=profile.source_limit,
+            )
+
+            project = create_project(
+                story.title,
+                master_language=initial_master_language,
+                root=root,
+            )
+            project_id = project.id
+            add_source(project.id, candidate_to_source(story), root=root)
+            source = _persist_source_bundle(
+                project.id,
+                source_bundle,
+                root=root,
+            )
+            state = _checkpoint_autopilot(
+                project.id,
+                {},
+                stage="sources",
+                root=root,
+                topic=str(profile.topic or "").strip(),
+                story=_story_state_payload(story),
+                source_id=source.id,
+                source_verified=False,
+                output_languages=list(output_languages),
+                target_duration_seconds=profile.target_duration_seconds,
+            )
+
+            stage = "transcription"
+            _emit(
+                progress,
+                stage,
+                "Downloading and validating source speech",
+                0.23,
+            )
+            model = subtitle_service.get_whisper_model("small")
+
+            remaining_stories = [
+                candidate for candidate in stories if candidate is not story
+            ]
+            story_attempts = [story] + _published_footage_stories(
+                remaining_stories
+            )
+            transcription_errors = []
+            transcript = None
+
+            for index, candidate_story in enumerate(story_attempts):
+                candidate_source = source
+                if index:
+                    try:
+                        candidate_bundle = _discover_source_bundle(
+                            candidate_story,
+                            limit=profile.source_limit,
+                        )
+                    except AutopilotError as exc:
+                        transcription_errors.append(
+                            f"{candidate_story.title}: source search failed: {exc}"
+                        )
+                        continue
+
+                    try:
+                        add_source(
+                            project.id,
+                            candidate_to_source(candidate_story),
+                            root=root,
+                        )
+                    except ValueError as exc:
+                        if "source already exists in project" not in str(exc).lower():
+                            raise
+                    candidate_source = _persist_source_bundle(
+                        project.id,
+                        candidate_bundle,
+                        root=root,
+                    )
+
                 try:
-                    candidate_bundle = _discover_source_bundle(
-                        candidate_story,
-                        limit=profile.source_limit,
+                    candidate_source, candidate_transcript = (
+                        _fetch_and_transcribe_first_available_source(
+                            project.id,
+                            candidate_story,
+                            candidate_source,
+                            source_limit=profile.source_limit,
+                            model=model,
+                            root=root,
+                        )
                     )
                 except AutopilotError as exc:
                     transcription_errors.append(
-                        f"{candidate_story.title}: source search failed: {exc}"
+                        f"{candidate_story.title}: {exc}"
+                    )
+                    logger.info(
+                        "Documentary Autopilot skipped story without usable speech: "
+                        f"title={candidate_story.title!r}, reason={exc}"
                     )
                     continue
 
-                try:
-                    add_source(
-                        project.id,
-                        candidate_to_source(candidate_story),
-                        root=root,
-                    )
-                except ValueError as exc:
-                    if "source already exists in project" not in str(exc).lower():
-                        raise
-                candidate_source = _persist_source_bundle(
-                    project.id,
-                    candidate_bundle,
-                    root=root,
+                story = candidate_story
+                source = candidate_source
+                transcript = candidate_transcript
+                if project.title != story.title:
+                    current_project = load_project(project.id, root)
+                    current_project.title = story.title
+                    save_project(current_project, root)
+                    project = current_project
+                break
+
+            if transcript is None:
+                detail = " | ".join(transcription_errors)
+                if len(detail) > 3000:
+                    detail = detail[-3000:]
+                raise AutopilotError(
+                    "transcription",
+                    "autopilot checked available stories but found no downloadable "
+                    "source with recognizable speech"
+                    + (f": {detail}" if detail else ""),
+                    project_id=project.id,
                 )
 
-            try:
-                candidate_source, candidate_transcript = (
-                    _fetch_and_transcribe_first_available_source(
-                        project.id,
-                        candidate_story,
-                        candidate_source,
-                        source_limit=profile.source_limit,
-                        model=model,
-                        root=root,
-                    )
-                )
-            except AutopilotError as exc:
-                transcription_errors.append(
-                    f"{candidate_story.title}: {exc}"
-                )
-                logger.info(
-                    "Documentary Autopilot skipped story without usable speech: "
-                    f"title={candidate_story.title!r}, reason={exc}"
-                )
-                continue
-
-            story = candidate_story
-            source = candidate_source
-            transcript = candidate_transcript
-            if project.title != story.title:
-                current_project = load_project(project.id, root)
-                current_project.title = story.title
-                save_project(current_project, root)
-            break
-
-        if transcript is None:
-            detail = " | ".join(transcription_errors)
-            if len(detail) > 3000:
-                detail = detail[-3000:]
-            raise AutopilotError(
-                "transcription",
-                "autopilot checked available stories but found no downloadable "
-                "source with recognizable speech"
-                + (f": {detail}" if detail else ""),
-                project_id=project.id,
+            state = _checkpoint_autopilot(
+                project.id,
+                state,
+                stage="transcription",
+                root=root,
+                topic=str(profile.topic or "").strip(),
+                story=_story_state_payload(story),
+                source_id=source.id,
+                source_verified=True,
             )
 
-        _emit(progress, stage, "Analyzing speech and timecodes", 0.34)
+        if project is None or story is None or source is None or transcript is None:
+            raise AutopilotError(
+                "resume",
+                "autopilot could not restore a usable checkpoint",
+                project_id=project_id,
+            )
+
+        _emit(progress, "transcription", "Analyzing speech and timecodes", 0.34)
         detected_language = str(transcript.language or "").split("-", 1)[0].lower()
         master_language = (
             detected_language
             if detected_language in {"ru", "en", "es"}
             else initial_master_language
         )
-        if master_language != initial_master_language:
-            current_project = load_project(project.id, root)
+        current_project = load_project(project.id, root)
+        if current_project.master_language != master_language:
             current_project.master_language = master_language
             save_project(current_project, root)
+        project = load_project(project.id, root)
+
+        state = _checkpoint_autopilot(
+            project.id,
+            state,
+            stage="transcription",
+            root=root,
+            master_language=master_language,
+            source_id=source.id,
+            source_verified=True,
+            story=_story_state_payload(story),
+        )
 
         target_languages = tuple(
             language
@@ -1077,29 +1223,84 @@ def run_autopilot(
         )
 
         stage = "story_plan"
-        _emit(progress, stage, "Building the documentary story", 0.46)
-        plan_story(
-            project.id,
-            source_ids=[source.id],
-            target_duration_seconds=profile.target_duration_seconds,
-            root=root,
-        )
+        try:
+            load_story_plan(project.id, root=root)
+        except (FileNotFoundError, StoryPlannerError):
+            _emit(progress, stage, "Building the documentary story", 0.46)
+            plan_story(
+                project.id,
+                source_ids=[source.id],
+                target_duration_seconds=profile.target_duration_seconds,
+                root=root,
+            )
+            state = _checkpoint_autopilot(
+                project.id,
+                state,
+                stage="story_plan",
+                root=root,
+            )
+        else:
+            _emit(
+                progress,
+                "resume",
+                "Reusing reviewed Story Plan checkpoint",
+                0.46,
+            )
 
         stage = "clips"
-        _emit(progress, stage, "Selecting source clips", 0.57)
-        select_clips(project.id, root=root)
+        try:
+            load_clip_plan(project.id, root=root)
+            current_project = load_project(project.id, root)
+            if not current_project.plan.scenes:
+                raise ClipSelectorError("saved clip plan has no applied timeline")
+        except (FileNotFoundError, ClipSelectorError):
+            _emit(progress, stage, "Selecting source clips", 0.57)
+            select_clips(project.id, root=root)
+            state = _checkpoint_autopilot(
+                project.id,
+                state,
+                stage="clips",
+                root=root,
+            )
+        else:
+            _emit(
+                progress,
+                "resume",
+                "Reusing Clip Plan checkpoint",
+                0.57,
+            )
 
         stage = "narration"
-        _emit(progress, stage, "Writing grounded narration", 0.66)
-        write_narration(project.id, root=root)
+        if _master_narration_is_complete(project.id, root=root):
+            _emit(
+                progress,
+                "resume",
+                "Reusing reviewed narration checkpoint",
+                0.66,
+            )
+        else:
+            _emit(progress, stage, "Writing grounded narration", 0.66)
+            write_narration(project.id, root=root)
+            state = _checkpoint_autopilot(
+                project.id,
+                state,
+                stage="narration",
+                root=root,
+            )
 
         stage = "voice"
         if _project_has_narrated_scenes(project.id, root=root):
-            _emit(progress, stage, "Generating narrator audio", 0.75)
+            _emit(progress, stage, "Generating or reusing narrator audio", 0.75)
             synthesize_narration(
                 project.id,
                 _resolve_voice(master_language, profile.voice_name),
                 language=master_language,
+                root=root,
+            )
+            state = _checkpoint_autopilot(
+                project.id,
+                state,
+                stage="voice",
                 root=root,
             )
 
@@ -1111,23 +1312,50 @@ def run_autopilot(
             root=root,
         )
         previews = {master_language: str(master_preview)}
+        state = _checkpoint_autopilot(
+            project.id,
+            state,
+            stage="preview",
+            root=root,
+        )
 
         if target_languages:
             step = 0.14 / max(1, len(target_languages))
             for index, language in enumerate(target_languages):
                 stage = f"localize_{language}"
                 base_fraction = 0.84 + step * index
-                _emit(
-                    progress,
-                    stage,
-                    f"Creating {language.upper()} version",
-                    base_fraction,
-                )
-                localize_project(
-                    project.id,
-                    language,
-                    root=root,
-                )
+                try:
+                    load_localization_plan(
+                        project.id,
+                        language,
+                        root=root,
+                    )
+                except (FileNotFoundError, LocalizationError):
+                    _emit(
+                        progress,
+                        stage,
+                        f"Creating {language.upper()} version",
+                        base_fraction,
+                    )
+                    localize_project(
+                        project.id,
+                        language,
+                        root=root,
+                    )
+                    state = _checkpoint_autopilot(
+                        project.id,
+                        state,
+                        stage=stage,
+                        root=root,
+                    )
+                else:
+                    _emit(
+                        progress,
+                        "resume",
+                        f"Reusing reviewed {language.upper()} localization",
+                        base_fraction,
+                    )
+
                 if _project_has_narrated_scenes(project.id, root=root):
                     synthesize_narration(
                         project.id,
@@ -1154,23 +1382,55 @@ def run_autopilot(
             render_documentary(project.id, root=root)
             final_master_created = True
 
+        state = _checkpoint_autopilot(
+            project.id,
+            state,
+            stage="done",
+            status="done",
+            root=root,
+        )
         _emit(progress, "done", "Documentary is ready", 1.0)
         return AutopilotResult(
             project_id=project.id,
-            title=story.title,
+            title=project.title,
             source_id=source.id,
             preview_paths=previews,
             rights_review_required=rights_review_required,
             final_master_created=final_master_created,
         )
-    except AutopilotError:
+    except AutopilotError as exc:
+        if project_id:
+            try:
+                _checkpoint_autopilot(
+                    project_id,
+                    state,
+                    stage=exc.stage or stage,
+                    status="failed",
+                    root=root,
+                    last_error=str(exc),
+                )
+            except Exception:
+                pass
         raise
     except Exception as exc:
         logger.exception(
             f"Documentary Autopilot failed: stage={stage}, project_id={project_id}"
         )
+        if project_id:
+            try:
+                _checkpoint_autopilot(
+                    project_id,
+                    state,
+                    stage=stage,
+                    status="failed",
+                    root=root,
+                    last_error=str(exc),
+                )
+            except Exception:
+                pass
         raise AutopilotError(
             stage,
             str(exc) or exc.__class__.__name__,
             project_id=project_id,
         ) from exc
+
