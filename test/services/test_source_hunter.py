@@ -10,6 +10,7 @@ from app.services.documentary.source_hunter import (
     candidate_to_youtube_source,
     embedded_media_to_source,
     find_embedded_media,
+    find_public_page_media,
     find_source_videos,
     find_web_sources,
     inspect_story_article,
@@ -898,3 +899,40 @@ def test_source_hunter_converts_candidate_without_granting_rights():
     assert source.youtube_video_id == "abcdefghijk"
     assert source.rights_status == RightsStatus.unknown_review_required
     assert source.local_path == ""
+
+
+def test_source_hunter_finds_vimeo_and_direct_video_on_public_page():
+    html = """
+    <html><body>
+      <iframe src="https://player.vimeo.com/video/123456789"></iframe>
+      <video controls>
+        <source src="/media/bodycam-release.mp4" type="video/mp4">
+      </video>
+    </body></html>
+    """
+    session = _Session(_Response(html))
+
+    results = find_public_page_media(
+        "https://news.example/bodycam-story",
+        session=session,
+    )
+
+    assert [item.platform for item in results] == ["vimeo", "direct_video"]
+    assert results[0].url == "https://player.vimeo.com/video/123456789"
+    assert results[1].url == "https://news.example/media/bodycam-release.mp4"
+
+
+def test_source_hunter_rejects_private_public_page_media_url():
+    session = _Session(_Response("<html></html>"))
+
+    try:
+        find_public_page_media(
+            "http://127.0.0.1/video",
+            session=session,
+        )
+    except SourceHunterError as exc:
+        assert "safe public HTTP(S)" in str(exc)
+    else:
+        raise AssertionError("private media page URL should be rejected")
+
+    assert session.calls == []
