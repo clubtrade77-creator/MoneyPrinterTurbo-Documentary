@@ -175,6 +175,9 @@ def test_build_story_planner_prompt_keeps_evidence_ids_and_injection_boundary():
     assert 'Never invent synonyms such as "resolution"' in prompt
     assert 'Do NOT return top-level sections such as' in prompt
     assert '"investigation", "outcome", or "closing"' in prompt
+    assert '"target_duration_seconds" (never' in prompt
+    assert 'evidence "segment_ids" (never "segments")' in prompt
+    assert 'never use placeholders such as "user", "source", or "video"' in prompt
 
 
 def test_build_story_planner_prompt_accepts_short_grounded_smoke_target():
@@ -331,6 +334,128 @@ def test_parse_story_plan_response_repairs_section_map_shape():
     assert plan.beats[0].original_audio_priority is True
     assert plan.beats[0].evidence[0].segment_ids == [0]
 
+
+
+def test_parse_story_plan_response_repairs_common_field_aliases():
+    payload = {
+        "version": 1,
+        "title": "Surveillance report",
+        "angle": "A report built from the recorded source.",
+        "total_duration": 600,
+        "beats": [
+            {
+                "id": "beat_01",
+                "purpose": "hook",
+                "summary": "The report opens with surveillance footage.",
+                "duration": 30,
+                "narration_goal": "Introduce the recorded opening.",
+                "original_audio_priority": True,
+                "evidence": [
+                    {"source_id": "user", "segments": [0, 1]},
+                ],
+            },
+            {
+                "id": "beat_02",
+                "purpose": "context",
+                "summary": "The source adds context.",
+                "duration": 60,
+                "narration_goal": "Present only recorded context.",
+                "original_audio_priority": False,
+                "evidence": [
+                    {"source_id": "user", "segments": [2, 3]},
+                ],
+            },
+            {
+                "id": "beat_03",
+                "purpose": "conflict",
+                "summary": "The source describes the allegation.",
+                "duration": 90,
+                "narration_goal": "Keep the allegation attributed.",
+                "original_audio_priority": True,
+                "evidence": [
+                    {"source_id": "user", "segments": [4, 5, 6, 7, 8]},
+                ],
+            },
+            {
+                "id": "beat_04",
+                "purpose": "question",
+                "summary": "The report describes the investigation.",
+                "duration": 90,
+                "narration_goal": "Follow the investigation.",
+                "original_audio_priority": True,
+                "evidence": [
+                    {"source_id": "user", "segments": [9, 10, 11, 12]},
+                ],
+            },
+            {
+                "id": "beat_05",
+                "purpose": "payoff",
+                "summary": "The report closes with the stated outcome.",
+                "duration": 130,
+                "narration_goal": "Close with the recorded outcome.",
+                "original_audio_priority": False,
+                "evidence": [
+                    {"source_id": "user", "segments": [13, 14, 15]},
+                ],
+            },
+        ],
+    }
+
+    plan = parse_story_plan_response(
+        json.dumps(payload),
+        target_duration_seconds=600,
+    )
+
+    assert plan.target_duration_seconds == 600
+    assert plan.hook == "The report opens with surveillance footage."
+    assert plan.beats[0].title == "The report opens with surveillance footage."
+    assert plan.beats[0].target_duration_seconds == 30
+    assert plan.beats[0].evidence[0].segment_ids == [0, 1]
+    assert plan.beats[0].evidence[0].source_id == "user"
+
+
+def test_single_source_placeholder_evidence_is_normalized():
+    transcript = _transcript(source_id="youtube_real_source")
+    plan = parse_story_plan_response(
+        json.dumps(
+            {
+                "version": 1,
+                "title": "Recorded report",
+                "angle": "Recorded source.",
+                "hook": "The officer approaches the vehicle.",
+                "target_duration_seconds": 120,
+                "beats": [
+                    {
+                        "id": "beat_01",
+                        "purpose": "hook",
+                        "title": "Opening",
+                        "summary": "The officer approaches the vehicle.",
+                        "target_duration_seconds": 120,
+                        "narration_goal": "Keep to the recorded opening.",
+                        "original_audio_priority": True,
+                        "evidence": [
+                            {
+                                "source_id": "user",
+                                "segment_ids": [0],
+                                "note": "",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        target_duration_seconds=120,
+    )
+
+    from app.services.documentary.story_planner import _validate_generated_plan
+
+    _validate_generated_plan(
+        plan,
+        target_duration_seconds=120,
+        transcripts=[transcript],
+    )
+
+    assert plan.beats[0].evidence[0].source_id == "youtube_real_source"
 
 def test_parse_story_plan_response_rejects_non_json():
     with pytest.raises(StoryPlannerError, match="valid JSON"):
