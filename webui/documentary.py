@@ -25,7 +25,6 @@ from app.services.documentary.project import (
     list_projects,
     load_project,
     project_dir,
-    project_manifest_path,
     update_scene_narration,
 )
 from app.services.documentary.localization import (
