@@ -626,6 +626,19 @@
     "Documentary Localization Audio Generate": "Generar narración localizada",
     "Documentary Localization No Narration": "Esta versión no necesita una pista de narrador traducida; los subtítulos localizados cubrirán el habla original referenciada.",
     "Documentary Localization Render Current": "El master en {language} está actualizado.",
-    "Documentary Localization Render Build": "Renderizar master localizado"
+    "Documentary Localization Render Build": "Renderizar master localizado",
+    "Documentary Rights Review": "Revisión de derechos de la fuente",
+    "Documentary Rights Review Help": "Revisa los derechos de publicación por separado de la procedencia de la fuente. Encontrar o descargar una fuente no demuestra permiso para publicarla.",
+    "Documentary Rights Review Source": "Fuente a revisar",
+    "Documentary Rights Review Open Source": "Abrir página de la fuente",
+    "Documentary Rights Confirmation Warning": "Marca la fuente como autorizada solo si tienes una base real de derechos: propiedad, licencia, permiso o dominio público verificado. La aplicación no lo comprueba por ti.",
+    "Documentary Rights Save": "Guardar revisión de derechos",
+    "Documentary Rights Save Failed": "No se pudo guardar el estado de derechos: {error}",
+    "Documentary Rights Saved": "Revisión de derechos guardada.",
+    "Documentary Preview Build": "Crear preview técnico",
+    "Documentary Preview Again": "Reconstruir preview técnico",
+    "Documentary Preview Current": "El preview técnico está actualizado. No implica autorización para publicar.",
+    "Documentary Preview Stale": "El preview técnico está desactualizado.",
+    "Documentary Preview Complete": "Preview técnico listo: {filename}"
   }
 }
