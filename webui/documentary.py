@@ -1175,14 +1175,22 @@ def _render_rights_review(project, tr: Tr) -> None:
             rights_status != source.rights_status
             or rights_note.strip() != source.rights_note
         )
+        note_required = rights_status in {
+            RightsStatus.licensed,
+            RightsStatus.permission_confirmed,
+            RightsStatus.public_domain,
+        }
+        note_missing = note_required and len(rights_note.strip()) < 5
         if rights_status != RightsStatus.unknown_review_required:
             st.warning(tr("Documentary Rights Confirmation Warning"))
+        if note_missing:
+            st.info(tr("Documentary Rights Note Required"))
 
         if st.button(
             tr("Documentary Rights Save"),
             type="primary",
             width="stretch",
-            disabled=not changed,
+            disabled=(not changed) or note_missing,
             key=f"documentary_rights_review_save_{project.id}_{source.id}",
         ):
             try:
