@@ -8,7 +8,10 @@ from uuid import uuid4
 from app.models.documentary import AudioMode
 from app.services.documentary.localization import load_localization_plan
 from app.services.documentary.project import load_project, project_dir
-from app.services.documentary.transcription import load_source_transcript
+from app.services.documentary.transcription import (
+    TranscriptionError,
+    load_source_transcript,
+)
 from app.utils import utils
 
 
@@ -88,11 +91,22 @@ def build_localized_subtitle_cues(
             if localized.subtitle_segments:
                 transcript = transcript_cache.get(scene.source_id)
                 if transcript is None:
-                    transcript = load_source_transcript(
-                        project_id,
-                        scene.source_id,
-                        root=root,
-                    )
+                    try:
+                        transcript = load_source_transcript(
+                            project_id,
+                            scene.source_id,
+                            root=root,
+                        )
+                    except (
+                        FileNotFoundError,
+                        OSError,
+                        ValueError,
+                        TranscriptionError,
+                    ) as exc:
+                        raise LocalizedSubtitleError(
+                            f"localized subtitle transcript is unavailable: "
+                            f"{scene.source_id}"
+                        ) from exc
                     transcript_cache[scene.source_id] = transcript
                 segments_by_id = {
                     segment.id: segment
