@@ -609,6 +609,23 @@
     "Documentary Narration Saved": "Изменения текста сохранены.",
     "Documentary Narration Ready": "Текст рассказчика готов к озвучке.",
     "Documentary Source Hunter Article Agencies": "Контекст статьи: {agencies}",
-    "Documentary Source Hunter Article Official Links": "официальных ссылок найдено в статье: {count}"
+    "Documentary Source Hunter Article Official Links": "официальных ссылок найдено в статье: {count}",
+    "Documentary Localization": "Версии на других языках",
+    "Documentary Localization Help": "Создаёт проверенные языковые версии из того же мастер-таймлайна. Оригинальные кадры не меняются; переводятся закадровый текст и субтитры, привязанные к исходным доказательствам.",
+    "Documentary Localization Master Narration Missing": "Сначала заверши текст мастер-озвучки. В {count} сценах с рассказчиком текста ещё нет.",
+    "Documentary Localization Target": "Целевой язык",
+    "Documentary Localization Current": "Локализация на {language} актуальна · сцен: {scenes}",
+    "Documentary Localization Stale": "Сохранённая локализация устарела или недействительна: {error}",
+    "Documentary Localization Missing": "Проверенной локализации на {language} пока нет.",
+    "Documentary Localization Rebuild": "Пересоздать проверенную локализацию",
+    "Documentary Localization Generate": "Создать проверенную локализацию",
+    "Documentary Localization Generating": "Перевожу и проверяю смысловую точность документального фильма…",
+    "Documentary Localization Failed": "Не удалось создать языковую версию: {error}",
+    "Documentary Localization Complete": "Проверенная версия на {language} готова.",
+    "Documentary Localization Voice": "Голос рассказчика для этого языка",
+    "Documentary Localization Audio Generate": "Создать озвучку на этом языке",
+    "Documentary Localization No Narration": "Для этой версии отдельная озвучка рассказчика не нужна; переведённые субтитры будут использоваться для привязанной оригинальной речи.",
+    "Documentary Localization Render Current": "Мастер-версия на {language} актуальна.",
+    "Documentary Localization Render Build": "Собрать мастер на этом языке"
   }
 }
