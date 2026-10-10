@@ -157,6 +157,23 @@ def _save_autopilot_state(
         temp.unlink(missing_ok=True)
 
 
+def _checkpoint_autopilot(
+    project_id: str,
+    state: dict,
+    *,
+    stage: str,
+    status: str = "running",
+    root: str | Path | None = None,
+    **updates,
+) -> dict:
+    next_state = dict(state)
+    next_state.update(updates)
+    next_state["stage"] = stage
+    next_state["status"] = status
+    _save_autopilot_state(project_id, next_state, root=root)
+    return next_state
+
+
 def _story_state_payload(story: StoryCandidate) -> dict:
     return asdict(story)
 
