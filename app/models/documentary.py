@@ -533,7 +533,6 @@ class VideoMetadata(BaseModel):
     audio_codec: str = ""
     container: str = ""
     file_size_bytes: int = Field(default=0, ge=0)
-    voice_name: str = ""
     rotation_degrees: int = 0
     audio_channels: Optional[int] = Field(default=None, ge=1)
     audio_sample_rate: Optional[int] = Field(default=None, ge=1)
@@ -614,6 +613,7 @@ class NarrationAudioAsset(BaseModel):
     duration_seconds: float = Field(gt=0)
     audio_codec: str = ""
     file_size_bytes: int = Field(default=0, ge=0)
+    voice_name: str = ""
 
     @field_validator("checksum_sha256")
     @classmethod
