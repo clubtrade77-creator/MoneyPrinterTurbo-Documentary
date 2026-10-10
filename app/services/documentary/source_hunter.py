@@ -1046,6 +1046,117 @@ def _normalize_embedded_media_url(
     return None
 
 
+def find_public_page_media(
+    source_page_url: str,
+    *,
+    limit: int = 6,
+    timeout_seconds: float = 8.0,
+    session=None,
+) -> list[EmbeddedMediaCandidate]:
+    """Inspect a Source-Hunter-discovered public page for linked/embedded media.
+
+    Unlike find_embedded_media(), this helper is not restricted to government
+    domains. It is intended only for pages already discovered by Source Hunter.
+    Publication rights remain unverified.
+    """
+    if not _public_article_url_allowed(source_page_url):
+        raise SourceHunterError(
+            "media inspection requires a safe public HTTP(S) source page"
+        )
+
+    try:
+        limit = int(limit)
+        timeout_seconds = float(timeout_seconds)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid public media inspection settings") from exc
+    if not 1 <= limit <= 20:
+        raise ValueError("public media limit must be between 1 and 20")
+    if timeout_seconds <= 0:
+        raise ValueError("public media timeout must be positive")
+
+    direct = _normalize_embedded_media_url(source_page_url, source_page_url)
+    if direct is not None:
+        platform, media_url = direct
+        return [
+            EmbeddedMediaCandidate(
+                platform=platform,
+                url=media_url,
+                label=platform,
+                source_page_url=source_page_url,
+            )
+        ]
+
+    request = session or requests
+    current_url = source_page_url
+    response = None
+    try:
+        for redirect_index in range(_MAX_ARTICLE_REDIRECTS + 1):
+            response = request.get(
+                current_url,
+                headers=_REQUEST_HEADERS,
+                timeout=min(timeout_seconds, 10.0),
+                allow_redirects=False,
+            )
+            if 300 <= response.status_code < 400:
+                if redirect_index >= _MAX_ARTICLE_REDIRECTS:
+                    raise SourceHunterError(
+                        "public media page redirected too many times"
+                    )
+                location = str(
+                    (getattr(response, "headers", {}) or {}).get("Location") or ""
+                ).strip()
+                next_url = urljoin(current_url, location)
+                if not location or not _public_article_url_allowed(next_url):
+                    raise SourceHunterError(
+                        "public media page redirected to an unsafe URL"
+                    )
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+                response = None
+                current_url = next_url
+                continue
+            if response.status_code != 200:
+                raise SourceHunterError(
+                    f"public media page returned HTTP {response.status_code}"
+                )
+            break
+
+        if response is None:
+            raise SourceHunterError("public media page returned no response")
+
+        parser = _OfficialMediaParser()
+        parser.feed((getattr(response, "text", "") or "")[:2_000_000])
+        results: list[EmbeddedMediaCandidate] = []
+        seen_urls: set[str] = set()
+        for raw_url, label in parser.links:
+            normalized = _normalize_embedded_media_url(current_url, raw_url)
+            if normalized is None:
+                continue
+            platform, media_url = normalized
+            if media_url in seen_urls:
+                continue
+            results.append(
+                EmbeddedMediaCandidate(
+                    platform=platform,
+                    url=media_url,
+                    label=re.sub(r"\s+", " ", label or "").strip() or platform,
+                    source_page_url=current_url,
+                )
+            )
+            seen_urls.add(media_url)
+            if len(results) >= limit:
+                break
+        return results
+    except requests.RequestException as exc:
+        raise SourceHunterError("public media page request failed") from exc
+    finally:
+        if response is not None:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+
+
 def find_embedded_media(
     source_page_url: str,
     *,
