@@ -607,7 +607,8 @@
     "Documentary Narration Save": "Сохранить изменения текста",
     "Documentary Narration Save Failed": "Не удалось сохранить текст рассказчика: {error}",
     "Documentary Narration Saved": "Изменения текста сохранены.",
-    "Documentary Narration Ready": "Текст рассказчика готов к озвучке."
-
+    "Documentary Narration Ready": "Текст рассказчика готов к озвучке.",
+    "Documentary Source Hunter Article Agencies": "Контекст статьи: {agencies}",
+    "Documentary Source Hunter Article Official Links": "официальных ссылок найдено в статье: {count}"
   }
 }
