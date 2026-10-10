@@ -257,9 +257,16 @@ def find_resumable_autopilot_project_id(
     # Autopilot state existed. Only consider projects that have a research lead
     # and at least one persisted transcript.
     for project in projects:
+        if _load_autopilot_state(project.id, root):
+            continue
         if not any(source.id.startswith("story_") for source in project.sources):
             continue
-        if _latest_saved_transcript(project.id, root=root) is not None:
+        if (project_dir(project.id, root) / "renders" / "preview.mp4").is_file():
+            continue
+        if any(
+            transcript_path(project.id, source.id, root).is_file()
+            for source in project.sources
+        ):
             return project.id
     return ""
 
