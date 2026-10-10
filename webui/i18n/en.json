@@ -761,7 +761,8 @@
     "Documentary Narration Save": "Save narration edits",
     "Documentary Narration Save Failed": "Could not save narration edits: {error}",
     "Documentary Narration Saved": "Narration edits saved.",
-    "Documentary Narration Ready": "Narration text is ready for voice generation."
-
+    "Documentary Narration Ready": "Narration text is ready for voice generation.",
+    "Documentary Source Hunter Article Agencies": "Article context: {agencies}",
+    "Documentary Source Hunter Article Official Links": "official links found in article: {count}"
   }
 }
