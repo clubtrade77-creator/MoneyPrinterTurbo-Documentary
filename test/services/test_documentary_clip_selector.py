@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -278,6 +279,8 @@ def test_reselecting_identical_clips_preserves_narration_audio(
         root=tmp_path,
     )
     before = load_project(project.id, tmp_path)
+    persisted_clip_plan = clip_plan_path(project.id, tmp_path)
+    os.utime(persisted_clip_plan, (100, 100))
 
     select_clips(
         project.id,
@@ -287,6 +290,7 @@ def test_reselecting_identical_clips_preserves_narration_audio(
     )
     after = load_project(project.id, tmp_path)
 
+    assert persisted_clip_plan.stat().st_mtime == pytest.approx(100)
     assert after.revision == before.revision
     assert after.plan.scenes[0].narration_text == "Keep this narration."
     assert len(after.narration_audio) == 1
