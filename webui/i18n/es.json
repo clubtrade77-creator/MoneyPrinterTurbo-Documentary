@@ -639,6 +639,7 @@
     "Documentary Preview Again": "Reconstruir preview técnico",
     "Documentary Preview Current": "El preview técnico está actualizado. No implica autorización para publicar.",
     "Documentary Preview Stale": "El preview técnico está desactualizado.",
-    "Documentary Preview Complete": "Preview técnico listo: {filename}"
+    "Documentary Preview Complete": "Preview técnico listo: {filename}",
+    "Documentary Rights Note Required": "Añade una nota breve con la base: licencia, permiso o dominio público verificado antes de guardar este estado autorizado."
   }
 }
