@@ -1803,6 +1803,305 @@ def _render_master_video(project, tr: Tr) -> None:
                 st.rerun()
 
 
+def _documentary_language_label(language: str) -> str:
+    return {
+        "ru": "Русский",
+        "en": "English",
+        "es": "Español",
+    }.get((language or "").lower(), (language or "").upper())
+
+
+def _render_localized_versions(project, tr: Tr) -> None:
+    if not project.plan.scenes:
+        return
+
+    master_language = project.master_language.lower()
+    target_languages = [
+        language
+        for language in ("ru", "en", "es")
+        if language != master_language
+    ]
+    if not target_languages:
+        return
+
+    with st.expander(
+        tr("Documentary Localization"),
+        expanded=False,
+    ):
+        st.caption(tr("Documentary Localization Help"))
+
+        missing_master_narration = [
+            scene.id
+            for scene in project.plan.scenes
+            if (
+                scene.audio_mode in {AudioMode.narration, AudioMode.mixed}
+                and not scene.narration_text.strip()
+            )
+        ]
+        if missing_master_narration:
+            st.warning(
+                tr("Documentary Localization Master Narration Missing").format(
+                    count=len(missing_master_narration)
+                )
+            )
+            return
+
+        target_language = st.selectbox(
+            tr("Documentary Localization Target"),
+            options=target_languages,
+            format_func=_documentary_language_label,
+            key=f"documentary_localization_target_{project.id}",
+        )
+
+        localization = None
+        localization_error = ""
+        try:
+            localization = load_localization_plan(
+                project.id,
+                target_language,
+            )
+        except FileNotFoundError:
+            localization = None
+        except LocalizationError as exc:
+            localization_error = str(exc)
+
+        if localization is not None:
+            st.success(
+                tr("Documentary Localization Current").format(
+                    language=_documentary_language_label(target_language),
+                    scenes=len(localization.scenes),
+                )
+            )
+        elif localization_error:
+            st.warning(
+                tr("Documentary Localization Stale").format(
+                    error=localization_error
+                )
+            )
+        else:
+            st.info(
+                tr("Documentary Localization Missing").format(
+                    language=_documentary_language_label(target_language)
+                )
+            )
+
+        localization_button_label = (
+            tr("Documentary Localization Rebuild")
+            if localization is not None or localization_error
+            else tr("Documentary Localization Generate")
+        )
+        if st.button(
+            localization_button_label,
+            type="primary" if localization is None else "secondary",
+            width="stretch",
+            key=(
+                "documentary_localization_generate_"
+                f"{project.id}_{target_language}"
+            ),
+        ):
+            try:
+                with st.spinner(tr("Documentary Localization Generating")):
+                    localization = localize_project(
+                        project.id,
+                        target_language,
+                    )
+            except (OSError, ValueError, LocalizationError) as exc:
+                st.error(
+                    tr("Documentary Localization Failed").format(
+                        error=str(exc)
+                    )
+                )
+            else:
+                st.success(
+                    tr("Documentary Localization Complete").format(
+                        language=_documentary_language_label(target_language)
+                    )
+                )
+                st.rerun()
+
+        if localization is None:
+            return
+
+        localized_by_scene = {
+            scene.scene_id: scene
+            for scene in localization.scenes
+        }
+        narrated_scenes = [
+            scene
+            for scene in project.plan.scenes
+            if (
+                scene.audio_mode in {AudioMode.narration, AudioMode.mixed}
+                and localized_by_scene.get(scene.id) is not None
+                and localized_by_scene[scene.id].narration_text.strip()
+            )
+        ]
+
+        if narrated_scenes:
+            st.markdown(
+                f"**{tr('Documentary Localization Voice')}**"
+            )
+            voice_options = _documentary_voice_options(target_language)
+            voice_by_id = dict(voice_options)
+            voice_ids = list(voice_by_id)
+            persisted_voice = project.narrator_voices.get(
+                target_language,
+                "",
+            )
+            default_voice_index = (
+                voice_ids.index(persisted_voice)
+                if persisted_voice in voice_ids
+                else 0
+            )
+            selected_voice = st.selectbox(
+                tr("Documentary Voice"),
+                options=voice_ids,
+                index=default_voice_index,
+                format_func=lambda value: voice_by_id[value],
+                key=(
+                    "documentary_localization_voice_"
+                    f"{project.id}_{target_language}"
+                ),
+                help=tr("Documentary Voice Help"),
+            )
+
+            preview_state_key = (
+                "documentary_localization_voice_preview_path_"
+                f"{project.id}_{target_language}"
+            )
+            if st.button(
+                tr("Documentary Voice Preview Button"),
+                key=(
+                    "documentary_localization_voice_preview_"
+                    f"{project.id}_{target_language}"
+                ),
+            ):
+                try:
+                    with st.spinner(
+                        tr("Documentary Voice Preview Generating")
+                    ):
+                        preview_path = _generate_documentary_voice_preview(
+                            project.id,
+                            voice_name=selected_voice,
+                            text=_documentary_voice_preview_text(
+                                target_language
+                            ),
+                        )
+                except Exception as exc:
+                    st.error(
+                        tr("Documentary Voice Preview Failed").format(
+                            error=str(exc)
+                        )
+                    )
+                else:
+                    st.session_state[preview_state_key] = str(preview_path)
+
+            preview_value = st.session_state.get(preview_state_key)
+            if preview_value and Path(preview_value).is_file():
+                st.audio(preview_value)
+
+            if st.button(
+                tr("Documentary Localization Audio Generate"),
+                type="primary",
+                width="stretch",
+                key=(
+                    "documentary_localization_audio_"
+                    f"{project.id}_{target_language}"
+                ),
+            ):
+                try:
+                    with st.spinner(
+                        tr("Documentary Narration Audio Generating")
+                    ):
+                        synthesis = synthesize_narration(
+                            project.id,
+                            selected_voice,
+                            language=target_language,
+                        )
+                except (
+                    OSError,
+                    ValueError,
+                    NarrationSynthesisError,
+                ) as exc:
+                    st.error(
+                        tr("Documentary Narration Audio Failed").format(
+                            error=str(exc)
+                        )
+                    )
+                else:
+                    st.success(
+                        tr("Documentary Narration Audio Complete").format(
+                            generated=len(synthesis.generated),
+                            reused=len(synthesis.reused),
+                        )
+                    )
+                    st.rerun()
+        else:
+            st.info(tr("Documentary Localization No Narration"))
+
+        output_path = documentary_render_path(
+            project.id,
+            language=target_language,
+        )
+        current_render = _render_output_is_current(
+            project.id,
+            language=target_language,
+        )
+        if output_path.is_file():
+            if current_render:
+                st.success(
+                    tr("Documentary Localization Render Current").format(
+                        language=_documentary_language_label(target_language)
+                    )
+                )
+                st.video(str(output_path))
+            else:
+                st.warning(tr("Documentary Render Stale"))
+
+        readiness_issues = documentary_render_readiness_issues(
+            project.id,
+            language=target_language,
+        )
+        if readiness_issues:
+            st.warning(tr("Documentary Render Not Ready"))
+            for issue in readiness_issues:
+                st.caption(f"• {issue}")
+
+        render_button_label = (
+            tr("Documentary Render Again")
+            if output_path.is_file()
+            else tr("Documentary Localization Render Build")
+        )
+        if st.button(
+            render_button_label,
+            type="primary",
+            width="stretch",
+            disabled=bool(readiness_issues),
+            key=(
+                "documentary_localization_render_"
+                f"{project.id}_{target_language}"
+            ),
+        ):
+            try:
+                with st.spinner(tr("Documentary Rendering")):
+                    result = render_documentary(
+                        project.id,
+                        language=target_language,
+                    )
+            except (OSError, ValueError, DocumentaryRenderError) as exc:
+                st.error(
+                    tr("Documentary Render Failed").format(
+                        error=str(exc)
+                    )
+                )
+            else:
+                st.success(
+                    tr("Documentary Render Complete").format(
+                        filename=result.name
+                    )
+                )
+                st.rerun()
+
+
 def _render_source_upload(project, tr: Tr) -> None:
     with st.expander(tr("Documentary Add Source"), expanded=not project.sources):
         upload_nonce_key = f"documentary_upload_nonce_{project.id}"
@@ -1914,3 +2213,5 @@ def render_documentary_application(tr: Tr) -> None:
     _render_narration_writer(project, tr)
     project = load_project(selected_project_id)
     _render_master_video(project, tr)
+    project = load_project(selected_project_id)
+    _render_localized_versions(project, tr)
