@@ -527,6 +527,7 @@
     "Documentary Render Again": "Renderizar video maestro de nuevo",
     "Documentary Rendering": "Renderizando el documental maestro con FFmpeg…",
     "Documentary Render Failed": "Falló el render del documental: {error}",
+    "Documentary Render Not Ready": "El render aún no está listo. Corrige primero los bloqueos indicados abajo.",
     "Documentary Render Complete": "Render maestro creado: {filename}",
     "Documentary Narration": "Narrador",
     "Documentary Narration Original": "Escena {index}: prioridad del audio original — no se necesita narrador.",
