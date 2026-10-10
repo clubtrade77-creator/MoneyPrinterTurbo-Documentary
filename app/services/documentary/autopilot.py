@@ -11,7 +11,10 @@ from app.services import subtitle as subtitle_service
 from app.services import voice as voice_service
 from app.services.documentary.clip_selector import select_clips
 from app.services.documentary.localization import localize_project
-from app.services.documentary.media_fetcher import fetch_source_local_copy
+from app.services.documentary.media_fetcher import (
+    DocumentaryMediaFetchError,
+    fetch_source_local_copy,
+)
 from app.services.documentary.narration import write_narration
 from app.services.documentary.narration_synthesis import synthesize_narration
 from app.services.documentary.project import (
@@ -226,6 +229,93 @@ def _hunt_source(
     return source
 
 
+def _fallback_video_sources(
+    story: StoryCandidate,
+    *,
+    exclude_source_id: str,
+    limit: int,
+):
+    try:
+        candidates = find_source_videos(
+            story.title,
+            limit=max(2, limit),
+        )
+    except (OSError, ValueError, SourceHunterError):
+        return []
+
+    usable = [
+        candidate
+        for candidate in candidates
+        if candidate.source_quality_score > 0 or candidate.score >= 50
+    ]
+    usable.sort(
+        key=lambda item: (
+            item.source_quality_score > 0,
+            item.score,
+            item.source_quality_score,
+            item.video_signal_score,
+            item.freshness_score,
+        ),
+        reverse=True,
+    )
+    sources = []
+    seen_ids = {exclude_source_id}
+    for candidate in usable:
+        source = candidate_to_youtube_source(candidate)
+        if source.id in seen_ids:
+            continue
+        seen_ids.add(source.id)
+        sources.append(source)
+    return sources
+
+
+def _fetch_first_available_source(
+    project_id: str,
+    story: StoryCandidate,
+    primary_source,
+    *,
+    source_limit: int,
+    root=None,
+):
+    errors = []
+    candidates = [primary_source] + _fallback_video_sources(
+        story,
+        exclude_source_id=primary_source.id,
+        limit=source_limit,
+    )
+
+    for index, source in enumerate(candidates):
+        if index:
+            try:
+                add_source(project_id, source, root=root)
+            except ValueError as exc:
+                if "duplicate source id" not in str(exc).lower():
+                    raise
+        try:
+            fetch_source_local_copy(
+                project_id,
+                source.id,
+                root=root,
+            )
+            return source
+        except DocumentaryMediaFetchError as exc:
+            errors.append(f"{source.id}: {exc}")
+            logger.warning(
+                "Documentary Autopilot source download failed; trying next source: "
+                f"source={source.id}, error={exc}"
+            )
+
+    detail = " | ".join(errors)
+    if len(detail) > 3000:
+        detail = detail[-3000:]
+    raise AutopilotError(
+        "media",
+        "autopilot could not download any suitable source video"
+        + (f": {detail}" if detail else ""),
+        project_id=project_id,
+    )
+
+
 def _project_has_narrated_scenes(project_id: str, *, root=None) -> bool:
     project = load_project(project_id, root)
     return any(
@@ -304,7 +394,13 @@ def run_autopilot(
 
         stage = "media"
         _emit(progress, stage, "Downloading a technical review copy", 0.23)
-        fetch_source_local_copy(project.id, source.id, root=root)
+        source = _fetch_first_available_source(
+            project.id,
+            story,
+            source,
+            source_limit=profile.source_limit,
+            root=root,
+        )
 
         stage = "transcription"
         _emit(progress, stage, "Analyzing speech and timecodes", 0.34)
