@@ -600,7 +600,14 @@
     "Documentary Attach Local Copy File": "Copia local MP4/MOV",
     "Documentary Attach Local Copy Button": "Adjuntar copia local",
     "Documentary Attach Local Copy Failed": "No se pudo adjuntar la copia local: {error}",
-    "Documentary Attach Local Copy Complete": "Copia local adjuntada a la fuente {source_id}."
+    "Documentary Attach Local Copy Complete": "Copia local adjuntada a la fuente {source_id}.",
+    "Documentary Narration Not Required": "Escena {index}: no se necesita narrador.",
+    "Documentary Narration Edit": "Texto del narrador",
+    "Documentary Narration Unsaved": "Hay cambios sin guardar en la narración. Guárdalos antes de generar el audio.",
+    "Documentary Narration Save": "Guardar cambios de narración",
+    "Documentary Narration Save Failed": "No se pudieron guardar los cambios de narración: {error}",
+    "Documentary Narration Saved": "Cambios de narración guardados.",
+    "Documentary Narration Ready": "El texto de narración está listo para generar la voz."
 
   }
 }
