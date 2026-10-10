@@ -1392,6 +1392,7 @@ def _render_narration_writer(project, tr: Tr) -> None:
 
     beats = {beat.id: beat for beat in story_plan.beats}
     with st.expander(tr("Documentary Narration"), expanded=True):
+        narration_required = 0
         narration_needed = 0
         narration_updates: dict[str, str] = {}
         for index, scene in enumerate(project.plan.scenes, start=1):
@@ -1399,6 +1400,9 @@ def _render_narration_writer(project, tr: Tr) -> None:
                 AudioMode.narration,
                 AudioMode.mixed,
             }
+            if requires_narration:
+                narration_required += 1
+
             if not requires_narration:
                 if scene.audio_mode == AudioMode.original:
                     st.write(
@@ -1487,8 +1491,11 @@ def _render_narration_writer(project, tr: Tr) -> None:
                         )
                     )
                     st.rerun()
+        elif narration_required:
+            st.success(tr("Documentary Narration Ready"))
         else:
             st.success(tr("Documentary Narration Not Needed"))
+            return
 
         st.markdown(f"**{tr('Documentary Voice Preview')}**")
         voice_options = _documentary_voice_options(project.master_language)
