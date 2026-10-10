@@ -32,7 +32,11 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
     project_snapshot = _project_snapshot(source)
 
     source_bundle = autopilot._SourceBundle(media_source=source)
-    monkeypatch.setattr(autopilot, "discover_stories", lambda *a, **k: [story])
+    monkeypatch.setattr(
+        autopilot,
+        "_discover_autopilot_stories",
+        lambda *a, **k: [story],
+    )
     monkeypatch.setattr(
         autopilot,
         "_choose_story_with_source",
@@ -166,7 +170,11 @@ def test_run_autopilot_renders_final_when_rights_are_cleared(
     renders = []
 
     source_bundle = autopilot._SourceBundle(media_source=source)
-    monkeypatch.setattr(autopilot, "discover_stories", lambda *a, **k: [story])
+    monkeypatch.setattr(
+        autopilot,
+        "_discover_autopilot_stories",
+        lambda *a, **k: [story],
+    )
     monkeypatch.setattr(
         autopilot,
         "_choose_story_with_source",
@@ -265,3 +273,58 @@ def test_fetch_first_available_source_uses_fallback_after_download_failure(
     assert result.id == fallback.id
     assert attempts == [primary.id, fallback.id]
     assert added == [fallback.id]
+
+
+def test_published_footage_story_filter_rejects_camera_mentions():
+    mention_only = SimpleNamespace(
+        title="Police seek dashcam footage after shooting",
+        score=80,
+        footage_score=16,
+        freshness_score=30,
+        story_score=30,
+    )
+    published = SimpleNamespace(
+        title="Bodycam footage shows police shooting",
+        score=95,
+        footage_score=32,
+        freshness_score=30,
+        story_score=30,
+    )
+
+    result = autopilot._published_footage_stories([mention_only, published])
+
+    assert result == [published]
+
+
+def test_discover_autopilot_stories_expands_to_seven_days(monkeypatch):
+    calls = []
+    weak = SimpleNamespace(
+        title="Police seek dashcam footage",
+        score=60,
+        footage_score=16,
+        freshness_score=30,
+        story_score=20,
+    )
+    strong = SimpleNamespace(
+        title="Bodycam footage shows dramatic rescue",
+        score=90,
+        footage_score=32,
+        freshness_score=18,
+        story_score=30,
+    )
+
+    def fake_discover(topic, *, lookback_hours, limit):
+        calls.append(lookback_hours)
+        return [weak] if lookback_hours == 72 else [strong]
+
+    monkeypatch.setattr(autopilot, "discover_stories", fake_discover)
+
+    result = autopilot._discover_autopilot_stories(
+        autopilot.AutopilotProfile(
+            lookback_hours=72,
+            discovery_limit=30,
+        )
+    )
+
+    assert result == [strong]
+    assert calls == [72, 168]
