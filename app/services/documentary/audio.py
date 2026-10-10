@@ -45,6 +45,45 @@ def _normalize_language(language: str) -> str:
     return value
 
 
+def _scene_narration_text_for_language(
+    project,
+    scene,
+    language: str,
+    *,
+    root: str | os.PathLike | None,
+) -> str:
+    master_language = _normalize_language(project.master_language)
+    if language == master_language:
+        return scene.narration_text
+
+    from app.services.documentary.localization import (
+        LocalizationError,
+        load_localization_plan,
+    )
+
+    try:
+        plan = load_localization_plan(
+            project.id,
+            language,
+            root=root,
+        )
+    except (FileNotFoundError, LocalizationError) as exc:
+        raise NarrationAudioError(
+            f"localized narration text is unavailable for "
+            f"{scene.id}/{language}"
+        ) from exc
+
+    localized = next(
+        (item for item in plan.scenes if item.scene_id == scene.id),
+        None,
+    )
+    if localized is None:
+        raise NarrationAudioError(
+            f"localized narration scene is missing: {scene.id}/{language}"
+        )
+    return localized.narration_text
+
+
 def _positive_float(value) -> float | None:
     try:
         parsed = float(value)
@@ -167,6 +206,12 @@ def attach_narration_audio(
         raise ValueError(f"documentary scene not found: {scene_id}")
 
     resolved_language = _normalize_language(language or project.master_language)
+    narration_text = _scene_narration_text_for_language(
+        project,
+        scene,
+        resolved_language,
+        root=root,
+    )
     resolved_voice_name = str(voice_name or "").strip()
     if len(resolved_voice_name) > 300:
         raise ValueError("invalid documentary narration voice")
@@ -203,7 +248,7 @@ def attach_narration_audio(
             local_path=str(target),
             checksum_sha256=sha256_file(target),
             narration_text_fingerprint=_narration_text_fingerprint(
-                scene.narration_text
+                narration_text
             ),
             duration_seconds=duration,
             audio_codec=codec,
@@ -275,7 +320,13 @@ def load_narration_audio(
             f"{scene_id}/{resolved_language}"
         )
 
-    current_text_fingerprint = _narration_text_fingerprint(scene.narration_text)
+    current_text = _scene_narration_text_for_language(
+        project,
+        scene,
+        resolved_language,
+        root=root,
+    )
+    current_text_fingerprint = _narration_text_fingerprint(current_text)
     if not asset.narration_text_fingerprint:
         raise NarrationAudioError(
             f"narration audio metadata is outdated for scene {scene_id}; "
