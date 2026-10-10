@@ -331,6 +331,39 @@ def _scene_from_clip(clip: ClipSelection) -> DocumentaryScene:
     )
 
 
+def _scene_selection_signature(scene) -> tuple:
+    return (
+        scene.scene_type,
+        scene.source_id,
+        scene.source_start,
+        scene.source_end,
+        scene.audio_mode,
+        scene.purpose,
+        scene.story_beat_id,
+        tuple(scene.transcript_segment_ids),
+    )
+
+
+def _remove_obsolete_narration_files(
+    project_id: str,
+    assets,
+    *,
+    root: str | os.PathLike | None,
+) -> None:
+    audio_root = (project_dir(project_id, root) / "audio").resolve()
+    for asset in assets:
+        try:
+            path = Path(asset.local_path).expanduser().resolve()
+        except (OSError, RuntimeError):
+            continue
+        if audio_root != path.parent and audio_root not in path.parents:
+            continue
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def apply_clip_plan(
     project_id: str,
     clip_plan: ClipPlan | None = None,
@@ -384,9 +417,54 @@ def apply_clip_plan(
             "documentary clip plan became stale before it could be applied"
         )
 
+    same_story_revision = (
+        project.plan.story_plan_fingerprint == plan.story_plan_fingerprint
+    )
+    previous_scenes = {scene.id: scene for scene in project.plan.scenes}
+    preserved_scene_ids: set[str] = set()
+
+    if same_story_revision:
+        for scene in scenes:
+            previous = previous_scenes.get(scene.id)
+            if (
+                previous is None
+                or _scene_selection_signature(previous)
+                != _scene_selection_signature(scene)
+            ):
+                continue
+            scene.narration_text = previous.narration_text
+            scene.original_volume = previous.original_volume
+            scene.narration_volume = previous.narration_volume
+            preserved_scene_ids.add(scene.id)
+
+    previous_audio = list(project.narration_audio)
+    preserved_audio = [
+        asset
+        for asset in previous_audio
+        if asset.scene_id in preserved_scene_ids
+    ]
+    obsolete_audio = [
+        asset
+        for asset in previous_audio
+        if asset.scene_id not in preserved_scene_ids
+    ]
+
+    if (
+        project.plan.story_plan_fingerprint == plan.story_plan_fingerprint
+        and project.plan.scenes == scenes
+        and project.narration_audio == preserved_audio
+    ):
+        return project
+
     project.plan.story_plan_fingerprint = plan.story_plan_fingerprint
     project.plan.scenes = scenes
+    project.narration_audio = preserved_audio
     save_project(project, root)
+    _remove_obsolete_narration_files(
+        project.id,
+        obsolete_audio,
+        root=root,
+    )
     return project
 
 
