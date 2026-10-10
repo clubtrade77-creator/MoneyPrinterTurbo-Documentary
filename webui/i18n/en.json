@@ -763,6 +763,23 @@
     "Documentary Narration Saved": "Narration edits saved.",
     "Documentary Narration Ready": "Narration text is ready for voice generation.",
     "Documentary Source Hunter Article Agencies": "Article context: {agencies}",
-    "Documentary Source Hunter Article Official Links": "official links found in article: {count}"
+    "Documentary Source Hunter Article Official Links": "official links found in article: {count}",
+    "Documentary Localization": "Localized versions",
+    "Documentary Localization Help": "Create reviewed language versions from the same master timeline. The original footage stays unchanged; narration and evidence-linked subtitles are localized.",
+    "Documentary Localization Master Narration Missing": "Finish the master narration first. {count} narrated scene(s) still have no narrator text.",
+    "Documentary Localization Target": "Target language",
+    "Documentary Localization Current": "{language} localization is current · scenes: {scenes}",
+    "Documentary Localization Stale": "The saved localization is stale or invalid: {error}",
+    "Documentary Localization Missing": "No reviewed {language} localization exists yet.",
+    "Documentary Localization Rebuild": "Rebuild reviewed localization",
+    "Documentary Localization Generate": "Create reviewed localization",
+    "Documentary Localization Generating": "Translating and semantically reviewing the documentary…",
+    "Documentary Localization Failed": "Could not create the localized version: {error}",
+    "Documentary Localization Complete": "Reviewed {language} localization is ready.",
+    "Documentary Localization Voice": "Narrator voice for this language",
+    "Documentary Localization Audio Generate": "Generate localized narration audio",
+    "Documentary Localization No Narration": "This version needs no translated narrator track; localized subtitles will cover referenced original speech.",
+    "Documentary Localization Render Current": "The {language} master render is current.",
+    "Documentary Localization Render Build": "Render localized master"
   }
 }
