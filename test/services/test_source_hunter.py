@@ -1,7 +1,9 @@
+import pytest
 import json
 
 from app.models.documentary import ProvenanceType, RightsStatus, SourceType
 from app.services.documentary.source_hunter import (
+    EmbeddedMediaCandidate,
     SourceHunterError,
     _build_search_query,
     _build_web_search_query,
@@ -936,3 +938,38 @@ def test_source_hunter_rejects_private_public_page_media_url():
         raise AssertionError("private media page URL should be rejected")
 
     assert session.calls == []
+
+
+@pytest.mark.parametrize(
+    ("url", "platform"),
+    [
+        ("https://www.facebook.com/watch/?v=123456789", "facebook"),
+        ("https://x.com/example/status/1234567890123456789", "x"),
+        ("https://www.tiktok.com/@example/video/1234567890123456789", "tiktok"),
+        ("https://www.dailymotion.com/video/x123abc", "dailymotion"),
+        ("https://www.instagram.com/reel/ABC123xyz/", "instagram"),
+    ],
+)
+def test_source_hunter_accepts_direct_social_video_pages(url, platform):
+    session = _Session(_Response("<html></html>"))
+
+    results = find_public_page_media(url, session=session)
+
+    assert len(results) == 1
+    assert results[0].platform == platform
+    assert results[0].url == url
+    assert session.calls == []
+
+
+def test_embedded_media_to_source_keeps_third_party_provenance():
+    candidate = EmbeddedMediaCandidate(
+        platform="tiktok",
+        url="https://www.tiktok.com/@example/video/1234567890123456789",
+        label="video",
+        source_page_url="https://news.example/story",
+    )
+
+    source = embedded_media_to_source(candidate, title="Story video")
+
+    assert source.provenance == ProvenanceType.third_party_platform
+    assert source.rights_status == RightsStatus.unknown_review_required
