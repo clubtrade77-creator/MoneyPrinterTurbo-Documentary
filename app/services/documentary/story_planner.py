@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
 from typing import Callable
 from uuid import uuid4
@@ -95,6 +96,15 @@ def parse_story_plan_response(response_text: str) -> StoryPlan:
 
     if not isinstance(payload, dict):
         raise StoryPlannerError("story planner response must be one JSON object")
+
+    beats = payload.get("beats")
+    if isinstance(beats, list):
+        for beat in beats:
+            if not isinstance(beat, dict):
+                continue
+            beat_id = str(beat.get("id") or "").strip()
+            if re.fullmatch(r"b\d{1,3}", beat_id, re.IGNORECASE):
+                beat["id"] = f"beat_{beat_id[1:]}"
 
     try:
         return StoryPlan.model_validate(payload)
@@ -224,6 +234,8 @@ that stays close to the transcript instead of adding dramatic framing.
 Do not describe a moment as routine, ordinary, abrupt, sudden, pivotal, tense,
 dramatic, or similar unless the transcript itself supports that descriptor.
 Each beat "target_duration_seconds" must be greater than 0 and at most 180.
+Every beat "id" MUST use the exact form "beat_<number>", for example
+"beat_01", "beat_02", "beat_03". Never use shortened ids such as "b1" or "b2".
 
 OUTPUT:
 Return exactly one JSON object and nothing else, with this shape:
