@@ -97,18 +97,30 @@ def synthesize_narration(
     with tempfile.TemporaryDirectory(prefix="documentary-narration-") as temp_dir:
         for scene in pending:
             output = Path(temp_dir) / f"{scene.id}.mp3"
-            result = voice_service.tts(
-                text=scene.narration_text,
-                voice_name=voice_name,
-                voice_rate=1.0,
-                voice_file=str(output),
-                voice_volume=1.0,
-            )
+            try:
+                result = voice_service.tts(
+                    text=scene.narration_text,
+                    voice_name=voice_name,
+                    voice_rate=1.0,
+                    voice_file=str(output),
+                    voice_volume=1.0,
+                )
+            except Exception as exc:
+                raise NarrationSynthesisError(
+                    f"TTS failed for scene {scene.id}: {exc}"
+                ) from exc
             if result is None or not output.is_file() or output.stat().st_size <= 0:
                 raise NarrationSynthesisError(
                     f"narration generation failed for scene {scene.id}"
                 )
-            duration = float(voice_service.get_audio_duration(str(output)) or 0)
+            try:
+                duration = float(
+                    voice_service.get_audio_duration(str(output)) or 0
+                )
+            except Exception as exc:
+                raise NarrationSynthesisError(
+                    f"could not inspect narration duration for scene {scene.id}: {exc}"
+                ) from exc
             available = float(scene.source_end or 0) - float(scene.source_start or 0)
             if duration <= 0:
                 raise NarrationSynthesisError(
@@ -118,22 +130,29 @@ def synthesize_narration(
                 raise NarrationSynthesisError(
                     f"narration does not fit scene {scene.id}"
                 )
-            attach_narration_audio(
-                project_id,
-                scene.id,
-                output,
-                language=language,
-                root=root,
-            )
-            generated.append(
-                _record_asset_voice(
+            try:
+                attach_narration_audio(
                     project_id,
                     scene.id,
+                    output,
                     language=language,
-                    voice_name=voice_name,
                     root=root,
                 )
-            )
+                generated.append(
+                    _record_asset_voice(
+                        project_id,
+                        scene.id,
+                        language=language,
+                        voice_name=voice_name,
+                        root=root,
+                    )
+                )
+            except NarrationSynthesisError:
+                raise
+            except Exception as exc:
+                raise NarrationSynthesisError(
+                    f"could not register narration audio for scene {scene.id}: {exc}"
+                ) from exc
 
     set_narrator_voice(project_id, language, voice_name, root=root)
     return NarrationSynthesisResult(
