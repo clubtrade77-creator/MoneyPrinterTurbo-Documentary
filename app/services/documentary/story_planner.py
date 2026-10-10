@@ -44,6 +44,24 @@ _PURPOSE_ALIASES = {
     "conclusion": "payoff",
 }
 
+_SECTION_PURPOSE_ALIASES = {
+    "hook": "hook",
+    "context": "context",
+    "conflict": "conflict",
+    "question": "question",
+    "investigation": "question",
+    "escalation": "escalation",
+    "reveal": "reveal",
+    "twist": "twist",
+    "outcome": "payoff",
+    "closing": "payoff",
+    "resolution": "payoff",
+    "conclusion": "payoff",
+    "payoff": "payoff",
+    "next_hook": "next_hook",
+    "transition": "transition",
+}
+
 
 class StoryPlannerError(RuntimeError):
     """Raised when a grounded documentary story plan cannot be produced safely."""
@@ -87,7 +105,140 @@ def _strip_code_fence(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def parse_story_plan_response(response_text: str) -> StoryPlan:
+def _first_nonempty_text(*values) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _repair_section_map_payload(
+    payload: dict,
+    *,
+    target_duration_seconds: float | None,
+) -> dict:
+    if isinstance(payload.get("beats"), list):
+        return payload
+
+    section_items = [
+        (key, value)
+        for key, value in payload.items()
+        if key in _SECTION_PURPOSE_ALIASES and isinstance(value, dict)
+    ]
+    if len(section_items) < 2:
+        return payload
+
+    beats = []
+    for index, (section_name, section) in enumerate(section_items, start=1):
+        repaired = dict(section)
+        repaired["id"] = _first_nonempty_text(
+            repaired.get("id"),
+            f"beat_{index:02d}",
+        )
+        raw_purpose = _first_nonempty_text(
+            repaired.get("purpose"),
+            section_name,
+        ).lower()
+        repaired["purpose"] = _SECTION_PURPOSE_ALIASES.get(
+            raw_purpose,
+            _PURPOSE_ALIASES.get(raw_purpose, raw_purpose),
+        )
+
+        if "original_audio_priority" not in repaired and "original_audio" in repaired:
+            repaired["original_audio_priority"] = bool(repaired.pop("original_audio"))
+
+        if "target_duration_seconds" not in repaired:
+            for alias in ("duration_seconds", "duration"):
+                if alias in repaired:
+                    repaired["target_duration_seconds"] = repaired.pop(alias)
+                    break
+
+        if "narration_goal" not in repaired and "narration" in repaired:
+            repaired["narration_goal"] = repaired.pop("narration")
+
+        if "summary" not in repaired:
+            repaired["summary"] = _first_nonempty_text(
+                repaired.get("description"),
+                repaired.get("narration_goal"),
+                repaired.get("title"),
+            )
+        repaired.pop("description", None)
+
+        if "narration_goal" not in repaired:
+            repaired["narration_goal"] = _first_nonempty_text(
+                repaired.get("summary"),
+                repaired.get("title"),
+            )
+
+        if "evidence" not in repaired:
+            source_id = repaired.pop("source_id", None)
+            segment_ids = repaired.pop("segment_ids", None)
+            if source_id and isinstance(segment_ids, list) and segment_ids:
+                repaired["evidence"] = [
+                    {
+                        "source_id": source_id,
+                        "segment_ids": segment_ids,
+                        "note": "",
+                    }
+                ]
+
+        beats.append(repaired)
+
+    first = beats[0]
+    first_title = _first_nonempty_text(first.get("title"))
+    first_summary = _first_nonempty_text(
+        first.get("summary"),
+        first.get("narration_goal"),
+        first_title,
+    )
+    angle_text = _first_nonempty_text(
+        next(
+            (
+                beat.get("summary")
+                for beat in beats[1:]
+                if _first_nonempty_text(beat.get("summary"))
+            ),
+            "",
+        ),
+        first_summary,
+        first_title,
+    )
+
+    if target_duration_seconds is None:
+        durations = []
+        for beat in beats:
+            try:
+                durations.append(float(beat.get("target_duration_seconds")))
+            except (TypeError, ValueError):
+                pass
+        resolved_target = sum(durations) if durations else None
+    else:
+        resolved_target = float(target_duration_seconds)
+
+    repaired_payload = {
+        "version": 1,
+        "title": _first_nonempty_text(payload.get("title"), first_title),
+        "angle": _first_nonempty_text(payload.get("angle"), angle_text),
+        "hook": _first_nonempty_text(
+            payload.get("hook")
+            if isinstance(payload.get("hook"), str)
+            else "",
+            first_summary,
+            first_title,
+        ),
+        "beats": beats,
+    }
+    if resolved_target is not None:
+        repaired_payload["target_duration_seconds"] = resolved_target
+    return repaired_payload
+
+
+def parse_story_plan_response(
+    response_text: str,
+    *,
+    target_duration_seconds: float | None = None,
+) -> StoryPlan:
     raw = _strip_code_fence(response_text)
     if not raw:
         raise StoryPlannerError("story planner returned an empty response")
@@ -101,6 +252,11 @@ def parse_story_plan_response(response_text: str) -> StoryPlan:
 
     if not isinstance(payload, dict):
         raise StoryPlannerError("story planner response must be one JSON object")
+
+    payload = _repair_section_map_payload(
+        payload,
+        target_duration_seconds=target_duration_seconds,
+    )
 
     beats = payload.get("beats")
     if isinstance(beats, list):
@@ -118,6 +274,7 @@ def parse_story_plan_response(response_text: str) -> StoryPlan:
         return StoryPlan.model_validate(payload)
     except ValueError as exc:
         raise StoryPlannerError(f"invalid story plan: {exc}") from exc
+
 
 
 def _transcript_fingerprint(transcript: DocumentaryTranscript) -> str:
@@ -248,7 +405,11 @@ Every beat "id" MUST use the exact form "beat_<number>", for example
 "beat_01", "beat_02", "beat_03". Never use shortened ids such as "b1" or "b2".
 
 OUTPUT:
-Return exactly one JSON object and nothing else, with this shape:
+Return exactly one JSON object and nothing else, with this shape.
+The TOP LEVEL must contain "version", "title", "angle", "hook",
+"target_duration_seconds", and "beats". Do NOT return top-level sections such as
+"context", "conflict", "investigation", "outcome", or "closing"; every section
+must be an object inside the "beats" array:
 {{
   "version": 1,
   "title": "working documentary title",
@@ -536,6 +697,8 @@ def _retry_prompt(base_prompt: str, error: StoryPlannerError, attempt: int) -> s
         "CORRECTION REQUIRED:\n"
         f"Your previous attempt failed validation on attempt {attempt}: {error}\n"
         "Return a completely new JSON object that fixes every issue above. "
+        "Follow the exact top-level schema from OUTPUT; all story sections belong "
+        "inside the beats array, never as top-level keys. "
         "Remove rejected descriptors instead of replacing them with synonyms. "
         "When evidence is sparse, use neutral near-verbatim wording and fewer beats. "
         "Do not invent framing to fill the target duration. "
@@ -705,7 +868,10 @@ def plan_story(
                 )
 
             try:
-                candidate = parse_story_plan_response(response)
+                candidate = parse_story_plan_response(
+                    response,
+                    target_duration_seconds=target_duration_seconds,
+                )
                 _validate_generated_plan(
                     candidate,
                     target_duration_seconds=target_duration_seconds,
