@@ -397,6 +397,52 @@ def test_build_render_command_rejects_mixed_audio_without_source_audio(
         build_documentary_render_command(project.id, root=tmp_path)
 
 
+def test_render_rejects_narration_from_different_saved_voice(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _project_with_video_source(tmp_path)
+    _save_scene(
+        project,
+        source,
+        tmp_path,
+        start=1.0,
+        end=5.0,
+        audio_mode=AudioMode.narration,
+    )
+    tracked = load_project(project.id, tmp_path)
+    tracked.narrator_voices["en"] = "voice-a"
+    save_project(tracked, tmp_path)
+
+    narration_path = tmp_path / "narration.wav"
+    narration_path.write_bytes(b"narration")
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.load_narration_audio",
+        lambda *args, **kwargs: NarrationAudioAsset(
+            scene_id="scene_renderer",
+            language="en",
+            local_path=str(narration_path.resolve()),
+            checksum_sha256="0" * 64,
+            duration_seconds=2.0,
+            audio_codec="pcm_s16le",
+            file_size_bytes=narration_path.stat().st_size,
+            voice_name="voice-b",
+        ),
+    )
+
+    issues = documentary_render_readiness_issues(
+        project.id,
+        root=tmp_path,
+    )
+    assert any("different narrator voice" in issue for issue in issues)
+
+    with pytest.raises(
+        DocumentaryRenderError,
+        match="different narrator voice",
+    ):
+        build_documentary_render_command(project.id, root=tmp_path)
+
+
 def test_build_render_command_rejects_narration_longer_than_scene(
     tmp_path: Path,
     monkeypatch,
