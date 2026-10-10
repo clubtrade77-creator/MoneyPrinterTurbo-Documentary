@@ -248,6 +248,25 @@ def test_parse_story_plan_response_normalizes_resolution_to_payoff():
     assert plan.beats[2].purpose == NarrativePurpose.payoff
 
 
+def test_parse_story_plan_response_normalizes_common_purpose_aliases():
+    aliases = {
+        "revelation": NarrativePurpose.reveal,
+        "investigation": NarrativePurpose.question,
+        "setup": NarrativePurpose.context,
+        "closing": NarrativePurpose.payoff,
+        "next-hook": NarrativePurpose.next_hook,
+        "bridge": NarrativePurpose.transition,
+    }
+
+    for alias, expected in aliases.items():
+        payload = _plan_payload()
+        payload["beats"][1]["purpose"] = alias
+
+        plan = parse_story_plan_response(json.dumps(payload))
+
+        assert plan.beats[1].purpose == expected
+
+
 def test_parse_story_plan_response_repairs_section_map_shape():
     payload = {
         "hook": {
