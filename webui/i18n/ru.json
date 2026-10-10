@@ -669,6 +669,25 @@
     "Documentary Guided Preview Help": "Создай технический preview. Для него можно продолжать работу даже пока права на публикацию ещё проверяются.",
     "Documentary Guided Ready Title": "Готовое видео",
     "Documentary Guided Ready Help": "Когда права на используемые материалы подтверждены, создай финальный мастер и версии на других языках.",
-    "Documentary Guided Research Source": "источник для исследования"
+    "Documentary Guided Research Source": "источник для исследования",
+    "Documentary Simple Section Story": "История",
+    "Documentary Simple Section Materials": "Исходники",
+    "Documentary Simple Section Production": "Сценарий и голос",
+    "Documentary Simple Section Video": "Видео",
+    "Documentary Simple Story Selected": "История выбрана",
+    "Documentary Simple Materials Missing": "Нужно добавить видеоматериалы",
+    "Documentary Simple Materials Status": "Видео готово: {ready} из {total}",
+    "Documentary Simple Script Missing": "Сценарий ещё не создан",
+    "Documentary Simple Script Draft": "Нужно завершить сценарий",
+    "Documentary Simple Voice Missing": "Нужно создать озвучку",
+    "Documentary Simple Production Ready": "Сценарий и озвучка готовы",
+    "Documentary Simple Final Ready": "Финальное видео готово",
+    "Documentary Simple Preview Ready": "Черновик видео готов",
+    "Documentary Simple Video Missing": "Видео ещё не создано",
+    "Documentary Simple Continue": "Продолжить",
+    "Documentary Simple Open": "Открыть",
+    "Documentary Simple Production Help": "Здесь создаётся сценарий, выбираются нужные фрагменты исходников и настраивается голос рассказчика.",
+    "Documentary Simple Video Help": "Здесь создаётся черновик, финальное видео и версии на других языках.",
+    "Documentary Simple Advanced": "Дополнительно"
   }
 }
