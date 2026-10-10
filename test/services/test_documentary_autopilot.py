@@ -31,8 +31,13 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
     )
     project_snapshot = _project_snapshot(source)
 
+    source_bundle = autopilot._SourceBundle(media_source=source)
     monkeypatch.setattr(autopilot, "discover_stories", lambda *a, **k: [story])
-    monkeypatch.setattr(autopilot, "_choose_story", lambda candidates: story)
+    monkeypatch.setattr(
+        autopilot,
+        "_choose_story_with_source",
+        lambda *a, **k: (story, source_bundle),
+    )
     monkeypatch.setattr(
         autopilot,
         "create_project",
@@ -51,11 +56,6 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
         autopilot,
         "add_source",
         lambda *a, **k: calls.append("add_source"),
-    )
-    monkeypatch.setattr(
-        autopilot,
-        "_hunt_source",
-        lambda *a, **k: source,
     )
     monkeypatch.setattr(
         autopilot,
@@ -165,8 +165,13 @@ def test_run_autopilot_renders_final_when_rights_are_cleared(
     project_snapshot = _project_snapshot(source)
     renders = []
 
+    source_bundle = autopilot._SourceBundle(media_source=source)
     monkeypatch.setattr(autopilot, "discover_stories", lambda *a, **k: [story])
-    monkeypatch.setattr(autopilot, "_choose_story", lambda candidates: story)
+    monkeypatch.setattr(
+        autopilot,
+        "_choose_story_with_source",
+        lambda *a, **k: (story, source_bundle),
+    )
     monkeypatch.setattr(autopilot, "create_project", lambda *a, **k: created)
     monkeypatch.setattr(
         autopilot,
@@ -178,7 +183,6 @@ def test_run_autopilot_renders_final_when_rights_are_cleared(
         ),
     )
     monkeypatch.setattr(autopilot, "add_source", lambda *a, **k: None)
-    monkeypatch.setattr(autopilot, "_hunt_source", lambda *a, **k: source)
     monkeypatch.setattr(autopilot, "fetch_source_local_copy", lambda *a, **k: None)
     monkeypatch.setattr(
         autopilot.subtitle_service,
