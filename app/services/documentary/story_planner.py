@@ -267,13 +267,14 @@ def parse_story_plan_response(
         target_duration_seconds=target_duration_seconds,
     )
 
-    if target_duration_seconds is not None:
-        payload["target_duration_seconds"] = float(target_duration_seconds)
-    elif "target_duration_seconds" not in payload:
+    if "target_duration_seconds" not in payload:
         for alias in ("total_duration", "total_duration_seconds", "duration"):
             if alias in payload:
                 payload["target_duration_seconds"] = payload[alias]
                 break
+        else:
+            if target_duration_seconds is not None:
+                payload["target_duration_seconds"] = float(target_duration_seconds)
     payload.pop("total_duration", None)
     payload.pop("total_duration_seconds", None)
     if "beats" in payload:
