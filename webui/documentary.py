@@ -57,6 +57,7 @@ from app.services.documentary.story_planner import (
 from app.services.documentary.renderer import (
     DocumentaryRenderError,
     documentary_render_path,
+    documentary_render_readiness_issues,
     render_documentary,
 )
 from app.services.documentary.transcription import (
@@ -159,11 +160,23 @@ def _render_output_is_current(project_id: str) -> bool:
     if not output.is_file():
         return False
 
+    project = load_project(project_id)
     dependencies = [
         project_manifest_path(project_id),
         story_plan_path(project_id),
         clip_plan_path(project_id),
     ]
+    dependencies.extend(
+        Path(source.local_path)
+        for source in project.sources
+        if source.local_path
+    )
+    dependencies.extend(
+        Path(asset.local_path)
+        for asset in project.narration_audio
+        if asset.local_path
+    )
+
     output_mtime = output.stat().st_mtime
     return all(
         not dependency.is_file() or output_mtime >= dependency.stat().st_mtime
@@ -1456,6 +1469,12 @@ def _render_master_video(project, tr: Tr) -> None:
             )
         )
 
+        readiness_issues = documentary_render_readiness_issues(project.id)
+        if readiness_issues:
+            st.warning(tr("Documentary Render Not Ready"))
+            for issue in readiness_issues:
+                st.caption(f"• {issue}")
+
         button_label = (
             tr("Documentary Render Again")
             if output_path.is_file()
@@ -1465,6 +1484,7 @@ def _render_master_video(project, tr: Tr) -> None:
             button_label,
             type="primary",
             width="stretch",
+            disabled=bool(readiness_issues),
             key=f"documentary_render_{project.id}",
         ):
             try:
