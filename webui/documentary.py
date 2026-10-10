@@ -1080,7 +1080,7 @@ def _render_autopilot(tr: Tr) -> None:
                 resume_topic = ""
 
         can_resume = bool(resume_project_id) and (
-            not resume_topic or resume_topic == topic.strip()
+            resume_topic == topic.strip()
         )
         if can_resume:
             st.info(tr("Documentary Autopilot Resume Available"))
