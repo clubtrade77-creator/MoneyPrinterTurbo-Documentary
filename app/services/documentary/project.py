@@ -367,6 +367,41 @@ def set_narrator_voice(
         return project
 
 
+def update_scene_narration(
+    project_id: str,
+    updates: dict[str, str],
+    *,
+    root: str | os.PathLike | None = None,
+) -> DocumentaryProject:
+    clean_updates = {
+        str(scene_id): str(text or "").strip()
+        for scene_id, text in (updates or {}).items()
+    }
+    if not clean_updates:
+        return load_project(project_id, root)
+
+    with _project_lock(project_id, root):
+        project = _load_project_unlocked(project_id, root)
+        scenes_by_id = {scene.id: scene for scene in project.plan.scenes}
+        unknown_ids = sorted(set(clean_updates) - set(scenes_by_id))
+        if unknown_ids:
+            raise ValueError(
+                "documentary narration update references unknown scene: "
+                + ", ".join(unknown_ids)
+            )
+
+        changed = False
+        for scene_id, narration_text in clean_updates.items():
+            scene = scenes_by_id[scene_id]
+            if scene.narration_text != narration_text:
+                scene.narration_text = narration_text
+                changed = True
+
+        if changed:
+            _save_project_unlocked(project, root)
+        return project
+
+
 def sha256_file(path: str | os.PathLike, chunk_size: int = 1024 * 1024) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
