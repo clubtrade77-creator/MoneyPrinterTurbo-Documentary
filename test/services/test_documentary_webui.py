@@ -3,6 +3,7 @@ from io import BytesIO
 
 import pytest
 
+from app.services.documentary.localization import LocalizationError
 import webui.documentary as documentary_ui
 from webui.documentary import (
     _default_story_target_seconds,
@@ -338,6 +339,44 @@ def test_documentary_render_currentness_ignores_other_language_audio(
     os.utime(ru_audio, (20, 20))
 
     assert _render_output_is_current("doc_test") is True
+
+
+def test_localized_render_currentness_requires_valid_localization(
+    tmp_path,
+    monkeypatch,
+):
+    output = tmp_path / "master-ru.mp4"
+    output.write_bytes(b"render")
+
+    monkeypatch.setattr(
+        documentary_ui,
+        "documentary_render_path",
+        lambda project_id, language=None: output,
+    )
+    monkeypatch.setattr(
+        documentary_ui,
+        "load_project",
+        lambda project_id: SimpleNamespace(
+            master_language="en",
+            plan=SimpleNamespace(scenes=[]),
+            sources=[],
+            narration_audio=[],
+        ),
+    )
+
+    def stale_localization(*args, **kwargs):
+        raise LocalizationError("stale localization")
+
+    monkeypatch.setattr(
+        documentary_ui,
+        "load_localization_plan",
+        stale_localization,
+    )
+
+    assert _render_output_is_current(
+        "doc_test",
+        language="ru",
+    ) is False
 
 
 def test_documentary_render_currentness_requires_output(tmp_path, monkeypatch):
