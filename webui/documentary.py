@@ -161,26 +161,32 @@ def _render_output_is_current(project_id: str) -> bool:
         return False
 
     project = load_project(project_id)
-    dependencies = [
+    metadata_dependencies = [
         project_manifest_path(project_id),
         story_plan_path(project_id),
         clip_plan_path(project_id),
     ]
-    dependencies.extend(
+    media_dependencies = [
         Path(source.local_path)
         for source in project.sources
         if source.local_path
-    )
-    dependencies.extend(
+    ]
+    media_dependencies.extend(
         Path(asset.local_path)
         for asset in project.narration_audio
         if asset.local_path
     )
 
+    if any(not dependency.is_file() for dependency in media_dependencies):
+        return False
+
     output_mtime = output.stat().st_mtime
     return all(
         not dependency.is_file() or output_mtime >= dependency.stat().st_mtime
-        for dependency in dependencies
+        for dependency in metadata_dependencies
+    ) and all(
+        output_mtime >= dependency.stat().st_mtime
+        for dependency in media_dependencies
     )
 
 
