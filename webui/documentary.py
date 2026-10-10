@@ -503,6 +503,76 @@ def _render_story_discovery(tr: Tr) -> None:
                         except (OSError, ValueError, SourceHunterError) as exc:
                             bundle["errors"].append(f"web: {exc}")
                         else:
+                            article_hints = bundle["article_hints"]
+                            if (
+                                article_hints is None
+                                or (
+                                    not article_hints.agency_names
+                                    and not article_hints.official_urls
+                                )
+                            ):
+                                for web_candidate in bundle["web"][:2]:
+                                    if web_candidate.official_score >= 35:
+                                        continue
+                                    try:
+                                        refined_hints = inspect_story_article(
+                                            web_candidate.url,
+                                            timeout_seconds=5.0,
+                                        )
+                                    except (
+                                        OSError,
+                                        ValueError,
+                                        SourceHunterError,
+                                    ):
+                                        continue
+                                    if (
+                                        refined_hints.agency_names
+                                        or refined_hints.official_urls
+                                    ):
+                                        bundle["article_hints"] = refined_hints
+                                        article_hints = refined_hints
+                                        agency_hints = refined_hints.agency_names
+                                        official_urls = refined_hints.official_urls
+                                        try:
+                                            refined_web = find_web_sources(
+                                                candidate.title,
+                                                source_country=(
+                                                    candidate.source_country
+                                                ),
+                                                search_hints=agency_hints,
+                                                official_urls=official_urls,
+                                                limit=6,
+                                            )
+                                        except (
+                                            OSError,
+                                            ValueError,
+                                            SourceHunterError,
+                                        ):
+                                            refined_web = []
+                                        if refined_web:
+                                            merged = {}
+                                            for item in (
+                                                bundle["web"] + refined_web
+                                            ):
+                                                current = merged.get(item.url)
+                                                if (
+                                                    current is None
+                                                    or item.score > current.score
+                                                ):
+                                                    merged[item.url] = item
+                                            bundle["web"] = sorted(
+                                                merged.values(),
+                                                key=lambda item: (
+                                                    item.score,
+                                                    item.official_score,
+                                                    item.video_signal_score,
+                                                    item.title_overlap_score,
+                                                    item.title.lower(),
+                                                ),
+                                                reverse=True,
+                                            )[:6]
+                                        break
+
                             inspected_official_pages = 0
                             for official_candidate in bundle["web"]:
                                 if official_candidate.official_score < 35:
