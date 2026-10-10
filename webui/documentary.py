@@ -50,6 +50,7 @@ from app.services.documentary.source_hunter import (
     find_embedded_media,
     find_source_videos,
     find_web_sources,
+    inspect_story_article,
 )
 from app.services.documentary.story_planner import (
     StoryPlannerError,
@@ -467,13 +468,36 @@ def _render_story_discovery(tr: Tr) -> None:
                         "web": [],
                         "videos": [],
                         "embedded": {},
+                        "article_hints": None,
                         "errors": [],
                     }
                     with st.spinner(tr("Documentary Source Hunter Searching")):
                         try:
+                            bundle["article_hints"] = inspect_story_article(
+                                candidate.url,
+                                timeout_seconds=5.0,
+                            )
+                        except (OSError, ValueError, SourceHunterError):
+                            bundle["article_hints"] = None
+
+                        article_hints = bundle["article_hints"]
+                        agency_hints = (
+                            article_hints.agency_names
+                            if article_hints is not None
+                            else ()
+                        )
+                        official_urls = (
+                            article_hints.official_urls
+                            if article_hints is not None
+                            else ()
+                        )
+
+                        try:
                             bundle["web"] = find_web_sources(
                                 candidate.title,
                                 source_country=candidate.source_country,
+                                search_hints=agency_hints,
+                                official_urls=official_urls,
                                 limit=6,
                             )
                         except (OSError, ValueError, SourceHunterError) as exc:
@@ -511,6 +535,7 @@ def _render_story_discovery(tr: Tr) -> None:
                         try:
                             bundle["videos"] = find_source_videos(
                                 candidate.title,
+                                search_hints=agency_hints,
                                 limit=6,
                             )
                         except (OSError, ValueError, SourceHunterError) as exc:
@@ -537,7 +562,26 @@ def _render_story_discovery(tr: Tr) -> None:
                 web_candidates = source_bundle.get("web", [])
                 source_candidates = source_bundle.get("videos", [])
                 embedded_by_page = source_bundle.get("embedded", {})
+                article_hints = source_bundle.get("article_hints")
                 source_errors = source_bundle.get("errors", [])
+
+                if article_hints is not None and (
+                    article_hints.agency_names or article_hints.official_urls
+                ):
+                    details = []
+                    if article_hints.agency_names:
+                        details.append(
+                            tr("Documentary Source Hunter Article Agencies").format(
+                                agencies=", ".join(article_hints.agency_names)
+                            )
+                        )
+                    if article_hints.official_urls:
+                        details.append(
+                            tr("Documentary Source Hunter Article Official Links").format(
+                                count=len(article_hints.official_urls)
+                            )
+                        )
+                    st.caption(" · ".join(details))
 
                 if source_errors:
                     st.warning(
