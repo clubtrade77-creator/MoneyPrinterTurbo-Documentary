@@ -490,6 +490,10 @@ def inspect_story_article(
                     raise SourceHunterError(
                         "story article redirected to an unsafe URL"
                     )
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+                response = None
                 current_url = next_url
                 continue
 
@@ -512,7 +516,6 @@ def inspect_story_article(
         for raw_url in parser.links:
             absolute = urljoin(current_url, unescape(raw_url))
             parsed = urlparse(absolute)
-            host = (parsed.hostname or "").lower()
             if not _official_page_allowed_for_inspection(absolute):
                 continue
             normalized = parsed._replace(fragment="").geturl()
