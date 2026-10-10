@@ -26,6 +26,7 @@ from app.services.documentary.project import (
     load_project,
     project_dir,
     project_manifest_path,
+    update_scene_narration,
 )
 from app.services.documentary.narration_synthesis import (
     NarrationSynthesisError,
@@ -1392,29 +1393,75 @@ def _render_narration_writer(project, tr: Tr) -> None:
     beats = {beat.id: beat for beat in story_plan.beats}
     with st.expander(tr("Documentary Narration"), expanded=True):
         narration_needed = 0
+        narration_updates: dict[str, str] = {}
         for index, scene in enumerate(project.plan.scenes, start=1):
-            beat = beats.get(scene.story_beat_id)
-            preserve_original = (
-                beat is not None
-                and beat.original_audio_priority
-                and scene.audio_mode == AudioMode.original
-            )
-            if preserve_original:
-                st.write(
-                    tr("Documentary Narration Original").format(index=index)
-                )
+            requires_narration = scene.audio_mode in {
+                AudioMode.narration,
+                AudioMode.mixed,
+            }
+            if not requires_narration:
+                if scene.audio_mode == AudioMode.original:
+                    st.write(
+                        tr("Documentary Narration Original").format(index=index)
+                    )
+                else:
+                    st.write(
+                        tr("Documentary Narration Not Required").format(index=index)
+                    )
                 continue
 
             if scene.narration_text:
                 st.markdown(
                     f"**{tr('Documentary Narration Scene').format(index=index)}**"
                 )
-                st.write(scene.narration_text)
+                edited_text = st.text_area(
+                    tr("Documentary Narration Edit"),
+                    value=scene.narration_text,
+                    height=110,
+                    key=(
+                        "documentary_narration_edit_"
+                        f"{project.id}_{scene.id}_{project.revision}"
+                    ),
+                ).strip()
+                narration_updates[scene.id] = edited_text
             else:
                 narration_needed += 1
                 st.write(
                     tr("Documentary Narration Missing").format(index=index)
                 )
+
+        changed_narration = {
+            scene_id: text
+            for scene_id, text in narration_updates.items()
+            if next(
+                scene
+                for scene in project.plan.scenes
+                if scene.id == scene_id
+            ).narration_text
+            != text
+        }
+        if changed_narration:
+            st.info(tr("Documentary Narration Unsaved"))
+            if st.button(
+                tr("Documentary Narration Save"),
+                type="primary",
+                width="stretch",
+                key=f"documentary_narration_save_{project.id}",
+            ):
+                try:
+                    update_scene_narration(
+                        project.id,
+                        changed_narration,
+                    )
+                except (OSError, ValueError) as exc:
+                    st.error(
+                        tr("Documentary Narration Save Failed").format(
+                            error=str(exc)
+                        )
+                    )
+                else:
+                    st.success(tr("Documentary Narration Saved"))
+                    st.rerun()
 
         if narration_needed:
             if st.button(
@@ -1505,6 +1552,7 @@ def _render_narration_writer(project, tr: Tr) -> None:
                 tr("Documentary Narration Audio Generate"),
                 type="primary",
                 width="stretch",
+                disabled=bool(changed_narration),
                 key=f"documentary_narration_audio_generate_{project.id}",
             ):
                 try:
