@@ -14,7 +14,12 @@ from app.services.documentary.localization import localize_project
 from app.services.documentary.media_fetcher import fetch_source_local_copy
 from app.services.documentary.narration import write_narration
 from app.services.documentary.narration_synthesis import synthesize_narration
-from app.services.documentary.project import add_source, create_project, load_project
+from app.services.documentary.project import (
+    add_source,
+    create_project,
+    load_project,
+    save_project,
+)
 from app.services.documentary.renderer import render_documentary
 from app.services.documentary.source_hunter import (
     SourceHunterError,
@@ -41,8 +46,8 @@ ProgressCallback = Callable[["AutopilotProgress"], None]
 @dataclass(frozen=True)
 class AutopilotProfile:
     topic: str = ""
-    master_language: str = "ru"
-    target_languages: tuple[str, ...] = ("en", "es")
+    master_language: str = ""
+    output_languages: tuple[str, ...] = ("ru", "en", "es")
     target_duration_seconds: int = 600
     lookback_hours: int = 72
     discovery_limit: int = 12
@@ -257,13 +262,16 @@ def run_autopilot(
     still unverified. Final masters stay gated by the existing renderer rights checks.
     """
     profile = profile or AutopilotProfile()
-    master_language = _normalize_language(profile.master_language)
-    target_languages = tuple(
-        language
-        for language in (
-            _normalize_language(item) for item in profile.target_languages
+    initial_master_language = (
+        _normalize_language(profile.master_language)
+        if str(profile.master_language or "").strip()
+        else "en"
+    )
+    output_languages = tuple(
+        dict.fromkeys(
+            _normalize_language(item)
+            for item in profile.output_languages
         )
-        if language != master_language
     )
     project_id = ""
     stage = "story"
@@ -279,7 +287,7 @@ def run_autopilot(
 
         project = create_project(
             story.title,
-            master_language=master_language,
+            master_language=initial_master_language,
             root=root,
         )
         project_id = project.id
@@ -301,13 +309,29 @@ def run_autopilot(
         stage = "transcription"
         _emit(progress, stage, "Analyzing speech and timecodes", 0.34)
         model = subtitle_service.get_whisper_model("small")
-        transcribe_source(
+        transcript = transcribe_source(
             project.id,
             source.id,
             root=root,
             language=None,
             model_override=model,
             model_name="small",
+        )
+        detected_language = str(transcript.language or "").split("-", 1)[0].lower()
+        master_language = (
+            detected_language
+            if detected_language in {"ru", "en", "es"}
+            else initial_master_language
+        )
+        if master_language != initial_master_language:
+            current_project = load_project(project.id, root)
+            current_project.master_language = master_language
+            save_project(current_project, root)
+
+        target_languages = tuple(
+            language
+            for language in output_languages
+            if language != master_language
         )
 
         stage = "story_plan"
