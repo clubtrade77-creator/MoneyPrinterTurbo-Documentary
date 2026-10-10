@@ -348,6 +348,109 @@ def _build_documentary_render_command_and_expectations(
     return command, expected_duration, len(resolved_scenes), project.revision
 
 
+def documentary_render_readiness_issues(
+    project_id: str,
+    *,
+    root: str | os.PathLike | None = None,
+) -> list[str]:
+    """Return cheap, user-facing blockers before starting an expensive render.
+
+    Full checksum validation still happens inside the renderer. This preflight avoids
+    starting FFmpeg for predictable problems such as missing local media, stale
+    narration, invalid scene ranges, or a timeline that no longer matches Story Plan.
+    """
+    project = load_project(project_id, root)
+    if not project.plan.scenes:
+        return ["documentary project has no scenes to render"]
+
+    issues: list[str] = []
+    if project.plan.story_plan_fingerprint:
+        try:
+            current_story_plan = load_story_plan(project_id, root=root)
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            issues.append(f"story plan is unavailable: {exc}")
+        else:
+            if (
+                story_plan_fingerprint(current_story_plan)
+                != project.plan.story_plan_fingerprint
+            ):
+                issues.append(
+                    "documentary timeline is stale; Story Plan changed after clip selection"
+                )
+
+    sources = {source.id: source for source in project.sources}
+    sources_dir = (project_dir(project.id, root) / "sources").resolve()
+
+    for scene in project.plan.scenes:
+        if scene.scene_type not in _SUPPORTED_SCENE_TYPES:
+            issues.append(
+                f"unsupported scene type for {scene.id}: {scene.scene_type.value}"
+            )
+            continue
+        if scene.audio_mode not in _SUPPORTED_AUDIO_MODES:
+            issues.append(
+                f"unsupported audio mode for {scene.id}: {scene.audio_mode.value}"
+            )
+            continue
+
+        source = sources.get(scene.source_id)
+        if source is None:
+            issues.append(f"scene {scene.id} references an unknown source")
+            continue
+        if not source.local_path:
+            issues.append(f"source {source.id} has no local video copy")
+            continue
+
+        source_path = Path(source.local_path).expanduser().resolve()
+        if sources_dir != source_path.parent and sources_dir not in source_path.parents:
+            issues.append(f"source {source.id} is outside project storage")
+            continue
+        if not source_path.is_file():
+            issues.append(f"local video is missing for source {source.id}")
+            continue
+        if source.video_metadata is None:
+            issues.append(f"source {source.id} has no verified video metadata")
+            continue
+
+        if scene.source_start is None or scene.source_end is None:
+            issues.append(f"scene {scene.id} has no source range")
+            continue
+        source_duration = source.video_metadata.duration_seconds
+        if scene.source_start >= source_duration:
+            issues.append(f"scene {scene.id} starts outside its source")
+            continue
+        if scene.source_end > source_duration + _SOURCE_RANGE_TOLERANCE_SECONDS:
+            issues.append(f"scene {scene.id} ends outside its source")
+            continue
+
+        duration = min(scene.source_end, source_duration) - scene.source_start
+        if duration <= 0:
+            issues.append(f"scene {scene.id} has an empty source range")
+            continue
+
+        if scene.audio_mode == AudioMode.mixed and not source.video_metadata.has_audio:
+            issues.append(f"mixed scene {scene.id} requires source audio")
+
+        if scene.audio_mode in {AudioMode.narration, AudioMode.mixed}:
+            try:
+                narration = load_narration_audio(
+                    project.id,
+                    scene.id,
+                    language=project.master_language,
+                    root=root,
+                )
+            except (FileNotFoundError, NarrationAudioError) as exc:
+                issues.append(str(exc))
+            else:
+                if (
+                    narration.duration_seconds
+                    > duration + _NARRATION_DURATION_TOLERANCE_SECONDS
+                ):
+                    issues.append(f"narration audio exceeds scene duration: {scene.id}")
+
+    return list(dict.fromkeys(issues))
+
+
 def build_documentary_render_command(
     project_id: str,
     *,
