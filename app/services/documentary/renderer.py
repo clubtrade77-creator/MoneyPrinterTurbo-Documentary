@@ -82,6 +82,19 @@ def documentary_render_path(
     return project_dir(project_id, root) / "renders" / filename
 
 
+def documentary_preview_path(
+    project_id: str,
+    root: str | os.PathLike | None = None,
+    *,
+    language: str | None = None,
+) -> Path:
+    filename = "preview.mp4"
+    if language:
+        safe_language = _normalize_render_language(language).replace("-", "_")
+        filename = f"preview-{safe_language}.mp4"
+    return project_dir(project_id, root) / "renders" / filename
+
+
 def _escape_subtitle_filter_path(path: Path) -> str:
     """Escape an absolute subtitle path for FFmpeg's subtitles filter parser."""
     value = str(path.expanduser().resolve())
@@ -144,6 +157,7 @@ def _validate_scene(
     scene,
     *,
     narration_language: str,
+    require_publishable_rights: bool,
     root: str | os.PathLike | None,
     source_cache: dict[str, SourceAsset] | None = None,
 ) -> tuple[SourceAsset, float, NarrationAudioAsset | None]:
@@ -165,6 +179,10 @@ def _validate_scene(
         source = _resolve_source(project, scene.source_id, root=root)
         if source_cache is not None:
             source_cache[scene.source_id] = source
+    if require_publishable_rights and not source.rights_cleared_for_publish:
+        raise DocumentaryRenderError(
+            f"source {source.id} publication rights require review"
+        )
     if scene.source_start is None or scene.source_end is None:
         raise DocumentaryRenderError(
             f"source-backed documentary scene has no source range: {scene.id}"
@@ -231,6 +249,7 @@ def _build_documentary_render_command_and_expectations(
     project_id: str,
     *,
     language: str | None = None,
+    require_publishable_rights: bool = True,
     root: str | os.PathLike | None = None,
     output_path: str | os.PathLike | None = None,
     width: int = DEFAULT_RENDER_WIDTH,
@@ -288,6 +307,7 @@ def _build_documentary_render_command_and_expectations(
             project,
             scene,
             narration_language=narration_language,
+            require_publishable_rights=require_publishable_rights,
             root=root,
             source_cache=source_cache,
         )
@@ -456,6 +476,7 @@ def documentary_render_readiness_issues(
     project_id: str,
     *,
     language: str | None = None,
+    require_publishable_rights: bool = True,
     root: str | os.PathLike | None = None,
 ) -> list[str]:
     """Return cheap, user-facing blockers before starting an expensive render.
@@ -529,6 +550,10 @@ def documentary_render_readiness_issues(
         if source is None:
             issues.append(f"scene {scene.id} references an unknown source")
             continue
+        if require_publishable_rights and not source.rights_cleared_for_publish:
+            issues.append(
+                f"source {source.id} publication rights require review"
+            )
         if not source.local_path:
             issues.append(f"source {source.id} has no local video copy")
             continue
@@ -600,6 +625,7 @@ def build_documentary_render_command(
     project_id: str,
     *,
     language: str | None = None,
+    require_publishable_rights: bool = True,
     root: str | os.PathLike | None = None,
     output_path: str | os.PathLike | None = None,
     width: int = DEFAULT_RENDER_WIDTH,
@@ -610,6 +636,7 @@ def build_documentary_render_command(
     command, _, _, _ = _build_documentary_render_command_and_expectations(
         project_id,
         language=language,
+        require_publishable_rights=require_publishable_rights,
         root=root,
         output_path=output_path,
         width=width,
@@ -664,13 +691,14 @@ def render_documentary(
     project_id: str,
     *,
     language: str | None = None,
+    preview: bool = False,
     root: str | os.PathLike | None = None,
     width: int = DEFAULT_RENDER_WIDTH,
     height: int = DEFAULT_RENDER_HEIGHT,
     fps: int = DEFAULT_RENDER_FPS,
     timeout_seconds: int = DEFAULT_RENDER_TIMEOUT_SECONDS,
 ) -> Path:
-    """Render the current documentary timeline in the requested narration language."""
+    """Render a publication-gated master or a technical preview."""
     if timeout_seconds <= 0:
         raise ValueError("documentary render timeout must be positive")
 
@@ -694,14 +722,23 @@ def render_documentary(
             ) from exc
         localization_fingerprint = localization.reviewed_content_fingerprint
 
-    output_path = documentary_render_path(
-        project_id,
-        root,
-        language=(
-            narration_language
-            if narration_language != master_language
-            else None
-        ),
+    output_language = (
+        narration_language
+        if narration_language != master_language
+        else None
+    )
+    output_path = (
+        documentary_preview_path(
+            project_id,
+            root,
+            language=output_language,
+        )
+        if preview
+        else documentary_render_path(
+            project_id,
+            root,
+            language=output_language,
+        )
     ).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -718,6 +755,7 @@ def render_documentary(
             _build_documentary_render_command_and_expectations(
                 project_id,
                 language=narration_language,
+                require_publishable_rights=not preview,
                 root=root,
                 output_path=staged_path,
                 width=width,
