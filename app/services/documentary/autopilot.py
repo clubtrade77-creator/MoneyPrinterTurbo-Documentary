@@ -493,16 +493,11 @@ def _fetch_and_transcribe_first_available_source(
     root=None,
 ):
     errors = []
-    candidates = [primary_source] + _fallback_video_sources(
-        story,
-        exclude_source_id=primary_source.id,
-        limit=source_limit,
-    )
     seen_ids = set()
 
-    for source in candidates:
+    def try_source(source: SourceAsset):
         if source.id in seen_ids:
-            continue
+            return None
         seen_ids.add(source.id)
 
         try:
@@ -523,7 +518,7 @@ def _fetch_and_transcribe_first_available_source(
                 "Documentary Autopilot source download failed; trying next source: "
                 f"source={source.id}, error={exc}"
             )
-            continue
+            return None
 
         try:
             transcript = transcribe_source(
@@ -540,9 +535,22 @@ def _fetch_and_transcribe_first_available_source(
                 "Documentary Autopilot source has no usable speech; "
                 f"trying next source: source={source.id}, error={exc}"
             )
-            continue
+            return None
 
         return fetched, transcript
+
+    result = try_source(primary_source)
+    if result is not None:
+        return result
+
+    for source in _fallback_video_sources(
+        story,
+        exclude_source_id=primary_source.id,
+        limit=source_limit,
+    ):
+        result = try_source(source)
+        if result is not None:
+            return result
 
     detail = " | ".join(errors)
     if len(detail) > 3000:
@@ -553,6 +561,7 @@ def _fetch_and_transcribe_first_available_source(
         + (f": {detail}" if detail else ""),
         project_id=project_id,
     )
+
 
 
 def _project_has_narrated_scenes(project_id: str, *, root=None) -> bool:
