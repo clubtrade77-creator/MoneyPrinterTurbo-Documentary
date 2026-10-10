@@ -600,7 +600,14 @@
     "Documentary Attach Local Copy File": "Локальная копия MP4/MOV",
     "Documentary Attach Local Copy Button": "Прикрепить локальную копию",
     "Documentary Attach Local Copy Failed": "Не удалось прикрепить локальную копию: {error}",
-    "Documentary Attach Local Copy Complete": "Локальная копия прикреплена к источнику {source_id}."
+    "Documentary Attach Local Copy Complete": "Локальная копия прикреплена к источнику {source_id}.",
+    "Documentary Narration Not Required": "Сцена {index}: закадровый голос не требуется.",
+    "Documentary Narration Edit": "Текст рассказчика",
+    "Documentary Narration Unsaved": "В тексте рассказчика есть несохранённые изменения. Сначала сохрани их, затем создавай озвучку.",
+    "Documentary Narration Save": "Сохранить изменения текста",
+    "Documentary Narration Save Failed": "Не удалось сохранить текст рассказчика: {error}",
+    "Documentary Narration Saved": "Изменения текста сохранены.",
+    "Documentary Narration Ready": "Текст рассказчика готов к озвучке."
 
   }
 }
