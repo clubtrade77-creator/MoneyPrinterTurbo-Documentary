@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import re
 from dataclasses import dataclass
@@ -136,10 +137,25 @@ _AGENCY_ACRONYMS = {
     "PPB", "NYPD", "LAPD", "LASD", "ICE", "FBI", "DEA", "ATF", "CBP",
     "DHS", "DOJ", "USMS",
 }
+_AGENCY_NAME_PATTERN = re.compile(
+    r"\b(?:[A-Z][A-Za-z0-9.&'’()-]*\s+){1,5}"
+    r"(?:Police Department|Police Bureau|"
+    r"Sheriff(?:'s|’s)? (?:Office|Department)|"
+    r"Fire Department|District Attorney(?:'s|’s)? Office|"
+    r"Department of Public Safety|State Patrol|Highway Patrol)\b"
+)
+_MAX_ARTICLE_REDIRECTS = 2
 
 
 class SourceHunterError(RuntimeError):
     """Raised when original-video candidate discovery cannot be completed."""
+
+
+@dataclass(frozen=True)
+class StoryArticleHints:
+    final_url: str
+    agency_names: tuple[str, ...]
+    official_urls: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -210,6 +226,37 @@ class _OfficialMediaParser(HTMLParser):
             self.links.append((self._anchor_url, label or "linked media"))
             self._anchor_url = ""
             self._anchor_text = []
+
+
+class _StoryArticleParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.text_parts: list[str] = []
+        self.links: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in {"script", "style", "noscript"}:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        if tag == "a":
+            href = str(dict(attrs).get("href") or "").strip()
+            if href:
+                self.links.append(href)
+
+    def handle_endtag(self, tag):
+        if tag.lower() in {"script", "style", "noscript"} and self._skip_depth:
+            self._skip_depth -= 1
+
+    def handle_data(self, data):
+        if self._skip_depth:
+            return
+        value = re.sub(r"\s+", " ", data or "").strip()
+        if value:
+            self.text_parts.append(value)
 
 
 class _DuckDuckGoParser(HTMLParser):
@@ -348,6 +395,187 @@ def _normalize_search_result_url(value: str) -> str:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return ""
     return raw
+
+
+def _public_article_url_allowed(url: str) -> bool:
+    try:
+        parsed = urlparse((url or "").strip())
+    except ValueError:
+        return False
+
+    host = (parsed.hostname or "").lower().strip(".")
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or host in {"localhost", "localhost.localdomain"}
+        or host.endswith(".local")
+    ):
+        return False
+
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return bool(address.is_global)
+
+
+def _extract_agency_names(text: str) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
+
+    for match in _AGENCY_NAME_PATTERN.finditer(text or ""):
+        value = re.sub(r"\s+", " ", match.group(0)).strip(" ,.;:-")
+        if value.lower().startswith("the "):
+            value = value[4:].strip()
+        key = value.lower()
+        if len(value) < 6 or key in seen:
+            continue
+        names.append(value)
+        seen.add(key)
+        if len(names) >= 6:
+            break
+
+    for acronym in sorted(_AGENCY_ACRONYMS):
+        if len(names) >= 6:
+            break
+        if re.search(rf"\b{re.escape(acronym)}\b", text or ""):
+            key = acronym.lower()
+            if key not in seen:
+                names.append(acronym)
+                seen.add(key)
+
+    return tuple(names)
+
+
+def inspect_story_article(
+    story_url: str,
+    *,
+    timeout_seconds: float = 6.0,
+    session=None,
+) -> StoryArticleHints:
+    """Extract agency names and government links from a story page.
+
+    This is a best-effort research helper. Redirects are followed manually and only
+    to public HTTP(S) URLs; private/literal local addresses are rejected.
+    """
+    if not _public_article_url_allowed(story_url):
+        raise SourceHunterError("story article URL is not a safe public HTTP(S) URL")
+
+    request = session or requests
+    current_url = story_url
+    response = None
+
+    try:
+        for redirect_index in range(_MAX_ARTICLE_REDIRECTS + 1):
+            try:
+                response = request.get(
+                    current_url,
+                    headers=_REQUEST_HEADERS,
+                    timeout=min(max(float(timeout_seconds), 1.0), 10.0),
+                    allow_redirects=False,
+                )
+            except requests.RequestException as exc:
+                raise SourceHunterError("story article request failed") from exc
+
+            status = int(getattr(response, "status_code", 0) or 0)
+            if 300 <= status < 400:
+                if redirect_index >= _MAX_ARTICLE_REDIRECTS:
+                    raise SourceHunterError("story article redirected too many times")
+                headers = getattr(response, "headers", {}) or {}
+                location = str(headers.get("Location") or "").strip()
+                next_url = urljoin(current_url, location)
+                if not location or not _public_article_url_allowed(next_url):
+                    raise SourceHunterError(
+                        "story article redirected to an unsafe URL"
+                    )
+                current_url = next_url
+                continue
+
+            if status != 200:
+                raise SourceHunterError(
+                    f"story article returned HTTP {status or 'unknown'}"
+                )
+            break
+
+        if response is None:
+            raise SourceHunterError("story article returned no response")
+
+        parser = _StoryArticleParser()
+        parser.feed((getattr(response, "text", "") or "")[:2_000_000])
+        article_text = " ".join(parser.text_parts)
+        agency_names = _extract_agency_names(article_text)
+
+        official_urls: list[str] = []
+        seen_urls: set[str] = set()
+        for raw_url in parser.links:
+            absolute = urljoin(current_url, unescape(raw_url))
+            parsed = urlparse(absolute)
+            host = (parsed.hostname or "").lower()
+            if not _official_page_allowed_for_inspection(absolute):
+                continue
+            normalized = parsed._replace(fragment="").geturl()
+            if normalized in seen_urls:
+                continue
+            official_urls.append(normalized)
+            seen_urls.add(normalized)
+            if len(official_urls) >= 6:
+                break
+
+        return StoryArticleHints(
+            final_url=current_url,
+            agency_names=agency_names,
+            official_urls=tuple(official_urls),
+        )
+    finally:
+        if response is not None:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+
+
+def _search_hint_values(values) -> tuple[str, ...]:
+    results: list[str] = []
+    seen: set[str] = set()
+    for raw in values or ():
+        value = re.sub(r"\s+", " ", str(raw or "")).strip(" \t\r\n\"'")
+        if not value or len(value) > 100:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        results.append(value)
+        seen.add(key)
+        if len(results) >= 3:
+            break
+    return tuple(results)
+
+
+def _augment_search_query(query: str, search_hints) -> str:
+    hints = _search_hint_values(search_hints)
+    if not hints:
+        return query
+    suffix = " ".join(f'"{hint}"' for hint in hints)
+    return f"{query} {suffix}".strip()
+
+
+def _official_domains_from_urls(urls) -> tuple[str, ...]:
+    domains: list[str] = []
+    seen: set[str] = set()
+    for raw_url in urls or ():
+        try:
+            parsed = urlparse(str(raw_url or "").strip())
+        except ValueError:
+            continue
+        host = (parsed.hostname or "").lower().removeprefix("www.")
+        if not host or not _is_government_domain(host) or host in seen:
+            continue
+        domains.append(host)
+        seen.add(host)
+        if len(domains) >= 2:
+            break
+    return tuple(domains)
 
 
 def _is_government_domain(domain: str) -> bool:
@@ -977,6 +1205,8 @@ def find_web_sources(
     story_title: str,
     *,
     source_country: str = "",
+    search_hints=(),
+    official_urls=(),
     limit: int = 8,
     timeout_seconds: float = 20.0,
     session=None,
@@ -989,7 +1219,10 @@ def find_web_sources(
     if not 1 <= limit <= 20:
         raise ValueError("source hunter web limit must be between 1 and 20")
 
-    query = _build_web_search_query(story_title)
+    query = _augment_search_query(
+        _build_web_search_query(story_title),
+        search_hints,
+    )
     official_query = _official_search_query(query, source_country)
     request = session or requests
     provider_timeout = min(float(timeout_seconds), 10.0)
@@ -1044,6 +1277,33 @@ def find_web_sources(
     except requests.RequestException as exc:
         errors.append(f"Bing request failed: {exc}")
 
+    for official_domain in _official_domains_from_urls(official_urls):
+        try:
+            response = request.get(
+                _BING_SEARCH_URL,
+                params={
+                    "q": f"{query} site:{official_domain}",
+                    "setlang": "en-US",
+                    "format": "rss",
+                },
+                headers=_REQUEST_HEADERS,
+                timeout=provider_timeout,
+                allow_redirects=True,
+            )
+            if response.status_code != 200:
+                continue
+            try:
+                domain_items = _parse_bing_rss(response.text)
+            except SourceHunterError:
+                domain_items = []
+            if not domain_items:
+                parser = _BingParser()
+                parser.feed(response.text)
+                domain_items = parser.results
+            collected_items.extend(domain_items)
+        except requests.RequestException:
+            continue
+
     candidates = _web_candidates_from_items(
         story_title,
         collected_items,
@@ -1062,6 +1322,7 @@ def find_web_sources(
 def find_source_videos(
     story_title: str,
     *,
+    search_hints=(),
     limit: int = 8,
     timeout_seconds: float = 20.0,
     session=None,
@@ -1074,7 +1335,10 @@ def find_source_videos(
     if not 1 <= limit <= 20:
         raise ValueError("source hunter limit must be between 1 and 20")
 
-    query = _build_search_query(story_title)
+    query = _augment_search_query(
+        _build_search_query(story_title),
+        search_hints,
+    )
     request = session or requests
 
     try:
