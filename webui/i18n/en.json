@@ -793,6 +793,7 @@
     "Documentary Preview Again": "Rebuild technical preview",
     "Documentary Preview Current": "Technical preview is current. It is not a publication-rights clearance.",
     "Documentary Preview Stale": "Technical preview is stale.",
-    "Documentary Preview Complete": "Technical preview ready: {filename}"
+    "Documentary Preview Complete": "Technical preview ready: {filename}",
+    "Documentary Rights Note Required": "Add a short note describing the license, permission, or public-domain basis before saving this cleared status."
   }
 }
