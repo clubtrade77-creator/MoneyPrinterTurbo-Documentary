@@ -187,7 +187,7 @@ def _build_grounded_clips(
                     AudioMode.original
                     if beat.original_audio_priority
                     and source.video_metadata.has_audio
-                    else AudioMode.muted
+                    else AudioMode.narration
                 )
 
                 clip_number += 1
