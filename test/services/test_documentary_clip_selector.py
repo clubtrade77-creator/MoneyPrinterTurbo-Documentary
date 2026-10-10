@@ -259,7 +259,7 @@ def test_select_clips_does_not_persist_plan_if_apply_fails(
     assert not clip_plan_path(project.id, tmp_path).exists()
 
 
-def test_select_clips_uses_muted_narration_scene_when_original_audio_not_priority(
+def test_select_clips_uses_narration_audio_when_original_audio_not_priority(
     tmp_path: Path,
 ):
     project, source, _ = _register_video_transcript(tmp_path)
@@ -278,10 +278,10 @@ def test_select_clips_uses_muted_narration_scene_when_original_audio_not_priorit
         scene.scene_type == SceneType.narration_over_source
         for scene in updated.plan.scenes
     )
-    assert all(scene.audio_mode == AudioMode.muted for scene in updated.plan.scenes)
+    assert all(scene.audio_mode == AudioMode.narration for scene in updated.plan.scenes)
 
 
-def test_select_clips_falls_back_to_muted_when_source_has_no_audio(tmp_path: Path):
+def test_select_clips_falls_back_to_narration_when_source_has_no_audio(tmp_path: Path):
     project, source, _ = _register_video_transcript(tmp_path, has_audio=False)
     _create_story_plan(
         project.id,
@@ -292,7 +292,7 @@ def test_select_clips_falls_back_to_muted_when_source_has_no_audio(tmp_path: Pat
 
     clip_plan = build_clip_plan(project.id, root=tmp_path)
 
-    assert all(clip.audio_mode == AudioMode.muted for clip in clip_plan.clips)
+    assert all(clip.audio_mode == AudioMode.narration for clip in clip_plan.clips)
 
 
 def test_build_clip_plan_rejects_evidence_source_without_video_metadata(tmp_path: Path):
