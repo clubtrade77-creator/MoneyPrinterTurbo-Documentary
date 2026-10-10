@@ -40,26 +40,41 @@ _ALLOWED_PURPOSES = (
 )
 
 _PURPOSE_ALIASES = {
+    "revelation": "reveal",
+    "investigation": "question",
+    "setup": "context",
+    "background": "context",
+    "outcome": "payoff",
+    "closing": "payoff",
+    "ending": "payoff",
+    "closure": "payoff",
     "resolution": "payoff",
     "conclusion": "payoff",
+    "bridge": "transition",
 }
 
 _SECTION_PURPOSE_ALIASES = {
     "hook": "hook",
     "context": "context",
+    "setup": "context",
+    "background": "context",
     "conflict": "conflict",
     "question": "question",
     "investigation": "question",
     "escalation": "escalation",
     "reveal": "reveal",
+    "revelation": "reveal",
     "twist": "twist",
     "outcome": "payoff",
     "closing": "payoff",
+    "ending": "payoff",
+    "closure": "payoff",
     "resolution": "payoff",
     "conclusion": "payoff",
     "payoff": "payoff",
     "next_hook": "next_hook",
     "transition": "transition",
+    "bridge": "transition",
 }
 
 
@@ -292,9 +307,15 @@ def parse_story_plan_response(
             elif re.fullmatch(r"b\d{1,3}", beat_id, re.IGNORECASE):
                 beat["id"] = f"beat_{beat_id[1:]}"
 
-            purpose = str(beat.get("purpose") or "").strip().lower()
+            purpose = re.sub(
+                r"[\s-]+",
+                "_",
+                str(beat.get("purpose") or "").strip().lower(),
+            ).strip("_")
             if purpose in _PURPOSE_ALIASES:
                 beat["purpose"] = _PURPOSE_ALIASES[purpose]
+            elif purpose:
+                beat["purpose"] = purpose
 
             raw_original_audio = beat.pop("original_audio", None)
             if (
@@ -480,8 +501,10 @@ FACTUAL RULES:
 STORY SHAPE:
 The first beat MUST have purpose "hook".
 Allowed purpose values: {", ".join(_ALLOWED_PURPOSES)}.
-Use ONLY those exact purpose strings. Never invent synonyms such as "resolution"
-or "conclusion"; use "payoff" for a resolving/final beat.
+Use ONLY those exact purpose strings. Never invent synonyms such as
+"revelation", "resolution", "conclusion", "outcome", "setup", or "closing".
+Use "reveal" for a revelation, "context" for setup/background, "question" for an
+investigation beat, and "payoff" for a resolving/final beat.
 Build a clear progression using only the purposes needed by this story.
 The requested total length is exactly {target_duration_seconds:.0f} seconds.
 The sum of all beat "target_duration_seconds" values MUST stay between {target_duration_seconds * 0.65:.0f} and {target_duration_seconds * 1.35:.0f} seconds;
