@@ -182,11 +182,6 @@ def test_documentary_render_currentness_tracks_project_and_plan_files(
     )
     monkeypatch.setattr(
         documentary_ui,
-        "project_manifest_path",
-        lambda project_id: project_manifest,
-    )
-    monkeypatch.setattr(
-        documentary_ui,
         "story_plan_path",
         lambda project_id: story_plan,
     )
@@ -232,7 +227,7 @@ def test_documentary_render_currentness_rejects_missing_local_media(
     monkeypatch.setattr(
         documentary_ui,
         "documentary_render_path",
-        lambda project_id: output,
+        lambda project_id, language=None: output,
     )
     monkeypatch.setattr(
         documentary_ui,
@@ -360,7 +355,7 @@ def test_documentary_render_currentness_requires_output(tmp_path, monkeypatch):
     monkeypatch.setattr(
         documentary_ui,
         "documentary_render_path",
-        lambda project_id: output,
+        lambda project_id, language=None: output,
     )
 
     assert _render_output_is_current("doc_test") is False
