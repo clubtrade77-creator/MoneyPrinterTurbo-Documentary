@@ -714,6 +714,9 @@
     "Documentary Autopilot Failed": "Автопилот остановился на этапе: {stage}",
     "Documentary Autopilot Created": "«{title}» готов: preview на языках {languages}.",
     "Documentary Autopilot Rights Review": "Preview готов. Перед финальной публикацией нужно подтвердить права на {count} используемый(ых) источник(а).",
-    "Documentary Manual Mode": "Ручной режим"
+    "Documentary Manual Mode": "Ручной режим",
+    "Documentary Autopilot Resume": "ПРОДОЛЖИТЬ ПРЕДЫДУЩУЮ ГЕНЕРАЦИЮ",
+    "Documentary Autopilot Resume Available": "Найден незавершённый фильм. Уже готовые этапы будут использованы повторно — поиск, скачивание, Whisper и валидные AI-артефакты заново не запускаются.",
+    "Documentary Autopilot Stage Resume": "Продолжаю с сохранённого этапа"
   }
 }
