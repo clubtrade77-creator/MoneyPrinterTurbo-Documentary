@@ -780,6 +780,19 @@
     "Documentary Localization Audio Generate": "Generate localized narration audio",
     "Documentary Localization No Narration": "This version needs no translated narrator track; localized subtitles will cover referenced original speech.",
     "Documentary Localization Render Current": "The {language} master render is current.",
-    "Documentary Localization Render Build": "Render localized master"
+    "Documentary Localization Render Build": "Render localized master",
+    "Documentary Rights Review": "Source rights review",
+    "Documentary Rights Review Help": "Review publication rights separately from source provenance. Finding or downloading a source does not prove permission to publish it.",
+    "Documentary Rights Review Source": "Source to review",
+    "Documentary Rights Review Open Source": "Open source page",
+    "Documentary Rights Confirmation Warning": "Only mark this source as cleared if you have a real rights basis (ownership, license, permission, or a verified public-domain basis). The app does not verify this for you.",
+    "Documentary Rights Save": "Save rights review",
+    "Documentary Rights Save Failed": "Could not save source rights: {error}",
+    "Documentary Rights Saved": "Source rights review saved.",
+    "Documentary Preview Build": "Build technical preview",
+    "Documentary Preview Again": "Rebuild technical preview",
+    "Documentary Preview Current": "Technical preview is current. It is not a publication-rights clearance.",
+    "Documentary Preview Stale": "Technical preview is stale.",
+    "Documentary Preview Complete": "Technical preview ready: {filename}"
   }
 }
