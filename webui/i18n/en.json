@@ -868,6 +868,9 @@
     "Documentary Autopilot Failed": "Autopilot stopped at: {stage}",
     "Documentary Autopilot Created": "“{title}” is ready with previews in {languages}.",
     "Documentary Autopilot Rights Review": "The preview is ready. Confirm publication rights for {count} used source(s) before the final master.",
-    "Documentary Manual Mode": "Manual mode"
+    "Documentary Manual Mode": "Manual mode",
+    "Documentary Autopilot Resume": "CONTINUE PREVIOUS GENERATION",
+    "Documentary Autopilot Resume Available": "An unfinished documentary was found. Completed checkpoints will be reused instead of repeating discovery, downloads, Whisper, or valid AI artifacts.",
+    "Documentary Autopilot Stage Resume": "Resuming from saved checkpoint"
   }
 }
