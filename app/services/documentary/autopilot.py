@@ -54,8 +54,8 @@ class AutopilotProfile:
     output_languages: tuple[str, ...] = ("ru", "en", "es")
     target_duration_seconds: int = 600
     lookback_hours: int = 72
-    discovery_limit: int = 12
-    source_limit: int = 6
+    discovery_limit: int = 30
+    source_limit: int = 8
     voice_name: str = ""
 
 
@@ -273,14 +273,61 @@ def _rank_stories(candidates: list[StoryCandidate]) -> list[StoryCandidate]:
     )
 
 
+def _published_footage_stories(
+    candidates: list[StoryCandidate],
+) -> list[StoryCandidate]:
+    # Story Discovery gives a small score to any title that merely mentions a
+    # camera/video. Autopilot is stricter: 28+ requires a published-footage signal
+    # such as "video shows", "released footage", "bodycam footage", etc.
+    return [
+        story
+        for story in _rank_stories(candidates)
+        if story.footage_score >= 28
+    ]
+
+
+def _discover_autopilot_stories(
+    profile: AutopilotProfile,
+) -> list[StoryCandidate]:
+    windows = [profile.lookback_hours]
+    if not str(profile.topic or "").strip() and profile.lookback_hours < 24 * 7:
+        windows.append(24 * 7)
+
+    last_candidates: list[StoryCandidate] = []
+    for lookback_hours in dict.fromkeys(windows):
+        candidates = discover_stories(
+            profile.topic,
+            lookback_hours=lookback_hours,
+            limit=profile.discovery_limit,
+        )
+        last_candidates = candidates
+        viable = _published_footage_stories(candidates)
+        if viable:
+            return viable
+
+    if last_candidates:
+        raise AutopilotError(
+            "story",
+            "autopilot found recent stories, but none had a strong signal that "
+            "source footage was already published",
+        )
+    raise AutopilotError(
+        "story",
+        "autopilot found no usable story candidates",
+    )
+
+
 def _choose_story_with_source(
     candidates: list[StoryCandidate],
     *,
     source_limit: int,
-    max_story_attempts: int = 5,
+    max_story_attempts: int | None = None,
 ) -> tuple[StoryCandidate, _SourceBundle]:
     errors = []
-    for story in _rank_stories(candidates)[:max_story_attempts]:
+    ranked = _published_footage_stories(candidates)
+    if max_story_attempts is not None:
+        ranked = ranked[:max_story_attempts]
+    for story in ranked:
         try:
             bundle = _discover_source_bundle(story, limit=source_limit)
             return story, bundle
@@ -294,9 +341,15 @@ def _choose_story_with_source(
     detail = " | ".join(errors)
     if len(detail) > 3000:
         detail = detail[-3000:]
+    if not ranked:
+        raise AutopilotError(
+            "sources",
+            "autopilot had no stories with a published-footage signal to inspect",
+        )
     raise AutopilotError(
         "sources",
-        "autopilot could not find a story with usable source video"
+        "autopilot checked every published-footage story but could not find "
+        "downloadable source video"
         + (f": {detail}" if detail else ""),
     )
 
@@ -316,11 +369,7 @@ def _fallback_video_sources(
     except (OSError, ValueError, SourceHunterError):
         return []
 
-    usable = [
-        candidate
-        for candidate in candidates
-        if candidate.source_quality_score > 0 or candidate.score >= 50
-    ]
+    usable = list(candidates)
     usable.sort(
         key=lambda item: (
             item.source_quality_score > 0,
@@ -452,16 +501,7 @@ def run_autopilot(
 
     try:
         _emit(progress, "story", "Searching for the best story", 0.04)
-        stories = discover_stories(
-            profile.topic,
-            lookback_hours=profile.lookback_hours,
-            limit=profile.discovery_limit,
-        )
-        if not stories:
-            raise AutopilotError(
-                "story",
-                "autopilot found no usable story candidates",
-            )
+        stories = _discover_autopilot_stories(profile)
 
         stage = "sources"
         _emit(progress, stage, "Finding a story with source video", 0.13)
