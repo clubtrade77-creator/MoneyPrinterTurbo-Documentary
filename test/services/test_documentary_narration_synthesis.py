@@ -363,3 +363,76 @@ def test_localized_audio_becomes_stale_after_relocalization(
             language="ru",
             root=tmp_path,
         )
+
+
+def test_synthesis_time_fits_small_overrun_without_second_tts(
+    tmp_path,
+    monkeypatch,
+):
+    project = _make_project(tmp_path)
+    tts_calls = []
+    duration_calls = iter([5.3, 4.9])
+
+    def fake_tts(**kwargs):
+        tts_calls.append(kwargs["text"])
+        Path(kwargs["voice_file"]).write_bytes(b"original-audio")
+        return object()
+
+    def fake_run(command, **kwargs):
+        Path(command[-1]).write_bytes(b"fitted-audio")
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(narration_synthesis.voice_service, "tts", fake_tts)
+    monkeypatch.setattr(
+        narration_synthesis.voice_service,
+        "get_audio_duration",
+        lambda path: next(duration_calls),
+    )
+    monkeypatch.setattr(narration_synthesis.subprocess, "run", fake_run)
+    monkeypatch.setattr(audio_service, "_probe_audio", lambda path: (4.9, "mp3"))
+
+    result = narration_synthesis.synthesize_narration(
+        project.id,
+        "en-US-TestVoice",
+        root=tmp_path,
+    )
+
+    assert tts_calls == ["Short narration."]
+    assert len(result.generated) == 1
+    assert result.generated[0].duration_seconds == 4.9
+
+
+def test_synthesis_rejects_large_overrun_without_time_fit(
+    tmp_path,
+    monkeypatch,
+):
+    project = _make_project(tmp_path)
+    ffmpeg_calls = []
+
+    def fake_tts(**kwargs):
+        Path(kwargs["voice_file"]).write_bytes(b"audio")
+        return object()
+
+    monkeypatch.setattr(narration_synthesis.voice_service, "tts", fake_tts)
+    monkeypatch.setattr(
+        narration_synthesis.voice_service,
+        "get_audio_duration",
+        lambda path: 6.0,
+    )
+    monkeypatch.setattr(
+        narration_synthesis.subprocess,
+        "run",
+        lambda *args, **kwargs: ffmpeg_calls.append(args),
+    )
+
+    with pytest.raises(
+        narration_synthesis.NarrationSynthesisError,
+        match="exceeds the scene by too much",
+    ):
+        narration_synthesis.synthesize_narration(
+            project.id,
+            "en-US-TestVoice",
+            root=tmp_path,
+        )
+
+    assert ffmpeg_calls == []
