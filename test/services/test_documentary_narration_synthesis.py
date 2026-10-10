@@ -173,3 +173,22 @@ def test_synthesis_resumes_without_repeating_completed_scene(tmp_path, monkeypat
     assert calls == ["scene_second"]
     assert len(result.reused) == 1
     assert len(result.generated) == 1
+
+
+def test_synthesis_wraps_tts_provider_errors(tmp_path, monkeypatch):
+    project = _make_project(tmp_path)
+
+    def failing_tts(**kwargs):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(narration_synthesis.voice_service, "tts", failing_tts)
+
+    with pytest.raises(
+        narration_synthesis.NarrationSynthesisError,
+        match="TTS failed for scene scene_narrated",
+    ):
+        narration_synthesis.synthesize_narration(
+            project.id,
+            "en-US-TestVoice",
+            root=tmp_path,
+        )
