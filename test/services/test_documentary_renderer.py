@@ -24,6 +24,7 @@ from app.services.documentary.renderer import (
     DocumentaryRenderError,
     build_documentary_render_command,
     documentary_render_path,
+    documentary_render_readiness_issues,
     render_documentary,
 )
 
@@ -85,6 +86,67 @@ def _save_scene(
         )
     ]
     save_project(project, tmp_path)
+
+
+def test_render_readiness_accepts_valid_original_scene(tmp_path: Path):
+    project, source, _ = _project_with_video_source(tmp_path, has_audio=True)
+    _save_scene(project, source, tmp_path)
+
+    assert documentary_render_readiness_issues(
+        project.id,
+        root=tmp_path,
+    ) == []
+
+
+def test_render_readiness_reports_missing_narration_audio(tmp_path: Path):
+    project, source, _ = _project_with_video_source(tmp_path, has_audio=True)
+    _save_scene(
+        project,
+        source,
+        tmp_path,
+        audio_mode=AudioMode.narration,
+    )
+
+    issues = documentary_render_readiness_issues(
+        project.id,
+        root=tmp_path,
+    )
+
+    assert any("narration audio not found" in issue for issue in issues)
+
+
+def test_render_readiness_reports_missing_local_source_copy(tmp_path: Path):
+    project = create_project(
+        "Missing source copy",
+        project_id="doc_renderer_missing_copy",
+        root=tmp_path,
+    )
+    source = SourceAsset(
+        id="source_external",
+        source_type="youtube",
+        title="External source",
+        source_url="https://www.youtube.com/watch?v=abcdefghijk",
+        rights_status=RightsStatus.unknown_review_required,
+    )
+    project = add_source(project.id, source, root=tmp_path)
+    project.plan.scenes = [
+        DocumentaryScene(
+            id="scene_external",
+            scene_type=SceneType.original_clip,
+            source_id=source.id,
+            source_start=0.0,
+            source_end=2.0,
+            audio_mode=AudioMode.muted,
+        )
+    ]
+    save_project(project, tmp_path)
+
+    issues = documentary_render_readiness_issues(
+        project.id,
+        root=tmp_path,
+    )
+
+    assert any("has no local video copy" in issue for issue in issues)
 
 
 def test_build_render_command_uses_exact_source_range_and_original_audio(tmp_path: Path):
