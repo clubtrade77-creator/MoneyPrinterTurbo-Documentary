@@ -278,19 +278,30 @@ def _fetch_first_available_source(
     root=None,
 ):
     errors = []
-    candidates = [primary_source] + _fallback_video_sources(
+    try:
+        fetch_source_local_copy(
+            project_id,
+            primary_source.id,
+            root=root,
+        )
+        return primary_source
+    except DocumentaryMediaFetchError as exc:
+        errors.append(f"{primary_source.id}: {exc}")
+        logger.warning(
+            "Documentary Autopilot primary source download failed; "
+            f"trying fallbacks: source={primary_source.id}, error={exc}"
+        )
+
+    for source in _fallback_video_sources(
         story,
         exclude_source_id=primary_source.id,
         limit=source_limit,
-    )
-
-    for index, source in enumerate(candidates):
-        if index:
-            try:
-                add_source(project_id, source, root=root)
-            except ValueError as exc:
-                if "source already exists in project" not in str(exc).lower():
-                    raise
+    ):
+        try:
+            add_source(project_id, source, root=root)
+        except ValueError as exc:
+            if "source already exists in project" not in str(exc).lower():
+                raise
         try:
             fetch_source_local_copy(
                 project_id,
@@ -301,8 +312,8 @@ def _fetch_first_available_source(
         except DocumentaryMediaFetchError as exc:
             errors.append(f"{source.id}: {exc}")
             logger.warning(
-                "Documentary Autopilot source download failed; trying next source: "
-                f"source={source.id}, error={exc}"
+                "Documentary Autopilot fallback source download failed; "
+                f"trying next source: source={source.id}, error={exc}"
             )
 
     detail = " | ".join(errors)
