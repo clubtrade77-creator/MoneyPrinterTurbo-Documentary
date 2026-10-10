@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from app.services.documentary import audio as audio_service
+from app.services.documentary.audio import attach_narration_audio
 from app.models.documentary import (
     AudioMode,
     DocumentaryTranscript,
@@ -26,6 +28,7 @@ from app.services.documentary.project import (
     create_project,
     load_project,
     project_dir,
+    save_project,
     sha256_file,
 )
 from app.services.documentary.story_planner import plan_story, story_plan_path
@@ -236,6 +239,111 @@ def test_select_clips_persists_plan_and_applies_traceable_scenes(tmp_path: Path)
     assert updated.plan.scenes[0].audio_mode == AudioMode.original
     assert updated.plan.scenes[0].story_beat_id == "beat_clip_01"
     assert updated.plan.scenes[0].transcript_segment_ids == [0, 1]
+
+
+def test_reselecting_identical_clips_preserves_narration_audio(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _register_video_transcript(tmp_path)
+    _create_story_plan(
+        project.id,
+        source.id,
+        tmp_path,
+        original_audio_priority=False,
+    )
+    select_clips(
+        project.id,
+        root=tmp_path,
+        padding_seconds=0.25,
+        max_merge_gap_seconds=0.5,
+    )
+
+    edited = load_project(project.id, tmp_path)
+    edited.plan.scenes[0].narration_text = "Keep this narration."
+    save_project(edited, tmp_path)
+
+    narration_file = tmp_path / "narration.mp3"
+    narration_file.write_bytes(b"audio")
+    monkeypatch.setattr(
+        audio_service,
+        "_probe_audio",
+        lambda path: (1.0, "mp3"),
+    )
+    asset = attach_narration_audio(
+        project.id,
+        edited.plan.scenes[0].id,
+        narration_file,
+        voice_name="voice-a",
+        root=tmp_path,
+    )
+    before = load_project(project.id, tmp_path)
+
+    select_clips(
+        project.id,
+        root=tmp_path,
+        padding_seconds=0.25,
+        max_merge_gap_seconds=0.5,
+    )
+    after = load_project(project.id, tmp_path)
+
+    assert after.revision == before.revision
+    assert after.plan.scenes[0].narration_text == "Keep this narration."
+    assert len(after.narration_audio) == 1
+    assert after.narration_audio[0].local_path == asset.local_path
+    assert Path(asset.local_path).is_file()
+
+
+def test_changed_clip_ranges_invalidate_old_narration_audio(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _register_video_transcript(tmp_path)
+    _create_story_plan(
+        project.id,
+        source.id,
+        tmp_path,
+        original_audio_priority=False,
+    )
+    select_clips(
+        project.id,
+        root=tmp_path,
+        padding_seconds=0.25,
+        max_merge_gap_seconds=0.5,
+    )
+
+    edited = load_project(project.id, tmp_path)
+    edited.plan.scenes[0].narration_text = "Old narration."
+    save_project(edited, tmp_path)
+
+    narration_file = tmp_path / "old-narration.mp3"
+    narration_file.write_bytes(b"audio")
+    monkeypatch.setattr(
+        audio_service,
+        "_probe_audio",
+        lambda path: (1.0, "mp3"),
+    )
+    asset = attach_narration_audio(
+        project.id,
+        edited.plan.scenes[0].id,
+        narration_file,
+        voice_name="voice-a",
+        root=tmp_path,
+    )
+    old_audio_path = Path(asset.local_path)
+    assert old_audio_path.is_file()
+
+    select_clips(
+        project.id,
+        root=tmp_path,
+        padding_seconds=1.0,
+        max_merge_gap_seconds=0.5,
+    )
+    after = load_project(project.id, tmp_path)
+
+    assert after.narration_audio == []
+    assert all(not scene.narration_text for scene in after.plan.scenes)
+    assert not old_audio_path.exists()
 
 
 def test_select_clips_does_not_persist_plan_if_apply_fails(
