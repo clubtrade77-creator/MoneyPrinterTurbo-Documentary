@@ -122,9 +122,9 @@ def _repair_section_map_payload(
         return payload
 
     section_items = [
-        (key, value)
-        for key, value in payload.items()
-        if key in _SECTION_PURPOSE_ALIASES and isinstance(value, dict)
+        (key, payload[key])
+        for key in _SECTION_PURPOSE_ALIASES
+        if key in payload and isinstance(payload[key], dict)
     ]
     if len(section_items) < 2:
         return payload
