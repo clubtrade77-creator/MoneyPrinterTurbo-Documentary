@@ -178,7 +178,7 @@ def test_documentary_render_currentness_tracks_project_and_plan_files(
     monkeypatch.setattr(
         documentary_ui,
         "documentary_render_path",
-        lambda project_id: output,
+        lambda project_id, language=None: output,
     )
     monkeypatch.setattr(
         documentary_ui,
@@ -198,7 +198,12 @@ def test_documentary_render_currentness_tracks_project_and_plan_files(
     monkeypatch.setattr(
         documentary_ui,
         "load_project",
-        lambda project_id: SimpleNamespace(sources=[], narration_audio=[]),
+        lambda project_id: SimpleNamespace(
+            master_language="en",
+            plan=SimpleNamespace(scenes=[]),
+            sources=[],
+            narration_audio=[],
+        ),
     )
 
     import os
@@ -248,7 +253,22 @@ def test_documentary_render_currentness_rejects_missing_local_media(
         documentary_ui,
         "load_project",
         lambda project_id: SimpleNamespace(
-            sources=[SimpleNamespace(local_path=str(source_path))],
+            master_language="en",
+            plan=SimpleNamespace(
+                scenes=[
+                    SimpleNamespace(
+                        id="scene_source",
+                        source_id="source_media",
+                        audio_mode=AudioMode.muted,
+                    )
+                ]
+            ),
+            sources=[
+                SimpleNamespace(
+                    id="source_media",
+                    local_path=str(source_path),
+                )
+            ],
             narration_audio=[],
         ),
     )
@@ -262,6 +282,77 @@ def test_documentary_render_currentness_rejects_missing_local_media(
 
     source_path.unlink()
     assert _render_output_is_current("doc_test") is False
+
+
+def test_documentary_render_currentness_ignores_other_language_audio(
+    tmp_path,
+    monkeypatch,
+):
+    output = tmp_path / "master.mp4"
+    source_path = tmp_path / "source.mp4"
+    en_audio = tmp_path / "narration-en.mp3"
+    ru_audio = tmp_path / "narration-ru.mp3"
+    for path in (output, source_path, en_audio, ru_audio):
+        path.write_bytes(b"x")
+
+    monkeypatch.setattr(
+        documentary_ui,
+        "documentary_render_path",
+        lambda project_id, language=None: output,
+    )
+    monkeypatch.setattr(
+        documentary_ui,
+        "story_plan_path",
+        lambda project_id: tmp_path / "missing-story.json",
+    )
+    monkeypatch.setattr(
+        documentary_ui,
+        "clip_plan_path",
+        lambda project_id: tmp_path / "missing-clip.json",
+    )
+    monkeypatch.setattr(
+        documentary_ui,
+        "load_project",
+        lambda project_id: SimpleNamespace(
+            master_language="en",
+            plan=SimpleNamespace(
+                scenes=[
+                    SimpleNamespace(
+                        id="scene_narrated",
+                        source_id="source_media",
+                        audio_mode=AudioMode.narration,
+                    )
+                ]
+            ),
+            sources=[
+                SimpleNamespace(
+                    id="source_media",
+                    local_path=str(source_path),
+                )
+            ],
+            narration_audio=[
+                SimpleNamespace(
+                    scene_id="scene_narrated",
+                    language="en",
+                    local_path=str(en_audio),
+                ),
+                SimpleNamespace(
+                    scene_id="scene_narrated",
+                    language="ru",
+                    local_path=str(ru_audio),
+                ),
+            ],
+        ),
+    )
+
+    import os
+
+    os.utime(source_path, (10, 10))
+    os.utime(en_audio, (11, 11))
+    os.utime(output, (12, 12))
+    os.utime(ru_audio, (20, 20))
+
+    assert _render_output_is_current("doc_test") is True
 
 
 def test_documentary_render_currentness_requires_output(tmp_path, monkeypatch):
