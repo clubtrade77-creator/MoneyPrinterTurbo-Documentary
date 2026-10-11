@@ -32,6 +32,9 @@ from app.utils import utils
 DEFAULT_RENDER_WIDTH = 1920
 DEFAULT_RENDER_HEIGHT = 1080
 DEFAULT_RENDER_FPS = 30
+DEFAULT_PREVIEW_WIDTH = 1280
+DEFAULT_PREVIEW_HEIGHT = 720
+DEFAULT_PREVIEW_FPS = 24
 DEFAULT_RENDER_TIMEOUT_SECONDS = 3600
 _SOURCE_RANGE_TOLERANCE_SECONDS = 0.05
 _NARRATION_DURATION_TOLERANCE_SECONDS = 0.05
@@ -255,6 +258,8 @@ def _build_documentary_render_command_and_expectations(
     width: int = DEFAULT_RENDER_WIDTH,
     height: int = DEFAULT_RENDER_HEIGHT,
     fps: int = DEFAULT_RENDER_FPS,
+    video_preset: str = "medium",
+    video_crf: int = 18,
 ) -> tuple[list[str], float, int, int]:
     _validate_render_settings(width, height, fps)
     project = load_project(project_id, root)
@@ -456,9 +461,9 @@ def _build_documentary_render_command_and_expectations(
             "-c:v",
             "libx264",
             "-preset",
-            "medium",
+            video_preset,
             "-crf",
-            "18",
+            str(video_crf),
             "-c:a",
             "aac",
             "-b:a",
@@ -702,6 +707,20 @@ def render_documentary(
     if timeout_seconds <= 0:
         raise ValueError("documentary render timeout must be positive")
 
+    video_preset = "medium"
+    video_crf = 18
+    if preview:
+        # Technical previews should be quick to inspect. Keep full 1080p/CRF 18
+        # for the publication master, but avoid spending minutes encoding a draft.
+        if width == DEFAULT_RENDER_WIDTH:
+            width = DEFAULT_PREVIEW_WIDTH
+        if height == DEFAULT_RENDER_HEIGHT:
+            height = DEFAULT_PREVIEW_HEIGHT
+        if fps == DEFAULT_RENDER_FPS:
+            fps = DEFAULT_PREVIEW_FPS
+        video_preset = "veryfast"
+        video_crf = 23
+
     initial_project = load_project(project_id, root)
     master_language = _normalize_render_language(initial_project.master_language)
     narration_language = _normalize_render_language(
@@ -761,6 +780,8 @@ def render_documentary(
                 width=width,
                 height=height,
                 fps=fps,
+                video_preset=video_preset,
+                video_crf=video_crf,
             )
         )
         try:
