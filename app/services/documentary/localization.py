@@ -20,6 +20,9 @@ from app.services.documentary.transcription import load_source_transcript
 MAX_LOCALIZATION_ATTEMPTS = 3
 MAX_LOCALIZATION_PROMPT_CHARS = 120_000
 MAX_LOCALIZATION_REVIEW_PROMPT_CHARS = 180_000
+COMPACT_LOCALIZATION_THRESHOLD_CHARS = 4_000
+COMPACT_LOCALIZATION_BATCH_CHARS = 3_500
+COMPACT_LOCALIZATION_BATCH_ITEMS = 24
 CURRENT_LOCALIZATION_REVIEW_VERSION = 1
 
 
@@ -252,6 +255,290 @@ SOURCE:
     return prompt
 
 
+def _decode_localization_json(response_text: str):
+    raw = _strip_code_fence(response_text)
+    if not raw:
+        raise _LocalizationSchemaError(
+            "documentary localizer returned an empty response"
+        )
+    if raw.startswith("Error:"):
+        raise _NonRetryableLocalizationError(
+            raw.removeprefix("Error:").strip() or raw
+        )
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Providers sometimes surround an otherwise valid JSON value with a short
+    # sentence. Extract the first complete JSON object/array deterministically.
+    decoder = json.JSONDecoder()
+    for position, char in enumerate(raw):
+        if char not in "[{":
+            continue
+        try:
+            payload, _ = decoder.raw_decode(raw[position:])
+        except json.JSONDecodeError:
+            continue
+        return payload
+
+    raise _LocalizationSchemaError(
+        "documentary localizer did not return valid JSON"
+    )
+
+
+def _localization_text_units(source_scenes: list[dict]) -> list[dict]:
+    units = []
+    unit_index = 0
+    for scene_index, scene in enumerate(source_scenes):
+        narration = str(scene.get("narration_text") or "").strip()
+        if narration:
+            units.append(
+                {
+                    "i": unit_index,
+                    "scene_index": scene_index,
+                    "kind": "narration",
+                    "text": narration,
+                }
+            )
+            unit_index += 1
+
+        on_screen = str(scene.get("on_screen_text") or "").strip()
+        if on_screen:
+            units.append(
+                {
+                    "i": unit_index,
+                    "scene_index": scene_index,
+                    "kind": "on_screen",
+                    "text": on_screen,
+                }
+            )
+            unit_index += 1
+
+        for subtitle_index, subtitle in enumerate(scene.get("subtitle_segments", [])):
+            text = str(subtitle.get("text") or "").strip()
+            if not text:
+                continue
+            units.append(
+                {
+                    "i": unit_index,
+                    "scene_index": scene_index,
+                    "kind": "subtitle",
+                    "subtitle_index": subtitle_index,
+                    "text": text,
+                }
+            )
+            unit_index += 1
+    return units
+
+
+def _should_use_compact_localization(source_scenes: list[dict]) -> bool:
+    units = _localization_text_units(source_scenes)
+    return (
+        sum(len(unit["text"]) for unit in units)
+        > COMPACT_LOCALIZATION_THRESHOLD_CHARS
+        or len(units) > COMPACT_LOCALIZATION_BATCH_ITEMS
+    )
+
+
+def _compact_localization_batches(units: list[dict]) -> list[list[dict]]:
+    batches = []
+    current = []
+    current_chars = 0
+    for unit in units:
+        unit_chars = len(unit["text"])
+        if current and (
+            len(current) >= COMPACT_LOCALIZATION_BATCH_ITEMS
+            or current_chars + unit_chars > COMPACT_LOCALIZATION_BATCH_CHARS
+        ):
+            batches.append(current)
+            current = []
+            current_chars = 0
+        current.append(unit)
+        current_chars += unit_chars
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _build_compact_localization_prompt(
+    *,
+    source_language: str,
+    target_language: str,
+    batch: list[dict],
+) -> str:
+    payload = [
+        {"i": unit["i"], "text": unit["text"]}
+        for unit in batch
+    ]
+    return f"""
+You are translating a compact batch of factual documentary text from
+{source_language} to {target_language}.
+
+Translate ONLY the text. Preserve names, numbers, dates, attribution, uncertainty,
+and factual meaning. Do not add explanations or facts. Keep translations concise.
+
+Return exactly one JSON object:
+{{"items":[{{"i":0,"text":"translated text"}}]}}
+
+Rules:
+- Return every input item exactly once and in the same order.
+- Preserve each integer "i" exactly.
+- "text" must contain the translation only.
+- No markdown and no explanatory prose.
+
+INPUT ITEMS:
+{json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}
+""".strip()
+
+
+def _parse_compact_localization_response(
+    response_text: str,
+    batch: list[dict],
+) -> dict[int, str]:
+    payload = _decode_localization_json(response_text)
+    items = None
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        for key in ("items", "translations", "results", "output"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                items = value
+                break
+            if isinstance(value, dict) and isinstance(value.get("items"), list):
+                items = value["items"]
+                break
+    if not isinstance(items, list):
+        raise _LocalizationSchemaError(
+            "compact documentary localization did not return an items array"
+        )
+    if len(items) != len(batch):
+        raise _LocalizationSchemaError(
+            "compact documentary localization changed the number of items"
+        )
+
+    translated = {}
+    for expected, item in zip(batch, items):
+        if isinstance(item, str):
+            index = expected["i"]
+            text = item.strip()
+        elif isinstance(item, dict):
+            raw_index = item.get("i", item.get("index", item.get("id")))
+            try:
+                index = int(raw_index)
+            except (TypeError, ValueError) as exc:
+                raise _LocalizationSchemaError(
+                    "compact documentary localization item has no valid index"
+                ) from exc
+            text = str(
+                item.get("text")
+                or item.get("translation")
+                or item.get("translated_text")
+                or item.get("content")
+                or ""
+            ).strip()
+        else:
+            raise _LocalizationSchemaError(
+                "compact documentary localization item must be text or object"
+            )
+
+        if index != expected["i"]:
+            raise _LocalizationSchemaError(
+                "compact documentary localization changed item order or ids"
+            )
+        if not text:
+            raise _LocalizationSchemaError(
+                "compact documentary localization returned empty translated text"
+            )
+        translated[index] = text
+    return translated
+
+
+def _assemble_compact_localization(
+    source_scenes: list[dict],
+    units: list[dict],
+    translations: dict[int, str],
+) -> list[LocalizedSceneText]:
+    repaired = []
+    for scene in source_scenes:
+        repaired.append(
+            {
+                "scene_id": scene["scene_id"],
+                "narration_text": "",
+                "on_screen_text": "",
+                "subtitle_segments": [
+                    {
+                        "source_id": subtitle["source_id"],
+                        "segment_id": subtitle["segment_id"],
+                        "text": "",
+                    }
+                    for subtitle in scene["subtitle_segments"]
+                ],
+            }
+        )
+
+    for unit in units:
+        translated = translations.get(unit["i"], "").strip()
+        if not translated:
+            raise _LocalizationSchemaError(
+                "compact documentary localization is missing translated text"
+            )
+        scene = repaired[unit["scene_index"]]
+        if unit["kind"] == "narration":
+            scene["narration_text"] = translated
+        elif unit["kind"] == "on_screen":
+            scene["on_screen_text"] = translated
+        else:
+            scene["subtitle_segments"][unit["subtitle_index"]]["text"] = translated
+
+    return [
+        LocalizedSceneText.model_validate(scene)
+        for scene in repaired
+    ]
+
+
+def _localize_compact(
+    *,
+    source_language: str,
+    target_language: str,
+    source_scenes: list[dict],
+    generator: Callable[[str], str],
+) -> list[LocalizedSceneText]:
+    units = _localization_text_units(source_scenes)
+    if not units:
+        return [
+            LocalizedSceneText.model_validate(
+                {
+                    "scene_id": scene["scene_id"],
+                    "narration_text": "",
+                    "on_screen_text": "",
+                    "subtitle_segments": [],
+                }
+            )
+            for scene in source_scenes
+        ]
+
+    translations: dict[int, str] = {}
+    for batch in _compact_localization_batches(units):
+        response = generator(
+            _build_compact_localization_prompt(
+                source_language=source_language,
+                target_language=target_language,
+                batch=batch,
+            )
+        )
+        translations.update(
+            _parse_compact_localization_response(response, batch)
+        )
+    return _assemble_compact_localization(
+        source_scenes,
+        units,
+        translations,
+    )
+
+
 def _extract_localization_scene_items(payload) -> list | None:
     if isinstance(payload, list):
         return payload
@@ -421,22 +708,7 @@ def _parse_candidate(
     response_text: str,
     source_scenes: list[dict],
 ) -> list[LocalizedSceneText]:
-    raw = _strip_code_fence(response_text)
-    if not raw:
-        raise _LocalizationSchemaError(
-            "documentary localizer returned an empty response"
-        )
-    if raw.startswith("Error:"):
-        raise _NonRetryableLocalizationError(
-            raw.removeprefix("Error:").strip() or raw
-        )
-
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise _LocalizationSchemaError(
-            "documentary localizer did not return valid JSON"
-        ) from exc
+    payload = _decode_localization_json(response_text)
 
     items = _extract_localization_scene_items(payload)
     if items is None:
@@ -623,7 +895,33 @@ def localize_project(
     localized_scenes = None
     last_error = None
 
+    if _should_use_compact_localization(source_scenes):
+        localized_scenes = _localize_compact(
+            source_language=source_language,
+            target_language=target_language,
+            source_scenes=source_scenes,
+            generator=generator,
+        )
+        _validate_candidate_against_source(localized_scenes, source_scenes)
+        review_issues = _parse_review(
+            reviewer(
+                build_localization_review_prompt(
+                    source_language=source_language,
+                    target_language=target_language,
+                    source_scenes=source_scenes,
+                    localized_scenes=localized_scenes,
+                )
+            )
+        )
+        if review_issues:
+            raise LocalizationError(
+                "semantic localization review failed: "
+                + "; ".join(review_issues)
+            )
+
     for attempt in range(1, MAX_LOCALIZATION_ATTEMPTS + 1):
+        if localized_scenes is not None:
+            break
         try:
             candidate = _parse_candidate(
                 generator(current_prompt),
@@ -649,6 +947,31 @@ def localize_project(
             break
         except _NonRetryableLocalizationError:
             raise
+        except _LocalizationSchemaError as exc:
+            last_error = exc
+            localized_scenes = _localize_compact(
+                source_language=source_language,
+                target_language=target_language,
+                source_scenes=source_scenes,
+                generator=generator,
+            )
+            _validate_candidate_against_source(localized_scenes, source_scenes)
+            review_issues = _parse_review(
+                reviewer(
+                    build_localization_review_prompt(
+                        source_language=source_language,
+                        target_language=target_language,
+                        source_scenes=source_scenes,
+                        localized_scenes=localized_scenes,
+                    )
+                )
+            )
+            if review_issues:
+                raise LocalizationError(
+                    "semantic localization review failed: "
+                    + "; ".join(review_issues)
+                )
+            break
         except LocalizationError as exc:
             last_error = exc
             if attempt >= MAX_LOCALIZATION_ATTEMPTS:
