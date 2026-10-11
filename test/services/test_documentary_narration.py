@@ -169,6 +169,8 @@ def test_narration_prompt_requires_grounded_concise_text():
     assert "Use ONLY facts stated in the supplied transcript evidence" in prompt
     assert "Do not claim that one event caused another" in prompt
     assert "scene_1" in prompt
+    assert 'top-level JSON object MUST contain exactly one field named "scenes"' in prompt
+    assert 'exactly "scene_id" and "narration_text"' in prompt
 
 
 def test_write_narration_skips_original_audio_priority_scene(tmp_path: Path):
@@ -283,6 +285,73 @@ def test_write_narration_requires_reviewer_for_custom_generator(tmp_path: Path):
             root=tmp_path,
             generate_fn=lambda prompt: "{}",
         )
+
+
+def test_write_narration_repairs_common_response_aliases(tmp_path: Path):
+    project, _ = _setup_case(tmp_path, original_audio_priority=False)
+    scene_id = load_project(project.id, tmp_path).plan.scenes[0].id
+    review_calls = []
+
+    result = write_narration(
+        project.id,
+        root=tmp_path,
+        generate_fn=lambda prompt: json.dumps(
+            {
+                "title": "Narration",
+                "language": "en",
+                "narration": [
+                    {
+                        "id": scene_id,
+                        "text": "The officer approaches the vehicle.",
+                        "confidence": 0.99,
+                    }
+                ],
+            }
+        ),
+        review_fn=lambda prompt: (
+            review_calls.append(prompt)
+            or json.dumps({"supported": True, "issues": []})
+        ),
+    )
+
+    assert result.plan.scenes[0].narration_text == (
+        "The officer approaches the vehicle."
+    )
+    assert len(review_calls) == 1
+
+
+def test_write_narration_shape_drift_uses_fallback_without_retry_or_review(
+    tmp_path: Path,
+):
+    project, _ = _setup_case(tmp_path, original_audio_priority=False)
+    generation_calls = []
+    review_calls = []
+
+    result = write_narration(
+        project.id,
+        root=tmp_path,
+        generate_fn=lambda prompt: (
+            generation_calls.append(prompt)
+            or json.dumps(
+                {
+                    "title": "Wrong shape",
+                    "language": "en",
+                    "script": "This is not a scenes array.",
+                }
+            )
+        ),
+        review_fn=lambda prompt: (
+            review_calls.append(prompt)
+            or json.dumps({"supported": True, "issues": []})
+        ),
+    )
+
+    assert len(generation_calls) == 1
+    assert review_calls == []
+    assert result.plan.scenes[0].narration_text
+    assert "officer approaches the vehicle" in (
+        result.plan.scenes[0].narration_text.lower()
+    )
 
 
 def test_write_narration_rejects_semantic_additions(tmp_path: Path):
