@@ -414,46 +414,146 @@ def _parse_compact_localization_response(
         raise _LocalizationSchemaError(
             "compact documentary localization did not return an items array"
         )
-    if len(items) != len(batch):
-        raise _LocalizationSchemaError(
-            "compact documentary localization changed the number of items"
-        )
 
-    translated = {}
-    for expected, item in zip(batch, items):
-        if isinstance(item, str):
-            index = expected["i"]
+    expected_ids = {unit["i"] for unit in batch}
+    translated: dict[int, str] = {}
+
+    # A plain string array has no stable ids. It is safe only when the model
+    # returned exactly one string for every requested item in order.
+    if items and all(isinstance(item, str) for item in items):
+        if len(items) != len(batch):
+            raise _LocalizationSchemaError(
+                "compact documentary localization returned unidentifiable partial items"
+            )
+        for expected, item in zip(batch, items):
             text = item.strip()
-        elif isinstance(item, dict):
-            raw_index = item.get("i", item.get("index", item.get("id")))
-            try:
-                index = int(raw_index)
-            except (TypeError, ValueError) as exc:
-                raise _LocalizationSchemaError(
-                    "compact documentary localization item has no valid index"
-                ) from exc
-            text = str(
-                item.get("text")
-                or item.get("translation")
-                or item.get("translated_text")
-                or item.get("content")
-                or ""
-            ).strip()
-        else:
+            if not text:
+                continue
+            translated[expected["i"]] = text
+        return translated
+
+    for item in items:
+        if not isinstance(item, dict):
             raise _LocalizationSchemaError(
                 "compact documentary localization item must be text or object"
             )
 
-        if index != expected["i"]:
+        raw_index = item.get("i", item.get("index", item.get("id")))
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError) as exc:
             raise _LocalizationSchemaError(
-                "compact documentary localization changed item order or ids"
+                "compact documentary localization item has no valid index"
+            ) from exc
+
+        if index not in expected_ids:
+            raise _LocalizationSchemaError(
+                "compact documentary localization returned an unexpected item id"
             )
+        if index in translated:
+            raise _LocalizationSchemaError(
+                "compact documentary localization returned a duplicate item id"
+            )
+
+        text = str(
+            item.get("text")
+            or item.get("translation")
+            or item.get("translated_text")
+            or item.get("content")
+            or ""
+        ).strip()
         if not text:
-            raise _LocalizationSchemaError(
-                "compact documentary localization returned empty translated text"
-            )
+            # Treat empty text as missing so only this item is retried.
+            continue
         translated[index] = text
+
     return translated
+
+
+def _translate_compact_batch(
+    *,
+    source_language: str,
+    target_language: str,
+    batch: list[dict],
+    generator: Callable[[str], str],
+) -> dict[int, str]:
+    if not batch:
+        return {}
+
+    try:
+        response = generator(
+            _build_compact_localization_prompt(
+                source_language=source_language,
+                target_language=target_language,
+                batch=batch,
+            )
+        )
+        translated = _parse_compact_localization_response(
+            response,
+            batch,
+        )
+    except _NonRetryableLocalizationError:
+        raise
+    except _LocalizationSchemaError:
+        if len(batch) == 1:
+            raise
+        midpoint = max(1, len(batch) // 2)
+        left = _translate_compact_batch(
+            source_language=source_language,
+            target_language=target_language,
+            batch=batch[:midpoint],
+            generator=generator,
+        )
+        right = _translate_compact_batch(
+            source_language=source_language,
+            target_language=target_language,
+            batch=batch[midpoint:],
+            generator=generator,
+        )
+        return {**left, **right}
+
+    missing = [
+        unit
+        for unit in batch
+        if unit["i"] not in translated
+    ]
+    if not missing:
+        return translated
+
+    # Keep every valid translation already received and request only missing ids.
+    if len(missing) < len(batch):
+        translated.update(
+            _translate_compact_batch(
+                source_language=source_language,
+                target_language=target_language,
+                batch=missing,
+                generator=generator,
+            )
+        )
+        return translated
+
+    # Nothing in this response was usable. Split the batch to make the model's
+    # output contract easier. A one-item failure is surfaced rather than looping.
+    if len(batch) == 1:
+        raise _LocalizationSchemaError(
+            "compact documentary localization returned no usable translation"
+        )
+
+    midpoint = max(1, len(batch) // 2)
+    left = _translate_compact_batch(
+        source_language=source_language,
+        target_language=target_language,
+        batch=batch[:midpoint],
+        generator=generator,
+    )
+    right = _translate_compact_batch(
+        source_language=source_language,
+        target_language=target_language,
+        batch=batch[midpoint:],
+        generator=generator,
+    )
+    return {**left, **right}
+
 
 
 def _assemble_compact_localization(
@@ -522,15 +622,13 @@ def _localize_compact(
 
     translations: dict[int, str] = {}
     for batch in _compact_localization_batches(units):
-        response = generator(
-            _build_compact_localization_prompt(
+        translations.update(
+            _translate_compact_batch(
                 source_language=source_language,
                 target_language=target_language,
                 batch=batch,
+                generator=generator,
             )
-        )
-        translations.update(
-            _parse_compact_localization_response(response, batch)
         )
     return _assemble_compact_localization(
         source_scenes,
