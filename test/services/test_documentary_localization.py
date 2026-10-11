@@ -326,10 +326,11 @@ def test_compact_localization_retries_only_missing_items(
                 },
                 ensure_ascii=False,
             )
-        assert '"i":2' in prompt
-        assert '"i":0' not in prompt
-        assert '"i":1' not in prompt
-        assert '"i":3' not in prompt
+        input_items = prompt.split("INPUT ITEMS:\n", 1)[1]
+        assert '"i":2' in input_items
+        assert '"i":0' not in input_items
+        assert '"i":1' not in input_items
+        assert '"i":3' not in input_items
         return json.dumps(
             {"items": [{"i": 2, "text": "Офицер подошёл."}]},
             ensure_ascii=False,
