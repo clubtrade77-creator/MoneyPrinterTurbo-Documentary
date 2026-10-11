@@ -728,8 +728,10 @@ def test_render_documentary_preview_allows_unreviewed_rights(
     source.rights_status = RightsStatus.unknown_review_required
     project.sources = [source]
     _save_scene(project, source, tmp_path, start=0.0, end=2.0)
+    commands = []
 
     def fake_run(command, **kwargs):
+        commands.append(command)
         Path(command[-1]).write_bytes(b"rendered-preview")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -743,7 +745,7 @@ def test_render_documentary_preview_allows_unreviewed_rights(
             duration_seconds=2.0,
             width=1280,
             height=720,
-            fps=30,
+            fps=24,
             has_audio=True,
             video_codec="h264",
             audio_codec="aac",
@@ -762,7 +764,55 @@ def test_render_documentary_preview_allows_unreviewed_rights(
 
     assert output == documentary_preview_path(project.id, tmp_path).resolve()
     assert output.read_bytes() == b"rendered-preview"
+    assert commands
+    command = commands[0]
+    assert command[command.index("-preset") + 1] == "veryfast"
+    assert command[command.index("-crf") + 1] == "23"
+    assert "fps=24" in " ".join(command)
     assert not documentary_render_path(project.id, tmp_path).exists()
+
+
+def test_render_documentary_preview_uses_fast_default_resolution(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _project_with_video_source(tmp_path, has_audio=False)
+    _save_scene(project, source, tmp_path, start=0.0, end=2.0)
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        Path(command[-1]).write_bytes(b"rendered-preview")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.subprocess.run",
+        fake_run,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.probe_video_metadata",
+        lambda path: VideoMetadata(
+            duration_seconds=2.0,
+            width=1280,
+            height=720,
+            fps=24,
+            has_audio=True,
+            video_codec="h264",
+            audio_codec="aac",
+            container="mov,mp4",
+            file_size_bytes=Path(path).stat().st_size,
+        ),
+    )
+
+    render_documentary(
+        project.id,
+        preview=True,
+        root=tmp_path,
+    )
+
+    joined = " ".join(commands[0])
+    assert "scale=1280:720" in joined
+    assert "fps=24" in joined
 
 
 def test_render_documentary_rejects_wrong_output_metadata_before_publish(
