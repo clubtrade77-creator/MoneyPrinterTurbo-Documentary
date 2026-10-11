@@ -302,6 +302,103 @@ def test_localize_project_uses_compact_batches_for_large_payload(
     ]
 
 
+def test_compact_localization_retries_only_missing_items(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_THRESHOLD_CHARS",
+        1,
+    )
+    calls = []
+
+    def generate(prompt: str) -> str:
+        calls.append(prompt)
+        if len(calls) == 1:
+            return json.dumps(
+                {
+                    "items": [
+                        {"i": 0, "text": "Офицер подходит к автомобилю."},
+                        {"i": 1, "text": "Записанная встреча"},
+                        {"i": 3, "text": "Всё изменилось."},
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        assert '"i":2' in prompt
+        assert '"i":0' not in prompt
+        assert '"i":1' not in prompt
+        assert '"i":3' not in prompt
+        return json.dumps(
+            {"items": [{"i": 2, "text": "Офицер подошёл."}]},
+            ensure_ascii=False,
+        )
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=_approved_review,
+    )
+
+    assert len(calls) == 2
+    assert plan.scenes[0].narration_text == "Офицер подходит к автомобилю."
+    assert [
+        item.text
+        for item in plan.scenes[0].subtitle_segments
+    ] == ["Офицер подошёл.", "Всё изменилось."]
+
+
+def test_compact_localization_splits_unidentifiable_partial_string_batch(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_THRESHOLD_CHARS",
+        1,
+    )
+    calls = []
+
+    def generate(prompt: str) -> str:
+        calls.append(prompt)
+        if len(calls) == 1:
+            return json.dumps(["частичный перевод"])
+        if '"i":0' in prompt and '"i":1' in prompt:
+            return json.dumps(
+                {
+                    "items": [
+                        {"i": 0, "text": "Офицер подходит к автомобилю."},
+                        {"i": 1, "text": "Записанная встреча"},
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "items": [
+                    {"i": 2, "text": "Офицер подошёл."},
+                    {"i": 3, "text": "Всё изменилось."},
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=_approved_review,
+    )
+
+    assert len(calls) == 3
+    assert plan.target_language == "ru"
+    assert plan.scenes[0].on_screen_text == "Записанная встреча"
+
+
 def test_localize_project_falls_back_to_compact_after_invalid_json(
     tmp_path: Path,
 ):
