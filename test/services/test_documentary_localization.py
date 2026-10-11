@@ -235,6 +235,79 @@ def test_localize_project_repairs_wrapped_scene_response(tmp_path: Path):
     ]
 
 
+def test_localization_reviewer_accepts_json_surrounded_by_prose(tmp_path: Path):
+    project, _ = _project_with_localizable_scene(tmp_path)
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=lambda prompt: (
+            'Review complete. {"supported": true, "issues": []} Thank you.'
+        ),
+    )
+
+    assert plan.semantic_reviewed is True
+
+
+def test_localization_reviewer_accepts_plain_pass_verdict(tmp_path: Path):
+    project, _ = _project_with_localizable_scene(tmp_path)
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=lambda prompt: "PASS",
+    )
+
+    assert plan.semantic_reviewed is True
+
+
+def test_localization_reviewer_repairs_unparseable_verdict_once(tmp_path: Path):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    review_calls = []
+
+    def review(prompt: str) -> str:
+        review_calls.append(prompt)
+        if len(review_calls) == 1:
+            return "The translation appears faithful and complete."
+        assert "Normalize the REVIEW VERDICT" in prompt
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert len(review_calls) == 2
+
+
+def test_localization_reviewer_normalizes_alias_verdict_fields(tmp_path: Path):
+    project, _ = _project_with_localizable_scene(tmp_path)
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=lambda prompt: json.dumps(
+            {
+                "verdict": "approved",
+                "reason": "",
+                "confidence": 0.98,
+            }
+        ),
+    )
+
+    assert plan.semantic_reviewed is True
+
+
 def test_localization_reviewer_allows_harmless_metadata_fields(tmp_path: Path):
     project, _ = _project_with_localizable_scene(tmp_path)
 
