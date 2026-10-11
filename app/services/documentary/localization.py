@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 from typing import Callable
 from uuid import uuid4
@@ -36,6 +37,10 @@ class _NonRetryableLocalizationError(LocalizationError):
 
 class _LocalizationSchemaError(LocalizationError):
     """Raised when generated localization JSON has a repairable schema drift."""
+
+
+class _LocalizationReviewSchemaError(LocalizationError):
+    """Raised when a reviewer verdict cannot be parsed safely."""
 
 
 def _normalize_language(language: str) -> str:
@@ -905,6 +910,112 @@ def build_localization_review_prompt(
     return prompt
 
 
+def _normalize_review_boolean(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in {0, 1}:
+        return bool(value)
+    text = str(value or "").strip().lower()
+    if text in {
+        "true",
+        "yes",
+        "y",
+        "pass",
+        "passed",
+        "approved",
+        "supported",
+        "faithful",
+        "ok",
+        "valid",
+    }:
+        return True
+    if text in {
+        "false",
+        "no",
+        "n",
+        "fail",
+        "failed",
+        "rejected",
+        "unsupported",
+        "unfaithful",
+        "invalid",
+    }:
+        return False
+    return None
+
+
+def _normalize_review_issues(value) -> list[str] | None:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, list):
+        return [
+            str(issue).strip()
+            for issue in value
+            if str(issue).strip()
+        ]
+    return None
+
+
+def _review_from_mapping(payload: dict) -> list[str]:
+    supported = None
+    for key in (
+        "supported",
+        "approved",
+        "faithful",
+        "valid",
+        "ok",
+        "pass",
+        "passed",
+        "verdict",
+        "status",
+    ):
+        if key in payload:
+            supported = _normalize_review_boolean(payload[key])
+            if supported is not None:
+                break
+
+    issues = None
+    for key in (
+        "issues",
+        "errors",
+        "problems",
+        "concerns",
+        "reasons",
+        "reason",
+    ):
+        if key in payload:
+            issues = _normalize_review_issues(payload[key])
+            if issues is not None:
+                break
+
+    if supported is None and issues is not None:
+        supported = not bool(issues)
+
+    if supported is None:
+        raise _LocalizationReviewSchemaError(
+            "documentary localization reviewer response is missing a recognizable verdict"
+        )
+    if issues is None:
+        issues = []
+
+    if supported and issues:
+        raise _LocalizationReviewSchemaError(
+            "documentary localization reviewer approved while reporting issues"
+        )
+    if not supported and not issues:
+        notes = str(
+            payload.get("notes")
+            or payload.get("explanation")
+            or payload.get("message")
+            or ""
+        ).strip()
+        issues = [notes or "reviewer rejected localization"]
+    return [] if supported else issues
+
+
 def _parse_review(response_text: str) -> list[str]:
     raw = _strip_code_fence(response_text)
     if not raw:
@@ -915,40 +1026,105 @@ def _parse_review(response_text: str) -> list[str]:
         raise _NonRetryableLocalizationError(
             raw.removeprefix("Error:").strip() or raw
         )
+
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise LocalizationError(
-            "documentary localization reviewer did not return valid JSON"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise LocalizationError(
-            "documentary localization reviewer response must be one JSON object"
+        payload = _decode_localization_json(raw)
+    except _LocalizationSchemaError:
+        payload = None
+
+    if isinstance(payload, dict):
+        return _review_from_mapping(payload)
+    if isinstance(payload, list):
+        issues = _normalize_review_issues(payload)
+        if issues is None:
+            raise _LocalizationReviewSchemaError(
+                "documentary localization reviewer returned an invalid issue list"
+            )
+        return issues
+
+    normalized = re.sub(r"\s+", " ", raw).strip()
+    verdict = _normalize_review_boolean(normalized.rstrip(".!"))
+    if verdict is True:
+        return []
+    if verdict is False:
+        return ["reviewer rejected localization"]
+
+    verdict_match = re.search(
+        r"\b(?:supported|approved|faithful|valid|verdict|status)\s*[:=]\s*"
+        r"(true|false|yes|no|pass(?:ed)?|approved|rejected|supported|unsupported|ok|fail(?:ed)?)\b",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if verdict_match:
+        verdict = _normalize_review_boolean(verdict_match.group(1))
+        if verdict is True:
+            return []
+        if verdict is False:
+            reason_match = re.search(
+                r"(?:reason|issue|problem|explanation)\s*[:=]\s*(.+)$",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            reason = (
+                reason_match.group(1).strip()
+                if reason_match
+                else "reviewer rejected localization"
+            )
+            return [reason]
+
+    upper = normalized.upper()
+    for prefix in ("PASS", "APPROVED", "SUPPORTED", "FAITHFUL", "OK"):
+        if upper == prefix or upper.startswith(prefix + ":") or upper.startswith(prefix + " -"):
+            return []
+    for prefix in ("FAIL", "FAILED", "REJECTED", "UNSUPPORTED"):
+        if upper == prefix or upper.startswith(prefix + ":") or upper.startswith(prefix + " -"):
+            reason = normalized[len(prefix):].lstrip(" :-").strip()
+            return [reason or "reviewer rejected localization"]
+
+    raise _LocalizationReviewSchemaError(
+        "documentary localization reviewer did not return a recognizable verdict"
+    )
+
+
+def _review_reformat_prompt(response_text: str) -> str:
+    raw = str(response_text or "").strip()
+    if len(raw) > 8000:
+        raw = raw[:8000]
+    return (
+        "Normalize the REVIEW VERDICT below into JSON. Do not re-review the "
+        "translation and do not invent a verdict. Preserve the verdict and any "
+        "stated issues from the text. Return exactly one JSON object only: "
+        '{"supported": true, "issues": []} or '
+        '{"supported": false, "issues": ["specific stated issue"]}. '
+        "If the text contains no clear verdict, return "
+        '{"supported": false, "issues": ["reviewer verdict was unclear"]}.\n\n'
+        "REVIEW VERDICT:\n"
+        + raw
+    )
+
+
+def _run_localization_review(
+    *,
+    reviewer: Callable[[str], str],
+    source_language: str,
+    target_language: str,
+    source_scenes: list[dict],
+    localized_scenes: list[LocalizedSceneText],
+) -> list[str]:
+    response = reviewer(
+        build_localization_review_prompt(
+            source_language=source_language,
+            target_language=target_language,
+            source_scenes=source_scenes,
+            localized_scenes=localized_scenes,
         )
-    if "supported" not in payload or "issues" not in payload:
-        raise LocalizationError(
-            "documentary localization reviewer response is missing verdict fields"
-        )
-    if not isinstance(payload["supported"], bool) or not isinstance(
-        payload["issues"], list
-    ):
-        raise LocalizationError(
-            "documentary localization reviewer response has invalid field types"
-        )
-    issues = [
-        str(issue).strip()
-        for issue in payload["issues"]
-        if str(issue).strip()
-    ]
-    if payload["supported"] and issues:
-        raise LocalizationError(
-            "documentary localization reviewer approved while reporting issues"
-        )
-    if not payload["supported"] and not issues:
-        raise LocalizationError(
-            "documentary localization reviewer rejected without an issue"
-        )
-    return [] if payload["supported"] else issues
+    )
+    try:
+        return _parse_review(response)
+    except _LocalizationReviewSchemaError:
+        repaired = reviewer(_review_reformat_prompt(response))
+        return _parse_review(repaired)
+
 
 
 def _retry_prompt(base_prompt: str, error: Exception, attempt: int) -> str:
@@ -1001,15 +1177,12 @@ def localize_project(
             generator=generator,
         )
         _validate_candidate_against_source(localized_scenes, source_scenes)
-        review_issues = _parse_review(
-            reviewer(
-                build_localization_review_prompt(
-                    source_language=source_language,
-                    target_language=target_language,
-                    source_scenes=source_scenes,
-                    localized_scenes=localized_scenes,
-                )
-            )
+        review_issues = _run_localization_review(
+            reviewer=reviewer,
+            source_language=source_language,
+            target_language=target_language,
+            source_scenes=source_scenes,
+            localized_scenes=localized_scenes,
         )
         if review_issues:
             raise LocalizationError(
@@ -1026,15 +1199,12 @@ def localize_project(
                 source_scenes,
             )
             _validate_candidate_against_source(candidate, source_scenes)
-            review_issues = _parse_review(
-                reviewer(
-                    build_localization_review_prompt(
-                        source_language=source_language,
-                        target_language=target_language,
-                        source_scenes=source_scenes,
-                        localized_scenes=candidate,
-                    )
-                )
+            review_issues = _run_localization_review(
+                reviewer=reviewer,
+                source_language=source_language,
+                target_language=target_language,
+                source_scenes=source_scenes,
+                localized_scenes=candidate,
             )
             if review_issues:
                 raise LocalizationError(
@@ -1054,15 +1224,12 @@ def localize_project(
                 generator=generator,
             )
             _validate_candidate_against_source(localized_scenes, source_scenes)
-            review_issues = _parse_review(
-                reviewer(
-                    build_localization_review_prompt(
-                        source_language=source_language,
-                        target_language=target_language,
-                        source_scenes=source_scenes,
-                        localized_scenes=localized_scenes,
-                    )
-                )
+            review_issues = _run_localization_review(
+                reviewer=reviewer,
+                source_language=source_language,
+                target_language=target_language,
+                source_scenes=source_scenes,
+                localized_scenes=localized_scenes,
             )
             if review_issues:
                 raise LocalizationError(
