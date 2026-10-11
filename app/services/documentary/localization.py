@@ -24,6 +24,9 @@ MAX_LOCALIZATION_REVIEW_PROMPT_CHARS = 180_000
 COMPACT_LOCALIZATION_THRESHOLD_CHARS = 4_000
 COMPACT_LOCALIZATION_BATCH_CHARS = 3_500
 COMPACT_LOCALIZATION_BATCH_ITEMS = 24
+COMPACT_REVIEW_THRESHOLD_CHARS = 5_000
+COMPACT_REVIEW_BATCH_CHARS = 4_000
+COMPACT_REVIEW_BATCH_ITEMS = 24
 CURRENT_LOCALIZATION_REVIEW_VERSION = 1
 
 
@@ -1086,21 +1089,159 @@ def _parse_review(response_text: str) -> list[str]:
     )
 
 
-def _review_reformat_prompt(response_text: str) -> str:
-    raw = str(response_text or "").strip()
-    if len(raw) > 8000:
-        raw = raw[:8000]
-    return (
-        "Normalize the REVIEW VERDICT below into JSON. Do not re-review the "
-        "translation and do not invent a verdict. Preserve the verdict and any "
-        "stated issues from the text. Return exactly one JSON object only: "
-        '{"supported": true, "issues": []} or '
-        '{"supported": false, "issues": ["specific stated issue"]}. '
-        "If the text contains no clear verdict, return "
-        '{"supported": false, "issues": ["reviewer verdict was unclear"]}.\n\n'
-        "REVIEW VERDICT:\n"
-        + raw
+def _localization_review_units(
+    source_scenes: list[dict],
+    localized_scenes: list[LocalizedSceneText],
+) -> list[dict]:
+    units = []
+    unit_index = 0
+    for source_scene, localized_scene in zip(source_scenes, localized_scenes):
+        pairs = [
+            (
+                str(source_scene.get("narration_text") or "").strip(),
+                localized_scene.narration_text.strip(),
+                "narration",
+            ),
+            (
+                str(source_scene.get("on_screen_text") or "").strip(),
+                localized_scene.on_screen_text.strip(),
+                "on_screen",
+            ),
+        ]
+        for source_text, localized_text, kind in pairs:
+            if source_text or localized_text:
+                units.append(
+                    {
+                        "i": unit_index,
+                        "kind": kind,
+                        "source": source_text,
+                        "translation": localized_text,
+                    }
+                )
+                unit_index += 1
+
+        for source_subtitle, localized_subtitle in zip(
+            source_scene.get("subtitle_segments", []),
+            localized_scene.subtitle_segments,
+        ):
+            source_text = str(source_subtitle.get("text") or "").strip()
+            localized_text = localized_subtitle.text.strip()
+            if not source_text and not localized_text:
+                continue
+            units.append(
+                {
+                    "i": unit_index,
+                    "kind": "subtitle",
+                    "source": source_text,
+                    "translation": localized_text,
+                }
+            )
+            unit_index += 1
+    return units
+
+
+def _compact_review_batches(units: list[dict]) -> list[list[dict]]:
+    batches = []
+    current = []
+    current_chars = 0
+    for unit in units:
+        unit_chars = len(unit["source"]) + len(unit["translation"])
+        if current and (
+            len(current) >= COMPACT_REVIEW_BATCH_ITEMS
+            or current_chars + unit_chars > COMPACT_REVIEW_BATCH_CHARS
+        ):
+            batches.append(current)
+            current = []
+            current_chars = 0
+        current.append(unit)
+        current_chars += unit_chars
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _build_compact_review_prompt(
+    *,
+    source_language: str,
+    target_language: str,
+    batch: list[dict],
+) -> str:
+    payload = [
+        {
+            "i": unit["i"],
+            "source": unit["source"],
+            "translation": unit["translation"],
+        }
+        for unit in batch
+    ]
+    return f"""
+Review this SMALL batch of documentary translations from
+{source_language} to {target_language}.
+
+Check ONLY factual fidelity and translation completeness:
+- reject additions or omissions of material facts;
+- reject changed names, numbers, dates, attribution, uncertainty, or meaning;
+- reject untranslated source-language prose that should have been translated;
+- proper names and conventional identical forms may remain unchanged;
+- do not critique style.
+
+Return exactly one JSON object and nothing else:
+{{"supported":true,"issues":[]}}
+or
+{{"supported":false,"issues":["specific issue with item i"]}}
+
+ITEMS:
+{json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}
+""".strip()
+
+
+def _run_compact_review_batch(
+    *,
+    reviewer: Callable[[str], str],
+    source_language: str,
+    target_language: str,
+    batch: list[dict],
+) -> list[str]:
+    prompt = _build_compact_review_prompt(
+        source_language=source_language,
+        target_language=target_language,
+        batch=batch,
     )
+    first_response = reviewer(prompt)
+    try:
+        return _parse_review(first_response)
+    except _LocalizationReviewSchemaError:
+        # Retry only this small review batch with an even simpler output contract.
+        retry_prompt = (
+            prompt
+            + "\n\nYour verdict format was unclear. Re-read the SAME ITEMS above. "
+            + 'Reply only with {"supported":true,"issues":[]} or '
+            + '{"supported":false,"issues":["specific issue with item i"]}.'
+        )
+        second_response = reviewer(retry_prompt)
+        return _parse_review(second_response)
+
+
+def _run_compact_localization_review(
+    *,
+    reviewer: Callable[[str], str],
+    source_language: str,
+    target_language: str,
+    source_scenes: list[dict],
+    localized_scenes: list[LocalizedSceneText],
+) -> list[str]:
+    units = _localization_review_units(source_scenes, localized_scenes)
+    issues = []
+    for batch in _compact_review_batches(units):
+        issues.extend(
+            _run_compact_review_batch(
+                reviewer=reviewer,
+                source_language=source_language,
+                target_language=target_language,
+                batch=batch,
+            )
+        )
+    return issues
 
 
 def _run_localization_review(
@@ -1111,6 +1252,23 @@ def _run_localization_review(
     source_scenes: list[dict],
     localized_scenes: list[LocalizedSceneText],
 ) -> list[str]:
+    units = _localization_review_units(source_scenes, localized_scenes)
+    total_chars = sum(
+        len(unit["source"]) + len(unit["translation"])
+        for unit in units
+    )
+    if (
+        total_chars > COMPACT_REVIEW_THRESHOLD_CHARS
+        or len(units) > COMPACT_REVIEW_BATCH_ITEMS
+    ):
+        return _run_compact_localization_review(
+            reviewer=reviewer,
+            source_language=source_language,
+            target_language=target_language,
+            source_scenes=source_scenes,
+            localized_scenes=localized_scenes,
+        )
+
     response = reviewer(
         build_localization_review_prompt(
             source_language=source_language,
@@ -1122,8 +1280,16 @@ def _run_localization_review(
     try:
         return _parse_review(response)
     except _LocalizationReviewSchemaError:
-        repaired = reviewer(_review_reformat_prompt(response))
-        return _parse_review(repaired)
+        # The translation itself may still be fine; review it again in a small,
+        # tightly constrained batch instead of converting an unclear verdict into
+        # a semantic rejection.
+        return _run_compact_localization_review(
+            reviewer=reviewer,
+            source_language=source_language,
+            target_language=target_language,
+            source_scenes=source_scenes,
+            localized_scenes=localized_scenes,
+        )
 
 
 
