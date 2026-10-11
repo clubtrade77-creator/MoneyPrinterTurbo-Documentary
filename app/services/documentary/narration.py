@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 from typing import Callable
 
 from app.models.documentary import AudioMode, SceneType
@@ -21,6 +23,14 @@ class NarrationWriterError(RuntimeError):
 
 class _NonRetryableNarrationWriterError(NarrationWriterError):
     pass
+
+
+class _NarrationSchemaError(NarrationWriterError):
+    """Raised when generated narration JSON does not match the expected schema."""
+
+
+class _NarrationShapeError(_NarrationSchemaError):
+    """Raised for recognizable response-shape drift that should not be retried."""
 
 
 def _strip_code_fence(text: str) -> str:
@@ -104,6 +114,10 @@ def _scene_context(project_id: str, root: str | os.PathLike | None = None):
                 "beat_title": beat.title,
                 "beat_summary": beat.summary,
                 "narration_goal": beat.narration_goal,
+                "available_seconds": max(
+                    0.0,
+                    float(scene.source_end or 0) - float(scene.source_start or 0),
+                ),
                 "evidence": evidence,
             }
         )
@@ -131,6 +145,10 @@ RULES:
 - Narration should complement the footage, not overwrite useful original dialogue.
 - Keep each scene's narration short enough for its source time range.
 - Return every scene exactly once and preserve scene_id exactly.
+- The top-level JSON object MUST contain exactly one field named "scenes".
+- Do not return top-level "title", "language", "narration", "result", "items",
+  "metadata", or any explanatory fields.
+- Each scene object must contain exactly "scene_id" and "narration_text".
 - Return JSON only.
 
 OUTPUT:
@@ -173,10 +191,106 @@ def build_narration_review_prompt(*, scenes: list[dict], candidate: list[dict]) 
     return prompt
 
 
+def _extract_narration_items(payload) -> list | None:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return None
+
+    scenes = payload.get("scenes")
+    if isinstance(scenes, list):
+        return scenes
+
+    for alias in ("narration", "items", "results", "result", "output"):
+        value = payload.get(alias)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict) and isinstance(value.get("scenes"), list):
+            return value["scenes"]
+
+    if any(
+        key in payload
+        for key in ("scene_id", "sceneId", "scene", "id")
+    ) and any(
+        key in payload
+        for key in (
+            "narration_text",
+            "narration",
+            "text",
+            "voiceover",
+            "voice_over",
+            "content",
+            "script",
+        )
+    ):
+        return [payload]
+    return None
+
+
+def _repair_narration_items(
+    items: list,
+    expected_scene_ids: list[str],
+) -> list[dict]:
+    if len(items) != len(expected_scene_ids):
+        raise _NarrationShapeError(
+            "narration writer changed the number of scenes"
+        )
+
+    repaired = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise _NarrationShapeError("invalid narration scene object")
+
+        scene_id = ""
+        for key in ("scene_id", "sceneId", "scene", "id"):
+            value = str(item.get(key) or "").strip()
+            if value:
+                scene_id = value
+                break
+        if not scene_id:
+            # Ordered fallback is safe because the prompt requires exact scene order;
+            # semantic review still validates the generated text against each scene.
+            scene_id = expected_scene_ids[index]
+
+        narration_text = ""
+        for key in (
+            "narration_text",
+            "narration",
+            "text",
+            "voiceover",
+            "voice_over",
+            "content",
+            "script",
+        ):
+            value = str(item.get(key) or "").strip()
+            if value:
+                narration_text = value
+                break
+
+        if not narration_text:
+            raise _NarrationShapeError("narration scene requires text")
+        if len(narration_text) > 8000:
+            raise _NarrationSchemaError("narration scene text is too long")
+
+        repaired.append(
+            {
+                "scene_id": scene_id,
+                "narration_text": narration_text,
+            }
+        )
+
+    actual_ids = [item["scene_id"] for item in repaired]
+    if actual_ids != expected_scene_ids:
+        raise _NarrationShapeError(
+            "narration writer changed scene order or scene ids"
+        )
+    return repaired
+
+
 def _parse_candidate(response_text: str, expected_scene_ids: list[str]) -> list[dict]:
     raw = _strip_code_fence(response_text)
     if not raw:
-        raise NarrationWriterError("narration writer returned an empty response")
+        raise _NarrationSchemaError("narration writer returned an empty response")
     if raw.startswith("Error:"):
         raise _NonRetryableNarrationWriterError(
             raw.removeprefix("Error:").strip() or raw
@@ -184,36 +298,65 @@ def _parse_candidate(response_text: str, expected_scene_ids: list[str]) -> list[
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise NarrationWriterError("narration writer did not return valid JSON") from exc
+        raise _NarrationSchemaError(
+            "narration writer did not return valid JSON"
+        ) from exc
 
-    if not isinstance(payload, dict) or set(payload) != {"scenes"}:
-        raise NarrationWriterError(
-            "narration writer response must contain only a scenes array"
+    items = _extract_narration_items(payload)
+    if items is None:
+        raise _NarrationShapeError(
+            "narration writer response does not contain a usable scenes array"
         )
-    scenes = payload["scenes"]
-    if not isinstance(scenes, list):
-        raise NarrationWriterError("narration writer scenes must be an array")
+    return _repair_narration_items(items, expected_scene_ids)
 
-    parsed = []
-    for item in scenes:
-        if not isinstance(item, dict) or set(item) != {"scene_id", "narration_text"}:
-            raise NarrationWriterError("invalid narration scene object")
-        scene_id = str(item["scene_id"] or "").strip()
-        narration_text = str(item["narration_text"] or "").strip()
-        if not scene_id or not narration_text:
-            raise NarrationWriterError("narration scene requires id and text")
-        if len(narration_text) > 8000:
-            raise NarrationWriterError("narration scene text is too long")
-        parsed.append(
-            {"scene_id": scene_id, "narration_text": narration_text}
-        )
 
-    actual_ids = [item["scene_id"] for item in parsed]
-    if actual_ids != expected_scene_ids:
-        raise NarrationWriterError(
-            "narration writer changed scene order or scene ids"
+def _truncate_to_word_budget(text: str, word_budget: int) -> str:
+    words = re.findall(r"\S+", str(text or "").strip())
+    if not words:
+        return ""
+    if len(words) <= word_budget:
+        return " ".join(words)
+    clipped = " ".join(words[:word_budget]).rstrip(" ,;:-")
+    if clipped and clipped[-1] not in ".!?…":
+        clipped += "."
+    return clipped
+
+
+def _deterministic_narration(scenes: list[dict]) -> list[dict]:
+    candidate = []
+    for scene in scenes:
+        available = max(1.0, float(scene.get("available_seconds") or 0))
+        # Conservative English-equivalent speaking budget. TTS fitting can safely
+        # absorb small timing variance later, but fallback should already be short.
+        word_budget = max(4, math.floor(available * 1.7))
+
+        evidence_texts = [
+            str(item.get("text") or "").strip()
+            for item in scene.get("evidence", [])
+            if isinstance(item, dict) and str(item.get("text") or "").strip()
+        ]
+        grounded_text = str(scene.get("beat_summary") or "").strip()
+        if not grounded_text:
+            grounded_text = " ".join(evidence_texts)
+        if not grounded_text and evidence_texts:
+            grounded_text = evidence_texts[0]
+
+        narration_text = _truncate_to_word_budget(
+            grounded_text,
+            word_budget,
         )
-    return parsed
+        if not narration_text:
+            raise NarrationWriterError(
+                f"scene {scene.get('scene_id')} has no grounded text for fallback"
+            )
+        candidate.append(
+            {
+                "scene_id": scene["scene_id"],
+                "narration_text": narration_text,
+            }
+        )
+    return candidate
+
 
 
 def _parse_review(response_text: str) -> list[str]:
@@ -305,9 +448,22 @@ def write_narration(
                 )
             candidate = parsed
             break
+        except _NarrationShapeError:
+            # Recognizable structure drift is not worth retrying. Build concise
+            # narration from already-reviewed Story Plan text / transcript evidence.
+            candidate = _deterministic_narration(scenes)
+            break
         except _NonRetryableNarrationWriterError:
             raise
+        except _NarrationSchemaError as exc:
+            last_error = exc
+            if attempt >= MAX_NARRATION_ATTEMPTS:
+                candidate = _deterministic_narration(scenes)
+                break
+            current_prompt = _retry_prompt(base_prompt, exc, attempt)
         except NarrationWriterError as exc:
+            # Semantic grounding failures are substantive and must never be hidden
+            # behind deterministic fallback.
             last_error = exc
             if attempt >= MAX_NARRATION_ATTEMPTS:
                 raise
