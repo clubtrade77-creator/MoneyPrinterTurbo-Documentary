@@ -251,6 +251,36 @@ def test_localization_reviewer_accepts_json_surrounded_by_prose(tmp_path: Path):
     assert plan.semantic_reviewed is True
 
 
+def test_compact_review_retries_only_unclear_batch(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_THRESHOLD_CHARS",
+        1,
+    )
+    review_calls = []
+
+    def review(prompt: str) -> str:
+        review_calls.append(prompt)
+        if len(review_calls) == 1:
+            return "I cannot format the verdict."
+        assert "Your verdict format was unclear" in prompt
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert len(review_calls) == 2
+
+
 def test_localization_reviewer_accepts_plain_pass_verdict(tmp_path: Path):
     project, _ = _project_with_localizable_scene(tmp_path)
 
@@ -265,7 +295,9 @@ def test_localization_reviewer_accepts_plain_pass_verdict(tmp_path: Path):
     assert plan.semantic_reviewed is True
 
 
-def test_localization_reviewer_repairs_unparseable_verdict_once(tmp_path: Path):
+def test_localization_reviewer_rechecks_unclear_verdict_in_compact_batch(
+    tmp_path: Path,
+):
     project, _ = _project_with_localizable_scene(tmp_path)
     review_calls = []
 
@@ -273,7 +305,7 @@ def test_localization_reviewer_repairs_unparseable_verdict_once(tmp_path: Path):
         review_calls.append(prompt)
         if len(review_calls) == 1:
             return "The translation appears faithful and complete."
-        assert "Normalize the REVIEW VERDICT" in prompt
+        assert "SMALL batch of documentary translations" in prompt
         return json.dumps({"supported": True, "issues": []})
 
     plan = localize_project(
@@ -286,6 +318,34 @@ def test_localization_reviewer_repairs_unparseable_verdict_once(tmp_path: Path):
 
     assert plan.semantic_reviewed is True
     assert len(review_calls) == 2
+
+
+def test_large_localization_review_uses_compact_batches(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_THRESHOLD_CHARS",
+        1,
+    )
+    review_calls = []
+
+    def review(prompt: str) -> str:
+        review_calls.append(prompt)
+        assert "SMALL batch of documentary translations" in prompt
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert len(review_calls) == 1
 
 
 def test_localization_reviewer_normalizes_alias_verdict_fields(tmp_path: Path):
