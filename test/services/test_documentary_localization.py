@@ -256,6 +256,87 @@ def test_localization_reviewer_allows_harmless_metadata_fields(tmp_path: Path):
     assert plan.semantic_reviewed is True
 
 
+def test_localize_project_uses_compact_batches_for_large_payload(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_THRESHOLD_CHARS",
+        1,
+    )
+    prompts = []
+
+    def generate(prompt: str) -> str:
+        prompts.append(prompt)
+        assert "compact batch" in prompt.lower()
+        return json.dumps(
+            {
+                "items": [
+                    {"i": 0, "text": "Офицер подходит к автомобилю."},
+                    {"i": 1, "text": "Записанная встреча"},
+                    {"i": 2, "text": "Офицер подошёл."},
+                    {"i": 3, "text": "Всё изменилось."},
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=_approved_review,
+    )
+
+    assert len(prompts) == 1
+    assert plan.scenes[0].narration_text == "Офицер подходит к автомобилю."
+    assert plan.scenes[0].on_screen_text == "Записанная встреча"
+    assert [
+        (item.source_id, item.segment_id, item.text)
+        for item in plan.scenes[0].subtitle_segments
+    ] == [
+        (source.id, 0, "Офицер подошёл."),
+        (source.id, 1, "Всё изменилось."),
+    ]
+
+
+def test_localize_project_falls_back_to_compact_after_invalid_json(
+    tmp_path: Path,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    calls = []
+
+    def generate(prompt: str) -> str:
+        calls.append(prompt)
+        if "compact batch" not in prompt.lower():
+            return '{"scenes": ['
+        return json.dumps(
+            {
+                "items": [
+                    {"i": 0, "text": "Офицер подходит к автомобилю."},
+                    {"i": 1, "text": "Записанная встреча"},
+                    {"i": 2, "text": "Офицер подошёл."},
+                    {"i": 3, "text": "Всё изменилось."},
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=_approved_review,
+    )
+
+    assert len(calls) == 2
+    assert "compact batch" in calls[1].lower()
+    assert plan.semantic_reviewed is True
+
+
 def test_localize_project_requires_reviewer_for_custom_generator(tmp_path: Path):
     project, _ = _project_with_localizable_scene(tmp_path)
 
