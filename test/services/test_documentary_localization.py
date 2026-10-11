@@ -184,6 +184,78 @@ def test_localize_project_persists_grounded_scene_text_and_subtitle_refs(
     assert loaded == plan
 
 
+def test_localize_project_repairs_wrapped_scene_response(tmp_path: Path):
+    project, source = _project_with_localizable_scene(tmp_path)
+
+    wrapped = {
+        "target_language": "ru",
+        "result": {
+            "scenes": [
+                {
+                    "id": "scene_localize",
+                    "narration": "Офицер подходит к автомобилю.",
+                    "onScreenText": "Записанная встреча",
+                    "subtitles": [
+                        {
+                            "sourceId": source.id,
+                            "segmentId": 0,
+                            "translation": "Офицер подошёл.",
+                            "confidence": 0.99,
+                        },
+                        {
+                            "sourceId": source.id,
+                            "segmentId": 1,
+                            "translation": "Всё изменилось.",
+                        },
+                    ],
+                    "notes": "wrapper metadata must be ignored",
+                }
+            ]
+        },
+        "model": "test",
+    }
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: json.dumps(wrapped, ensure_ascii=False),
+        review_fn=_approved_review,
+    )
+
+    assert plan.scenes[0].scene_id == "scene_localize"
+    assert plan.scenes[0].narration_text == "Офицер подходит к автомобилю."
+    assert plan.scenes[0].on_screen_text == "Записанная встреча"
+    assert [
+        (item.source_id, item.segment_id, item.text)
+        for item in plan.scenes[0].subtitle_segments
+    ] == [
+        (source.id, 0, "Офицер подошёл."),
+        (source.id, 1, "Всё изменилось."),
+    ]
+
+
+def test_localization_reviewer_allows_harmless_metadata_fields(tmp_path: Path):
+    project, _ = _project_with_localizable_scene(tmp_path)
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=lambda prompt: json.dumps(
+            {
+                "supported": True,
+                "issues": [],
+                "confidence": 0.99,
+                "notes": "faithful",
+            }
+        ),
+    )
+
+    assert plan.semantic_reviewed is True
+
+
 def test_localize_project_requires_reviewer_for_custom_generator(tmp_path: Path):
     project, _ = _project_with_localizable_scene(tmp_path)
 
