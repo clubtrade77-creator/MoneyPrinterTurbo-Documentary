@@ -31,6 +31,10 @@ class _NonRetryableLocalizationError(LocalizationError):
     """Raised for provider/runtime failures that retries cannot repair."""
 
 
+class _LocalizationSchemaError(LocalizationError):
+    """Raised when generated localization JSON has a repairable schema drift."""
+
+
 def _normalize_language(language: str) -> str:
     value = (language or "").strip().lower()
     parts = value.split("-")
@@ -217,6 +221,9 @@ every material fact, qualification, attribution, and uncertainty.
 An empty narration_text or on_screen_text must remain an empty string.
 Every source scene must appear exactly once and in the same order.
 Every subtitle segment must appear exactly once and in the same order.
+The top-level JSON object must contain one "scenes" array. Do not wrap it in
+"translation", "translations", "result", "output", or add explanatory prose.
+Inside each scene, preserve the exact field names shown below.
 Return JSON only, with exactly this shape:
 {{
   "scenes": [
@@ -245,10 +252,180 @@ SOURCE:
     return prompt
 
 
-def _parse_candidate(response_text: str) -> list[LocalizedSceneText]:
+def _extract_localization_scene_items(payload) -> list | None:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return None
+
+    if isinstance(payload.get("scenes"), list):
+        return payload["scenes"]
+
+    for key in (
+        "translation",
+        "translations",
+        "localized",
+        "localization",
+        "result",
+        "results",
+        "output",
+        "data",
+    ):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            if isinstance(value.get("scenes"), list):
+                return value["scenes"]
+            for nested_key in ("translations", "items", "results"):
+                if isinstance(value.get(nested_key), list):
+                    return value[nested_key]
+
+    # Last-resort structural repair: accept exactly one list-valued field when
+    # its items look like scene objects. This ignores wrapper metadata but never
+    # invents or translates text.
+    list_values = [
+        value
+        for value in payload.values()
+        if isinstance(value, list)
+        and value
+        and all(isinstance(item, dict) for item in value)
+    ]
+    if len(list_values) == 1:
+        return list_values[0]
+    return None
+
+
+def _repair_subtitle_segments(items, source_segments: list[dict]) -> list[dict]:
+    if items is None:
+        items = []
+    if not isinstance(items, list):
+        raise _LocalizationSchemaError(
+            "documentary localized subtitle segments must be an array"
+        )
+    if len(items) != len(source_segments):
+        raise _LocalizationSchemaError(
+            "documentary localization changed the number of subtitle segments"
+        )
+
+    repaired = []
+    for index, (item, source) in enumerate(zip(items, source_segments)):
+        if not isinstance(item, dict):
+            raise _LocalizationSchemaError(
+                "documentary localized subtitle item must be an object"
+            )
+
+        source_id = str(
+            item.get("source_id")
+            or item.get("sourceId")
+            or source["source_id"]
+        ).strip()
+        raw_segment_id = item.get("segment_id", item.get("segmentId"))
+        segment_id = source["segment_id"] if raw_segment_id is None else raw_segment_id
+        text = str(
+            item.get("text")
+            or item.get("translation")
+            or item.get("translated_text")
+            or item.get("content")
+            or ""
+        ).strip()
+
+        if not text and str(source.get("text") or "").strip():
+            raise _LocalizationSchemaError(
+                f"localized subtitle segment {index} is missing translated text"
+            )
+
+        repaired.append(
+            {
+                "source_id": source_id,
+                "segment_id": segment_id,
+                "text": text,
+            }
+        )
+    return repaired
+
+
+def _repair_localization_scene_items(
+    items: list,
+    source_scenes: list[dict],
+) -> list[dict]:
+    if len(items) != len(source_scenes):
+        raise _LocalizationSchemaError(
+            "documentary localization must contain every source scene exactly once"
+        )
+
+    repaired = []
+    for index, (item, source) in enumerate(zip(items, source_scenes)):
+        if not isinstance(item, dict):
+            raise _LocalizationSchemaError(
+                "documentary localized scene must be an object"
+            )
+
+        scene_id = str(
+            item.get("scene_id")
+            or item.get("sceneId")
+            or item.get("id")
+            or source["scene_id"]
+        ).strip()
+
+        narration_text = str(
+            item.get("narration_text")
+            if item.get("narration_text") is not None
+            else item.get("narration")
+            if item.get("narration") is not None
+            else item.get("voiceover")
+            if item.get("voiceover") is not None
+            else item.get("voice_over")
+            if item.get("voice_over") is not None
+            else ""
+        ).strip()
+
+        on_screen_text = str(
+            item.get("on_screen_text")
+            if item.get("on_screen_text") is not None
+            else item.get("onScreenText")
+            if item.get("onScreenText") is not None
+            else item.get("onscreen_text")
+            if item.get("onscreen_text") is not None
+            else item.get("title")
+            if item.get("title") is not None
+            else ""
+        ).strip()
+
+        subtitle_items = None
+        for key in (
+            "subtitle_segments",
+            "subtitles",
+            "subtitleSegments",
+            "captions",
+        ):
+            if key in item:
+                subtitle_items = item[key]
+                break
+
+        repaired.append(
+            {
+                "scene_id": scene_id,
+                "narration_text": narration_text,
+                "on_screen_text": on_screen_text,
+                "subtitle_segments": _repair_subtitle_segments(
+                    subtitle_items,
+                    source["subtitle_segments"],
+                ),
+            }
+        )
+    return repaired
+
+
+def _parse_candidate(
+    response_text: str,
+    source_scenes: list[dict],
+) -> list[LocalizedSceneText]:
     raw = _strip_code_fence(response_text)
     if not raw:
-        raise LocalizationError("documentary localizer returned an empty response")
+        raise _LocalizationSchemaError(
+            "documentary localizer returned an empty response"
+        )
     if raw.startswith("Error:"):
         raise _NonRetryableLocalizationError(
             raw.removeprefix("Error:").strip() or raw
@@ -257,21 +434,27 @@ def _parse_candidate(response_text: str) -> list[LocalizedSceneText]:
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise LocalizationError("documentary localizer did not return valid JSON") from exc
-    if not isinstance(payload, dict) or set(payload) != {"scenes"}:
-        raise LocalizationError(
-            "documentary localizer response must contain only a scenes array"
-        )
-    if not isinstance(payload["scenes"], list):
-        raise LocalizationError("documentary localizer scenes must be an array")
+        raise _LocalizationSchemaError(
+            "documentary localizer did not return valid JSON"
+        ) from exc
 
+    items = _extract_localization_scene_items(payload)
+    if items is None:
+        raise _LocalizationSchemaError(
+            "documentary localizer response does not contain a usable scenes array"
+        )
+
+    repaired = _repair_localization_scene_items(items, source_scenes)
     try:
         return [
             LocalizedSceneText.model_validate(item)
-            for item in payload["scenes"]
+            for item in repaired
         ]
     except ValueError as exc:
-        raise LocalizationError(f"invalid documentary localization: {exc}") from exc
+        raise _LocalizationSchemaError(
+            f"invalid documentary localization: {exc}"
+        ) from exc
+
 
 
 def _validate_candidate_against_source(
@@ -372,9 +555,9 @@ def _parse_review(response_text: str) -> list[str]:
         raise LocalizationError(
             "documentary localization reviewer response must be one JSON object"
         )
-    if set(payload) != {"supported", "issues"}:
+    if "supported" not in payload or "issues" not in payload:
         raise LocalizationError(
-            "documentary localization reviewer response has unexpected fields"
+            "documentary localization reviewer response is missing verdict fields"
         )
     if not isinstance(payload["supported"], bool) or not isinstance(
         payload["issues"], list
@@ -442,7 +625,10 @@ def localize_project(
 
     for attempt in range(1, MAX_LOCALIZATION_ATTEMPTS + 1):
         try:
-            candidate = _parse_candidate(generator(current_prompt))
+            candidate = _parse_candidate(
+                generator(current_prompt),
+                source_scenes,
+            )
             _validate_candidate_against_source(candidate, source_scenes)
             review_issues = _parse_review(
                 reviewer(
