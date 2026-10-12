@@ -660,6 +660,11 @@ def _localize_compact(
 
     translations: dict[int, str] = {}
     batches = _compact_localization_batches(units)
+    total_weight = sum(
+        max(1, len(unit["text"]))
+        for unit in units
+    )
+    completed_weight = 0
     _report_localization_progress(progress, 0.0)
     for index, batch in enumerate(batches, start=1):
         _report_localization_status(
@@ -676,9 +681,13 @@ def _localize_compact(
                 generator=generator,
             )
         )
+        completed_weight += sum(
+            max(1, len(unit["text"]))
+            for unit in batch
+        )
         _report_localization_progress(
             progress,
-            index / max(1, len(batches)),
+            completed_weight / max(1, total_weight),
         )
     return _assemble_compact_localization(
         source_scenes,
@@ -1448,6 +1457,11 @@ def _review_and_repair_localization(
         localized_scenes,
     )
     batches = _compact_review_batches(review_units)
+    total_weight = sum(
+        max(1, len(unit["source"]) + len(unit["translation"]))
+        for unit in review_units
+    )
+    completed_weight = 0
     unresolved_issues: list[str] = []
     _report_localization_progress(progress, 0.0)
 
@@ -1528,9 +1542,13 @@ def _review_and_repair_localization(
             if batch_issues:
                 unresolved_issues.extend(batch_issues)
 
+        completed_weight += sum(
+            max(1, len(unit["source"]) + len(unit["translation"]))
+            for unit in review_batch
+        )
         _report_localization_progress(
             progress,
-            batch_index / max(1, len(batches)),
+            completed_weight / max(1, total_weight),
         )
 
     return localized_scenes, unresolved_issues
