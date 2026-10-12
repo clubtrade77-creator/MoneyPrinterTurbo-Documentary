@@ -188,6 +188,20 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
     assert "render:es:True" in calls
     assert events[-1].stage == "done"
     assert events[-1].fraction == 1.0
+    assert events[-1].stage_fraction == 1.0
+    assert events[-1].status == "completed"
+    assert all(event.stage != "resume" for event in events)
+    assert any(
+        event.stage == "story"
+        and event.stage_fraction == 1.0
+        and event.status == "completed"
+        for event in events
+    )
+    assert any(
+        event.stage == "localize_ru"
+        and event.stage_fraction == 1.0
+        for event in events
+    )
 
 
 def test_run_autopilot_renders_final_when_rights_are_cleared(
@@ -589,6 +603,7 @@ def test_run_autopilot_resume_reuses_saved_transcript_and_story_plan(
         "source_verified": True,
     }
     calls = []
+    events = []
 
     monkeypatch.setattr(autopilot, "_load_autopilot_state", lambda *a, **k: state)
     monkeypatch.setattr(autopilot, "_checkpoint_autopilot", _checkpoint_stub)
@@ -662,9 +677,17 @@ def test_run_autopilot_resume_reuses_saved_transcript_and_story_plan(
         autopilot.AutopilotProfile(output_languages=("en",)),
         root=tmp_path,
         resume_project_id=project.id,
+        progress=events.append,
     )
 
     assert result.project_id == project.id
     assert result.source_id == source.id
     assert result.title == project.title
     assert calls == [(None, True)]
+    assert all(event.stage != "resume" for event in events)
+    reused = {
+        event.stage
+        for event in events
+        if event.status == "reused" and event.stage_fraction == 1.0
+    }
+    assert {"story", "sources", "transcription", "story_plan", "clips", "narration"} <= reused
