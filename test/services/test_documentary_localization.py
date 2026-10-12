@@ -251,6 +251,146 @@ def test_localization_reviewer_accepts_json_surrounded_by_prose(tmp_path: Path):
     assert plan.semantic_reviewed is True
 
 
+def test_semantic_review_repairs_only_rejected_batch(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_ITEMS",
+        2,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_CHARS",
+        100000,
+    )
+    generate_calls = []
+    rejected_once = {"value": False}
+
+    bad_response = json.loads(_russian_response())
+    bad_response["scenes"][0]["subtitle_segments"][0]["text"] = "ПЛОХО."
+    bad_response = json.dumps(bad_response, ensure_ascii=False)
+
+    def generate(prompt: str) -> str:
+        generate_calls.append(prompt)
+        if "Repair ONLY this rejected documentary translation batch" not in prompt:
+            return bad_response
+
+        items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+        assert [item["i"] for item in items] == [2, 3]
+        return json.dumps(
+            {
+                "items": [
+                    {"i": 2, "text": "Офицер подошёл."},
+                    {"i": 3, "text": "Всё изменилось."},
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    def review(prompt: str) -> str:
+        items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+        ids = [item["i"] for item in items]
+        if ids == [2, 3] and not rejected_once["value"]:
+            rejected_once["value"] = True
+            return json.dumps(
+                {
+                    "supported": False,
+                    "issues": ["item 2 is mistranslated"],
+                }
+            )
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert len(generate_calls) == 2
+    assert "Repair ONLY this rejected documentary translation batch" in generate_calls[1]
+    assert plan.scenes[0].narration_text == "Офицер подходит к автомобилю."
+    assert plan.scenes[0].on_screen_text == "Записанная встреча"
+    assert [
+        (item.source_id, item.segment_id, item.text)
+        for item in plan.scenes[0].subtitle_segments
+    ] == [
+        (source.id, 0, "Офицер подошёл."),
+        (source.id, 1, "Всё изменилось."),
+    ]
+
+
+def test_unresolved_semantic_batch_does_not_retry_whole_language(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_ITEMS",
+        2,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_CHARS",
+        100000,
+    )
+    generate_calls = []
+
+    def generate(prompt: str) -> str:
+        generate_calls.append(prompt)
+        if "Repair ONLY this rejected documentary translation batch" in prompt:
+            items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+            return json.dumps(
+                {
+                    "items": [
+                        {"i": item["i"], "text": "Всё ещё неверно."}
+                        for item in items
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        return _russian_response()
+
+    def review(prompt: str) -> str:
+        items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+        ids = [item["i"] for item in items]
+        if ids == [2, 3]:
+            return json.dumps(
+                {
+                    "supported": False,
+                    "issues": ["items 2-3 still fail semantic review"],
+                }
+            )
+        return json.dumps({"supported": True, "issues": []})
+
+    with pytest.raises(
+        LocalizationError,
+        match="semantic localization review failed",
+    ):
+        localize_project(
+            project.id,
+            "ru",
+            root=tmp_path,
+            generate_fn=generate,
+            review_fn=review,
+        )
+
+    full_generation_calls = [
+        prompt
+        for prompt in generate_calls
+        if "Repair ONLY this rejected documentary translation batch" not in prompt
+    ]
+    repair_calls = [
+        prompt
+        for prompt in generate_calls
+        if "Repair ONLY this rejected documentary translation batch" in prompt
+    ]
+    assert len(full_generation_calls) == 1
+    assert len(repair_calls) == 2
+
+
 def test_compact_review_accepts_minimal_pass_after_unclear_json(
     tmp_path: Path,
     monkeypatch,
