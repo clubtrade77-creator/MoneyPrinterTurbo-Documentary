@@ -140,15 +140,32 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
         "_resolve_voice",
         lambda language, explicit_voice="": f"voice:{language}",
     )
+    def fake_synthesize(*args, **kwargs):
+        calls.append(f"tts:{kwargs['language']}")
+        progress = kwargs.get("progress")
+        if progress is not None:
+            progress(0.5)
+            progress(1.0)
+        return SimpleNamespace(generated=(object(),), reused=())
+
+    def fake_localize(*args, **kwargs):
+        calls.append(f"localize:{args[1]}")
+        progress = kwargs.get("progress")
+        if progress is not None:
+            progress(0.25)
+            progress(0.5)
+            progress(1.0)
+        return SimpleNamespace()
+
     monkeypatch.setattr(
         autopilot,
         "synthesize_narration",
-        lambda *a, **k: calls.append(f"tts:{k['language']}"),
+        fake_synthesize,
     )
     monkeypatch.setattr(
         autopilot,
         "localize_project",
-        lambda *a, **k: calls.append(f"localize:{a[1]}"),
+        fake_localize,
     )
 
     def fake_render(project_id, *, language=None, preview=False, root=None):
@@ -202,6 +219,14 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
         and event.stage_fraction == 1.0
         for event in events
     )
+    ru_stage_fractions = [
+        event.stage_fraction
+        for event in events
+        if event.stage == "localize_ru"
+    ]
+    assert any(0.0 < value < 0.60 for value in ru_stage_fractions)
+    assert any(0.60 < value < 0.80 for value in ru_stage_fractions)
+    assert ru_stage_fractions[-1] == 1.0
 
 
 def test_run_autopilot_renders_final_when_rights_are_cleared(
