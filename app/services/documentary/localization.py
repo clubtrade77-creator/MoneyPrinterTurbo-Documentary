@@ -1301,7 +1301,6 @@ def _run_localization_review(
             target_language=target_language,
             source_scenes=source_scenes,
             localized_scenes=localized_scenes,
-            progress=progress,
         )
     )
     try:
@@ -1318,6 +1317,7 @@ def _run_localization_review(
             target_language=target_language,
             source_scenes=source_scenes,
             localized_scenes=localized_scenes,
+            progress=progress,
         )
 
 
