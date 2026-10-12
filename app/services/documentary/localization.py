@@ -1681,7 +1681,7 @@ def localize_project(
                 ),
             )
             if review_issues:
-                raise LocalizationError(
+                raise _LocalizationSemanticError(
                     "semantic localization review failed: "
                     + "; ".join(review_issues)
                 )
@@ -1715,7 +1715,7 @@ def localize_project(
                 ),
             )
             if review_issues:
-                raise LocalizationError(
+                raise _LocalizationSemanticError(
                     "semantic localization review failed: "
                     + "; ".join(review_issues)
                 )
