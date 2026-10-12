@@ -1478,6 +1478,13 @@ def run_autopilot(
             project.id,
             preview=True,
             root=root,
+            progress=lambda fraction: _emit(
+                progress,
+                "preview",
+                "Rendering master-language preview",
+                0.83 + 0.01 * fraction,
+                stage_fraction=fraction,
+            ),
         )
         previews = {master_language: str(master_preview)}
         state = _checkpoint_autopilot(
@@ -1587,6 +1594,14 @@ def run_autopilot(
                     language=language,
                     preview=True,
                     root=root,
+                    progress=lambda fraction: _emit(
+                        progress,
+                        stage,
+                        f"Rendering {language.upper()} preview",
+                        base_fraction
+                        + step * (0.80 + 0.20 * fraction),
+                        stage_fraction=0.80 + 0.20 * fraction,
+                    ),
                 )
                 previews[language] = str(localized_preview)
                 _emit(
@@ -1612,7 +1627,17 @@ def run_autopilot(
                 0.98,
                 stage_fraction=0.0,
             )
-            render_documentary(project.id, root=root)
+            render_documentary(
+                project.id,
+                root=root,
+                progress=lambda fraction: _emit(
+                    progress,
+                    "final",
+                    "Rendering publication-ready master",
+                    0.98 + 0.015 * fraction,
+                    stage_fraction=fraction,
+                ),
+            )
             final_master_created = True
             _emit(
                 progress,
