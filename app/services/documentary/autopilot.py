@@ -90,6 +90,11 @@ class AutopilotProgress:
     fraction: float
     stage_fraction: float = 0.0
     status: str = "running"
+    detail_phase: str = ""
+    detail_current: int = 0
+    detail_total: int = 0
+    detail_attempt: int = 0
+    detail_attempts: int = 0
 
 
 @dataclass(frozen=True)
@@ -299,6 +304,11 @@ def _emit(
     *,
     stage_fraction: float = 0.0,
     status: str = "running",
+    detail_phase: str = "",
+    detail_current: int = 0,
+    detail_total: int = 0,
+    detail_attempt: int = 0,
+    detail_attempts: int = 0,
 ) -> None:
     if callback is None:
         return
@@ -309,6 +319,11 @@ def _emit(
             fraction=max(0.0, min(1.0, float(fraction))),
             stage_fraction=max(0.0, min(1.0, float(stage_fraction))),
             status=status,
+            detail_phase=str(detail_phase or ""),
+            detail_current=max(0, int(detail_current or 0)),
+            detail_total=max(0, int(detail_total or 0)),
+            detail_attempt=max(0, int(detail_attempt or 0)),
+            detail_attempts=max(0, int(detail_attempts or 0)),
         )
     )
 
@@ -1529,17 +1544,45 @@ def run_autopilot(
                         base_fraction,
                         stage_fraction=0.0,
                     )
-                    localize_project(
-                        project.id,
-                        language,
-                        root=root,
-                        progress=lambda fraction: _emit(
+                    localization_progress = {"fraction": 0.0}
+
+                    def on_localization_progress(fraction):
+                        localization_progress["fraction"] = fraction
+                        _emit(
                             progress,
                             stage,
                             f"Translating and reviewing {language.upper()}",
                             base_fraction + step * 0.60 * fraction,
                             stage_fraction=0.60 * fraction,
-                        ),
+                        )
+
+                    def on_localization_status(
+                        phase,
+                        current,
+                        total,
+                        attempt,
+                        attempts,
+                    ):
+                        fraction = localization_progress["fraction"]
+                        _emit(
+                            progress,
+                            stage,
+                            f"Translating and reviewing {language.upper()}",
+                            base_fraction + step * 0.60 * fraction,
+                            stage_fraction=0.60 * fraction,
+                            detail_phase=phase,
+                            detail_current=current,
+                            detail_total=total,
+                            detail_attempt=attempt,
+                            detail_attempts=attempts,
+                        )
+
+                    localize_project(
+                        project.id,
+                        language,
+                        root=root,
+                        progress=on_localization_progress,
+                        status=on_localization_status,
                     )
                     state = _checkpoint_autopilot(
                         project.id,
