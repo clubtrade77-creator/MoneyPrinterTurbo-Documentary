@@ -886,6 +886,9 @@
     "Documentary Autopilot Stage Status Reused": "Reused saved result",
     "Documentary Autopilot Stage Status Skipped": "Not required",
     "Documentary Autopilot Progress Stage Detail": "Overall {overall}% · {stage}: {stage_percent}%",
-    "Documentary Autopilot Progress Log Detail": "Overall {overall}% · {stage}: {stage_percent}%"
+    "Documentary Autopilot Progress Log Detail": "Overall {overall}% · {stage}: {stage_percent}%",
+    "Documentary Autopilot Detail Translation Batch": "Translation: batch {current} of {total}",
+    "Documentary Autopilot Detail Review Batch": "Translation review: batch {current} of {total}",
+    "Documentary Autopilot Detail Repair Batch": "Repairing batch {current} of {total} · attempt {attempt} of {attempts}"
   }
 }
