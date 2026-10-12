@@ -168,11 +168,22 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
         fake_localize,
     )
 
-    def fake_render(project_id, *, language=None, preview=False, root=None):
+    def fake_render(
+        project_id,
+        *,
+        language=None,
+        preview=False,
+        root=None,
+        progress=None,
+    ):
         # The source transcript is English in this test, so Autopilot promotes
         # English to the master language and passes language=None for that preview.
         label = language or "en"
         calls.append(f"render:{label}:{preview}")
+        if progress is not None:
+            progress(0.25)
+            progress(0.5)
+            progress(1.0)
         path = tmp_path / f"{label}-preview.mp4"
         path.write_bytes(b"preview")
         return path
@@ -226,6 +237,7 @@ def test_run_autopilot_builds_three_language_previews(monkeypatch, tmp_path: Pat
     ]
     assert any(0.0 < value < 0.60 for value in ru_stage_fractions)
     assert any(0.60 < value < 0.80 for value in ru_stage_fractions)
+    assert any(0.80 < value < 1.0 for value in ru_stage_fractions)
     assert ru_stage_fractions[-1] == 1.0
 
 
@@ -301,8 +313,17 @@ def test_run_autopilot_renders_final_when_rights_are_cleared(
     monkeypatch.setattr(autopilot, "_resolve_voice", lambda *a, **k: "voice:ru")
     monkeypatch.setattr(autopilot, "synthesize_narration", lambda *a, **k: None)
 
-    def fake_render(project_id, *, language=None, preview=False, root=None):
+    def fake_render(
+        project_id,
+        *,
+        language=None,
+        preview=False,
+        root=None,
+        progress=None,
+    ):
         renders.append(preview)
+        if progress is not None:
+            progress(1.0)
         path = tmp_path / ("preview.mp4" if preview else "master.mp4")
         path.write_bytes(b"video")
         return path
@@ -680,8 +701,17 @@ def test_run_autopilot_resume_reuses_saved_transcript_and_story_plan(
         lambda *a, **k: False,
     )
 
-    def fake_render(project_id, *, language=None, preview=False, root=None):
+    def fake_render(
+        project_id,
+        *,
+        language=None,
+        preview=False,
+        root=None,
+        progress=None,
+    ):
         calls.append((language, preview))
+        if progress is not None:
+            progress(1.0)
         path = tmp_path / f"{language or 'master'}-{preview}.mp4"
         path.write_bytes(b"video")
         return path
