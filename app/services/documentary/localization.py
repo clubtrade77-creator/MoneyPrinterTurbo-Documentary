@@ -1432,6 +1432,10 @@ def localize_project(
                 target_language=target_language,
                 source_scenes=source_scenes,
                 generator=generator,
+                progress=lambda fraction: _report_localization_progress(
+                    progress,
+                    0.70 * fraction,
+                ),
             )
             _validate_candidate_against_source(localized_scenes, source_scenes)
             review_issues = _run_localization_review(
@@ -1440,6 +1444,10 @@ def localize_project(
                 target_language=target_language,
                 source_scenes=source_scenes,
                 localized_scenes=localized_scenes,
+                progress=lambda fraction: _report_localization_progress(
+                    progress,
+                    0.70 + 0.30 * fraction,
+                ),
             )
             if review_issues:
                 raise LocalizationError(
