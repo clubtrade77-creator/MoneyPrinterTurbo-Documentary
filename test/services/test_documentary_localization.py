@@ -251,6 +251,69 @@ def test_localization_reviewer_accepts_json_surrounded_by_prose(tmp_path: Path):
     assert plan.semantic_reviewed is True
 
 
+def test_compact_review_accepts_minimal_pass_after_unclear_json(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_THRESHOLD_CHARS",
+        1,
+    )
+    calls = []
+
+    def review(prompt: str) -> str:
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "The translation looks faithful, but here is my explanation."
+        return "PASS"
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert len(calls) == 2
+    assert "Return exactly PASS" in calls[1]
+
+
+def test_compact_review_splits_batch_after_two_unclear_verdicts(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_THRESHOLD_CHARS",
+        1,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_ITEMS",
+        99,
+    )
+    calls = []
+
+    def review(prompt: str) -> str:
+        calls.append(prompt)
+        if len(calls) <= 2:
+            return "unclear"
+        return "PASS"
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert len(calls) > 2
+
+
 def test_compact_review_retries_only_unclear_batch(
     tmp_path: Path,
     monkeypatch,
