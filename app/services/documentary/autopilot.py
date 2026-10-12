@@ -1426,6 +1426,13 @@ def run_autopilot(
                 _resolve_voice(master_language, profile.voice_name),
                 language=master_language,
                 root=root,
+                progress=lambda fraction: _emit(
+                    progress,
+                    "voice",
+                    "Generating or reusing narrator audio",
+                    0.75 + 0.07 * fraction,
+                    stage_fraction=fraction,
+                ),
             )
             state = _checkpoint_autopilot(
                 project.id,
@@ -1519,13 +1526,13 @@ def run_autopilot(
                         project.id,
                         language,
                         root=root,
-                    )
-                    _emit(
-                        progress,
-                        stage,
-                        f"{language.upper()} translation reviewed",
-                        base_fraction + step * 0.45,
-                        stage_fraction=0.45,
+                        progress=lambda fraction: _emit(
+                            progress,
+                            stage,
+                            f"Translating and reviewing {language.upper()}",
+                            base_fraction + step * 0.60 * fraction,
+                            stage_fraction=0.60 * fraction,
+                        ),
                     )
                     state = _checkpoint_autopilot(
                         project.id,
@@ -1538,8 +1545,8 @@ def run_autopilot(
                         progress,
                         stage,
                         f"Reusing reviewed {language.upper()} localization",
-                        base_fraction + step * 0.45,
-                        stage_fraction=0.45,
+                        base_fraction + step * 0.60,
+                        stage_fraction=0.60,
                         status="reused",
                     )
 
@@ -1549,13 +1556,31 @@ def run_autopilot(
                         _resolve_voice(language),
                         language=language,
                         root=root,
+                        progress=lambda fraction: _emit(
+                            progress,
+                            stage,
+                            f"Creating {language.upper()} narration",
+                            base_fraction
+                            + step * (0.60 + 0.20 * fraction),
+                            stage_fraction=0.60 + 0.20 * fraction,
+                        ),
                     )
+                else:
+                    _emit(
+                        progress,
+                        stage,
+                        f"{language.upper()} narration is not required",
+                        base_fraction + step * 0.80,
+                        stage_fraction=0.80,
+                        status="skipped",
+                    )
+
                 _emit(
                     progress,
                     stage,
-                    f"{language.upper()} narration ready",
-                    base_fraction + step * 0.70,
-                    stage_fraction=0.70,
+                    f"Rendering {language.upper()} preview",
+                    base_fraction + step * 0.80,
+                    stage_fraction=0.80,
                 )
                 localized_preview = render_documentary(
                     project.id,
