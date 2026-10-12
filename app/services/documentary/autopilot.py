@@ -88,6 +88,8 @@ class AutopilotProgress:
     stage: str
     message: str
     fraction: float
+    stage_fraction: float = 0.0
+    status: str = "running"
 
 
 @dataclass(frozen=True)
@@ -294,6 +296,9 @@ def _emit(
     stage: str,
     message: str,
     fraction: float,
+    *,
+    stage_fraction: float = 0.0,
+    status: str = "running",
 ) -> None:
     if callback is None:
         return
@@ -302,6 +307,8 @@ def _emit(
             stage=stage,
             message=message,
             fraction=max(0.0, min(1.0, float(fraction))),
+            stage_fraction=max(0.0, min(1.0, float(stage_fraction))),
+            status=status,
         )
     )
 
@@ -1050,17 +1057,39 @@ def run_autopilot(
                     resumed = True
                     _emit(
                         progress,
-                        "resume",
-                        "Resuming from saved transcript checkpoint",
+                        "transcription",
+                        "Reusing saved transcript checkpoint",
                         0.34,
+                        stage_fraction=1.0,
+                        status="reused",
                     )
 
         if not resumed:
-            _emit(progress, "story", "Searching for the best story", 0.04)
+            _emit(
+                progress,
+                "story",
+                "Searching for the best story",
+                0.04,
+                stage_fraction=0.0,
+            )
             stories = _discover_autopilot_stories(profile)
+            _emit(
+                progress,
+                "story",
+                "Story selected",
+                0.12,
+                stage_fraction=1.0,
+                status="completed",
+            )
 
             stage = "sources"
-            _emit(progress, stage, "Finding a story with source video", 0.13)
+            _emit(
+                progress,
+                stage,
+                "Finding a story with source video",
+                0.13,
+                stage_fraction=0.0,
+            )
             story, source_bundle = _choose_story_with_source(
                 stories,
                 source_limit=profile.source_limit,
@@ -1077,6 +1106,14 @@ def run_autopilot(
                 project.id,
                 source_bundle,
                 root=root,
+            )
+            _emit(
+                progress,
+                "sources",
+                "Source video selected",
+                0.22,
+                stage_fraction=1.0,
+                status="completed",
             )
             state = _checkpoint_autopilot(
                 project.id,
@@ -1097,6 +1134,7 @@ def run_autopilot(
                 stage,
                 "Downloading and validating source speech",
                 0.23,
+                stage_fraction=0.0,
             )
             model = subtitle_service.get_whisper_model("small")
 
@@ -1199,7 +1237,14 @@ def run_autopilot(
                 project_id=project_id,
             )
 
-        _emit(progress, "transcription", "Analyzing speech and timecodes", 0.34)
+        _emit(
+            progress,
+            "transcription",
+            "Analyzing speech and timecodes",
+            0.34,
+            stage_fraction=0.85 if not resumed else 1.0,
+            status="running" if not resumed else "reused",
+        )
         detected_language = str(transcript.language or "").split("-", 1)[0].lower()
         master_language = (
             detected_language
@@ -1228,12 +1273,26 @@ def run_autopilot(
             for language in output_languages
             if language != master_language
         )
+        _emit(
+            progress,
+            "transcription",
+            "Speech and timecodes ready",
+            0.45,
+            stage_fraction=1.0,
+            status="reused" if resumed else "completed",
+        )
 
         stage = "story_plan"
         try:
             load_story_plan(project.id, root=root)
         except (FileNotFoundError, StoryPlannerError):
-            _emit(progress, stage, "Building the documentary story", 0.46)
+            _emit(
+                progress,
+                stage,
+                "Building the documentary story",
+                0.46,
+                stage_fraction=0.0,
+            )
             plan_story(
                 project.id,
                 source_ids=[source.id],
@@ -1246,12 +1305,22 @@ def run_autopilot(
                 stage="story_plan",
                 root=root,
             )
+            _emit(
+                progress,
+                "story_plan",
+                "Story Plan ready",
+                0.56,
+                stage_fraction=1.0,
+                status="completed",
+            )
         else:
             _emit(
                 progress,
-                "resume",
+                "story_plan",
                 "Reusing reviewed Story Plan checkpoint",
-                0.46,
+                0.56,
+                stage_fraction=1.0,
+                status="reused",
             )
 
         stage = "clips"
@@ -1261,7 +1330,13 @@ def run_autopilot(
             if not current_project.plan.scenes:
                 raise ClipSelectorError("saved clip plan has no applied timeline")
         except (FileNotFoundError, ClipSelectorError):
-            _emit(progress, stage, "Selecting source clips", 0.57)
+            _emit(
+                progress,
+                stage,
+                "Selecting source clips",
+                0.57,
+                stage_fraction=0.0,
+            )
             select_clips(project.id, root=root)
             state = _checkpoint_autopilot(
                 project.id,
@@ -1269,24 +1344,42 @@ def run_autopilot(
                 stage="clips",
                 root=root,
             )
+            _emit(
+                progress,
+                "clips",
+                "Source clips ready",
+                0.65,
+                stage_fraction=1.0,
+                status="completed",
+            )
         else:
             _emit(
                 progress,
-                "resume",
+                "clips",
                 "Reusing Clip Plan checkpoint",
-                0.57,
+                0.65,
+                stage_fraction=1.0,
+                status="reused",
             )
 
         stage = "narration"
         if _master_narration_is_complete(project.id, root=root):
             _emit(
                 progress,
-                "resume",
+                "narration",
                 "Reusing reviewed narration checkpoint",
-                0.66,
+                0.73,
+                stage_fraction=1.0,
+                status="reused",
             )
         else:
-            _emit(progress, stage, "Writing grounded narration", 0.66)
+            _emit(
+                progress,
+                stage,
+                "Writing grounded narration",
+                0.66,
+                stage_fraction=0.0,
+            )
             write_narration(project.id, root=root)
             state = _checkpoint_autopilot(
                 project.id,
@@ -1294,10 +1387,24 @@ def run_autopilot(
                 stage="narration",
                 root=root,
             )
+            _emit(
+                progress,
+                "narration",
+                "Narration ready",
+                0.73,
+                stage_fraction=1.0,
+                status="completed",
+            )
 
         stage = "voice"
         if _project_has_narrated_scenes(project.id, root=root):
-            _emit(progress, stage, "Generating or reusing narrator audio", 0.75)
+            _emit(
+                progress,
+                stage,
+                "Generating or reusing narrator audio",
+                0.75,
+                stage_fraction=0.0,
+            )
             synthesize_narration(
                 project.id,
                 _resolve_voice(master_language, profile.voice_name),
@@ -1310,9 +1417,23 @@ def run_autopilot(
                 stage="voice",
                 root=root,
             )
+            _emit(
+                progress,
+                "voice",
+                "Narrator audio ready",
+                0.82,
+                stage_fraction=1.0,
+                status="completed",
+            )
 
         stage = "preview"
-        _emit(progress, stage, "Rendering master-language preview", 0.83)
+        _emit(
+            progress,
+            stage,
+            "Rendering master-language preview",
+            0.83,
+            stage_fraction=0.0,
+        )
         master_preview = render_documentary(
             project.id,
             preview=True,
@@ -1324,6 +1445,22 @@ def run_autopilot(
             state,
             stage="preview",
             root=root,
+        )
+        _emit(
+            progress,
+            "preview",
+            "Master-language preview ready",
+            0.84,
+            stage_fraction=1.0,
+            status="completed",
+        )
+        _emit(
+            progress,
+            f"localize_{master_language}",
+            f"{master_language.upper()} version ready as master language",
+            0.84,
+            stage_fraction=1.0,
+            status="completed",
         )
 
         if target_languages:
@@ -1343,11 +1480,19 @@ def run_autopilot(
                         stage,
                         f"Creating {language.upper()} version",
                         base_fraction,
+                        stage_fraction=0.0,
                     )
                     localize_project(
                         project.id,
                         language,
                         root=root,
+                    )
+                    _emit(
+                        progress,
+                        stage,
+                        f"{language.upper()} translation reviewed",
+                        base_fraction + step * 0.45,
+                        stage_fraction=0.45,
                     )
                     state = _checkpoint_autopilot(
                         project.id,
@@ -1358,9 +1503,11 @@ def run_autopilot(
                 else:
                     _emit(
                         progress,
-                        "resume",
+                        stage,
                         f"Reusing reviewed {language.upper()} localization",
-                        base_fraction,
+                        base_fraction + step * 0.45,
+                        stage_fraction=0.45,
+                        status="reused",
                     )
 
                 if _project_has_narrated_scenes(project.id, root=root):
@@ -1370,6 +1517,13 @@ def run_autopilot(
                         language=language,
                         root=root,
                     )
+                _emit(
+                    progress,
+                    stage,
+                    f"{language.upper()} narration ready",
+                    base_fraction + step * 0.70,
+                    stage_fraction=0.70,
+                )
                 localized_preview = render_documentary(
                     project.id,
                     language=language,
@@ -1377,6 +1531,14 @@ def run_autopilot(
                     root=root,
                 )
                 previews[language] = str(localized_preview)
+                _emit(
+                    progress,
+                    stage,
+                    f"{language.upper()} version ready",
+                    min(0.97, base_fraction + step),
+                    stage_fraction=1.0,
+                    status="completed",
+                )
 
         rights_review_required = _rights_review_source_ids(
             project.id,
@@ -1385,9 +1547,33 @@ def run_autopilot(
         final_master_created = False
         if not rights_review_required:
             stage = "final"
-            _emit(progress, stage, "Rendering publication-ready master", 0.98)
+            _emit(
+                progress,
+                stage,
+                "Rendering publication-ready master",
+                0.98,
+                stage_fraction=0.0,
+            )
             render_documentary(project.id, root=root)
             final_master_created = True
+            _emit(
+                progress,
+                "final",
+                "Publication-ready master created",
+                0.995,
+                stage_fraction=1.0,
+                status="completed",
+            )
+
+        if rights_review_required:
+            _emit(
+                progress,
+                "final",
+                "Final master is waiting for publication-rights review",
+                0.995,
+                stage_fraction=1.0,
+                status="skipped",
+            )
 
         state = _checkpoint_autopilot(
             project.id,
@@ -1396,7 +1582,14 @@ def run_autopilot(
             status="done",
             root=root,
         )
-        _emit(progress, "done", "Documentary is ready", 1.0)
+        _emit(
+            progress,
+            "done",
+            "Documentary is ready",
+            1.0,
+            stage_fraction=1.0,
+            status="completed",
+        )
         return AutopilotResult(
             project_id=project.id,
             title=project.title,
