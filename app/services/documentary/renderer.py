@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
+from typing import Callable
 
 from app.models.documentary import (
     AudioMode,
@@ -692,6 +694,111 @@ def _validate_rendered_output(
         )
 
 
+def _ffmpeg_progress_seconds(progress_text: str) -> float | None:
+    for line in reversed(progress_text.splitlines()):
+        if not line.startswith("out_time="):
+            continue
+        value = line.split("=", 1)[1].strip()
+        parts = value.split(":")
+        if len(parts) != 3:
+            continue
+        try:
+            hours = float(parts[0])
+            minutes = float(parts[1])
+            seconds = float(parts[2])
+        except ValueError:
+            continue
+        return hours * 3600 + minutes * 60 + seconds
+    return None
+
+
+def _run_render_command_with_progress(
+    command: list[str],
+    *,
+    expected_duration: float,
+    timeout_seconds: int,
+    progress: Callable[[float], None],
+    temp_dir: Path,
+) -> tuple[int, str]:
+    progress_fd, progress_name = tempfile.mkstemp(
+        prefix=".ffmpeg-progress-",
+        suffix=".txt",
+        dir=temp_dir,
+    )
+    os.close(progress_fd)
+    log_fd, log_name = tempfile.mkstemp(
+        prefix=".ffmpeg-log-",
+        suffix=".txt",
+        dir=temp_dir,
+    )
+    os.close(log_fd)
+    progress_path = Path(progress_name)
+    log_path = Path(log_name)
+
+    ffmpeg_command = [
+        *command[:-1],
+        "-progress",
+        str(progress_path),
+        "-nostats",
+        command[-1],
+    ]
+    process = None
+    try:
+        progress(0.0)
+        with log_path.open("wb") as log_file:
+            process = subprocess.Popen(
+                ffmpeg_command,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+            )
+            started_at = time.monotonic()
+            last_fraction = 0.0
+            while True:
+                returncode = process.poll()
+                try:
+                    progress_text = progress_path.read_text(
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                except OSError:
+                    progress_text = ""
+
+                rendered_seconds = _ffmpeg_progress_seconds(progress_text)
+                if rendered_seconds is not None and expected_duration > 0:
+                    fraction = min(
+                        0.99,
+                        max(last_fraction, rendered_seconds / expected_duration),
+                    )
+                    if fraction > last_fraction:
+                        last_fraction = fraction
+                        progress(fraction)
+
+                if returncode is not None:
+                    break
+                if time.monotonic() - started_at > timeout_seconds:
+                    process.kill()
+                    process.wait()
+                    raise subprocess.TimeoutExpired(
+                        ffmpeg_command,
+                        timeout_seconds,
+                    )
+                time.sleep(0.2)
+
+        output = log_path.read_text(
+            encoding="utf-8",
+            errors="replace",
+        )
+        if returncode == 0:
+            progress(1.0)
+        return returncode, output
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait()
+        progress_path.unlink(missing_ok=True)
+        log_path.unlink(missing_ok=True)
+
+
 def render_documentary(
     project_id: str,
     *,
@@ -702,6 +809,7 @@ def render_documentary(
     height: int = DEFAULT_RENDER_HEIGHT,
     fps: int = DEFAULT_RENDER_FPS,
     timeout_seconds: int = DEFAULT_RENDER_TIMEOUT_SECONDS,
+    progress: Callable[[float], None] | None = None,
 ) -> Path:
     """Render a publication-gated master or a technical preview."""
     if timeout_seconds <= 0:
@@ -785,15 +893,26 @@ def render_documentary(
             )
         )
         try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-                timeout=timeout_seconds,
-            )
+            if progress is None:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=False,
+                    timeout=timeout_seconds,
+                )
+                returncode = result.returncode
+                ffmpeg_output = result.stderr or result.stdout or ""
+            else:
+                returncode, ffmpeg_output = _run_render_command_with_progress(
+                    command,
+                    expected_duration=expected_duration,
+                    timeout_seconds=timeout_seconds,
+                    progress=progress,
+                    temp_dir=output_path.parent,
+                )
         except subprocess.TimeoutExpired as exc:
             raise DocumentaryRenderError(
                 f"documentary render timed out after {timeout_seconds} seconds"
@@ -803,8 +922,8 @@ def render_documentary(
                 f"failed to start documentary renderer: {exc}"
             ) from exc
 
-        if result.returncode != 0:
-            message = (result.stderr or result.stdout or "").strip()
+        if returncode != 0:
+            message = ffmpeg_output.strip()
             if len(message) > 4000:
                 message = message[-4000:]
             raise DocumentaryRenderError(
