@@ -720,6 +720,78 @@ def test_render_documentary_publishes_staged_output_atomically(
     assert not list(output.parent.glob(".master-*.mp4"))
 
 
+def test_render_documentary_reports_ffmpeg_progress(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, source, _ = _project_with_video_source(tmp_path, has_audio=False)
+    _save_scene(project, source, tmp_path, start=0.0, end=2.0)
+    reported = []
+
+    class FakePopen:
+        def __init__(self, command, **kwargs):
+            self.command = command
+            self.calls = 0
+            self.returncode = None
+            progress_path = Path(
+                command[command.index("-progress") + 1]
+            )
+            progress_path.write_text(
+                "out_time=00:00:01.000000\nprogress=continue\n",
+                encoding="utf-8",
+            )
+            Path(command[-1]).write_bytes(b"rendered-master")
+
+        def poll(self):
+            self.calls += 1
+            if self.calls >= 2:
+                self.returncode = 0
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self):
+            return self.returncode
+
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.subprocess.Popen",
+        FakePopen,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.time.sleep",
+        lambda seconds: None,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.renderer.probe_video_metadata",
+        lambda path: VideoMetadata(
+            duration_seconds=2.0,
+            width=1280,
+            height=720,
+            fps=30,
+            has_audio=True,
+            video_codec="h264",
+            audio_codec="aac",
+            container="mov,mp4",
+            file_size_bytes=Path(path).stat().st_size,
+        ),
+    )
+
+    output = render_documentary(
+        project.id,
+        root=tmp_path,
+        width=1280,
+        height=720,
+        progress=reported.append,
+    )
+
+    assert output.is_file()
+    assert reported[0] == 0.0
+    assert 0.5 in reported
+    assert reported[-1] == 1.0
+    assert reported == sorted(reported)
+
+
 def test_render_documentary_preview_allows_unreviewed_rights(
     tmp_path: Path,
     monkeypatch,
