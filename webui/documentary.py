@@ -1076,6 +1076,33 @@ def _autopilot_stage_status_label(status: str, tr: Tr) -> str:
     return tr(labels.get(status, "Documentary Autopilot Stage Status Pending"))
 
 
+def _autopilot_progress_detail(event, tr: Tr) -> str:
+    phase = str(getattr(event, "detail_phase", "") or "")
+    current = int(getattr(event, "detail_current", 0) or 0)
+    total = int(getattr(event, "detail_total", 0) or 0)
+    attempt = int(getattr(event, "detail_attempt", 0) or 0)
+    attempts = int(getattr(event, "detail_attempts", 0) or 0)
+
+    if phase == "translation_batch" and total:
+        return tr("Documentary Autopilot Detail Translation Batch").format(
+            current=current,
+            total=total,
+        )
+    if phase == "review_batch" and total:
+        return tr("Documentary Autopilot Detail Review Batch").format(
+            current=current,
+            total=total,
+        )
+    if phase == "repair_batch" and total:
+        return tr("Documentary Autopilot Detail Repair Batch").format(
+            current=current,
+            total=total,
+            attempt=attempt,
+            attempts=attempts,
+        )
+    return ""
+
+
 def _render_autopilot_stage_progress(
     placeholder,
     stage_progress: dict[str, dict],
@@ -1094,7 +1121,12 @@ def _render_autopilot_stage_progress(
             cols[0].markdown(
                 f"**{_autopilot_progress_label(stage_id, tr)}**"
             )
-            cols[0].caption(_autopilot_stage_status_label(status, tr))
+            detail = str(item.get("detail") or "")
+            cols[0].caption(
+                detail
+                if detail and status == "running"
+                else _autopilot_stage_status_label(status, tr)
+            )
             cols[1].progress(percent / 100)
             cols[2].markdown(f"**{percent}%**")
 
@@ -1161,6 +1193,7 @@ def _render_autopilot(tr: Tr) -> None:
             stage_id: {
                 "percent": 0,
                 "status": "pending",
+                "detail": "",
             }
             for stage_id in _AUTOPILOT_STAGE_ORDER
         }
@@ -1186,6 +1219,7 @@ def _render_autopilot(tr: Tr) -> None:
                 min(100, max(0, int(round(float(event.fraction) * 100)))),
             )
             label = _autopilot_progress_label(event.stage, tr)
+            detail = _autopilot_progress_detail(event, tr)
             progress_state["percent"] = percent
             progress_bar.progress(percent / 100)
             progress_text.markdown(
@@ -1206,6 +1240,7 @@ def _render_autopilot(tr: Tr) -> None:
                 stage_progress[event.stage] = {
                     "percent": stage_percent,
                     "status": event.status,
+                    "detail": detail,
                 }
                 _render_autopilot_stage_progress(
                     stage_progress_placeholder,
@@ -1213,16 +1248,22 @@ def _render_autopilot(tr: Tr) -> None:
                     tr,
                 )
 
+            stage_percent_value = (
+                stage_progress[event.stage]["percent"]
+                if event.stage in stage_progress
+                else 100
+            )
+            status_label = tr(
+                "Documentary Autopilot Progress Stage Detail"
+            ).format(
+                overall=percent,
+                stage=label,
+                stage_percent=stage_percent_value,
+            )
+            if detail:
+                status_label += f" · {detail}"
             status.update(
-                label=tr("Documentary Autopilot Progress Stage Detail").format(
-                    overall=percent,
-                    stage=label,
-                    stage_percent=(
-                        stage_progress[event.stage]["percent"]
-                        if event.stage in stage_progress
-                        else 100
-                    ),
-                ),
+                label=status_label,
                 state="running",
                 expanded=False,
             )
