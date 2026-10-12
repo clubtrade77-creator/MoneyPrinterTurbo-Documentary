@@ -1098,17 +1098,50 @@ def _render_autopilot(tr: Tr) -> None:
         ):
             return
 
+        progress_text = st.empty()
+        progress_text.markdown(
+            f"### {tr('Documentary Autopilot Progress Running').format(percent=0)}"
+        )
         progress_bar = st.progress(0.0)
         status = st.status(
-            tr("Documentary Autopilot Starting"),
+            tr("Documentary Autopilot Progress Stage").format(
+                percent=0,
+                stage=tr("Documentary Autopilot Starting"),
+            ),
             expanded=True,
         )
+        progress_state = {
+            "percent": 0,
+            "stage": "",
+        }
 
         def on_progress(event):
-            progress_bar.progress(event.fraction)
+            percent = max(
+                progress_state["percent"],
+                min(100, max(0, int(round(float(event.fraction) * 100)))),
+            )
             label = _autopilot_progress_label(event.stage, tr)
-            status.update(label=label, state="running", expanded=True)
-            status.write(label)
+            progress_state["percent"] = percent
+            progress_bar.progress(percent / 100)
+            progress_text.markdown(
+                f"### {tr('Documentary Autopilot Progress Running').format(percent=percent)}"
+            )
+            status.update(
+                label=tr("Documentary Autopilot Progress Stage").format(
+                    percent=percent,
+                    stage=label,
+                ),
+                state="running",
+                expanded=True,
+            )
+            if event.stage != progress_state["stage"]:
+                status.write(
+                    tr("Documentary Autopilot Progress Log").format(
+                        percent=percent,
+                        stage=label,
+                    )
+                )
+                progress_state["stage"] = event.stage
 
         try:
             result = run_autopilot(
@@ -1117,10 +1150,14 @@ def _render_autopilot(tr: Tr) -> None:
                 resume_project_id=resume_project_id if can_resume else "",
             )
         except AutopilotError as exc:
-            progress_bar.empty()
+            failed_stage = _autopilot_progress_label(exc.stage, tr)
+            progress_text.markdown(
+                f"### {tr('Documentary Autopilot Progress Failed').format(percent=progress_state['percent'])}"
+            )
             status.update(
-                label=tr("Documentary Autopilot Failed").format(
-                    stage=_autopilot_progress_label(exc.stage, tr),
+                label=tr("Documentary Autopilot Progress Failed Stage").format(
+                    percent=progress_state["percent"],
+                    stage=failed_stage,
                 ),
                 state="error",
                 expanded=True,
@@ -1130,9 +1167,16 @@ def _render_autopilot(tr: Tr) -> None:
                 st.session_state["documentary_project_id"] = exc.project_id
             return
 
+        progress_state["percent"] = 100
         progress_bar.progress(1.0)
+        progress_text.markdown(
+            f"### {tr('Documentary Autopilot Progress Complete').format(percent=100)}"
+        )
         status.update(
-            label=tr("Documentary Autopilot Complete"),
+            label=tr("Documentary Autopilot Progress Complete Stage").format(
+                percent=100,
+                stage=tr("Documentary Autopilot Stage Done"),
+            ),
             state="complete",
             expanded=False,
         )
