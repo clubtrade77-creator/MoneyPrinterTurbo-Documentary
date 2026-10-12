@@ -724,6 +724,14 @@
     "Documentary Autopilot Progress Failed": "Генерация остановлена — {percent}%",
     "Documentary Autopilot Progress Failed Stage": "Остановлено на {percent}% · {stage}",
     "Documentary Autopilot Progress Complete": "Генерация завершена — {percent}%",
-    "Documentary Autopilot Progress Complete Stage": "{percent}% · {stage}"
+    "Documentary Autopilot Progress Complete Stage": "{percent}% · {stage}",
+    "Documentary Autopilot Stage Progress Title": "Этапы генерации",
+    "Documentary Autopilot Stage Status Pending": "Ожидает",
+    "Documentary Autopilot Stage Status Running": "Выполняется",
+    "Documentary Autopilot Stage Status Completed": "Готово",
+    "Documentary Autopilot Stage Status Reused": "Использован сохранённый результат",
+    "Documentary Autopilot Stage Status Skipped": "Не требуется",
+    "Documentary Autopilot Progress Stage Detail": "Общий прогресс {overall}% · {stage}: {stage_percent}%",
+    "Documentary Autopilot Progress Log Detail": "Общий {overall}% · {stage}: {stage_percent}%"
   }
 }
