@@ -508,8 +508,8 @@ def test_localization_reviewer_rechecks_unclear_verdict_in_compact_batch(
         review_calls.append(prompt)
         if len(review_calls) == 1:
             return "The translation appears faithful and complete."
-        assert "SMALL batch of documentary translations" in prompt
-        return json.dumps({"supported": True, "issues": []})
+        assert "Return exactly PASS" in prompt
+        return "PASS"
 
     plan = localize_project(
         project.id,
@@ -861,11 +861,33 @@ def test_localize_project_rejects_changed_scene_ids_after_retries(tmp_path: Path
     assert "previous response was rejected" in attempts[-1]
 
 
-def test_localize_project_retries_semantically_rejected_translation(
+def test_localize_project_repairs_semantically_rejected_translation(
     tmp_path: Path,
 ):
     project, _ = _project_with_localizable_scene(tmp_path)
     review_calls = []
+    generate_calls = []
+
+    def generate(prompt: str) -> str:
+        generate_calls.append(prompt)
+        if "Repair ONLY this rejected documentary translation batch" in prompt:
+            items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+            translated = {
+                0: "Офицер подходит к автомобилю.",
+                1: "Записанная встреча",
+                2: "Офицер подошёл.",
+                3: "Всё изменилось.",
+            }
+            return json.dumps(
+                {
+                    "items": [
+                        {"i": item["i"], "text": translated[item["i"]]}
+                        for item in items
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        return _russian_response()
 
     def review(prompt: str) -> str:
         review_calls.append(prompt)
@@ -882,12 +904,15 @@ def test_localize_project_retries_semantically_rejected_translation(
         project.id,
         "ru",
         root=tmp_path,
-        generate_fn=lambda prompt: _russian_response(),
+        generate_fn=generate,
         review_fn=review,
     )
 
     assert plan.target_language == "ru"
     assert len(review_calls) == 2
+    assert len(generate_calls) == 2
+    assert "Repair ONLY this rejected documentary translation batch" in generate_calls[1]
+
 
 
 def test_localize_project_preserves_empty_master_text_fields(tmp_path: Path):
