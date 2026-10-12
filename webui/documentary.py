@@ -1100,7 +1100,10 @@ def _render_autopilot(tr: Tr) -> None:
 
         progress_text = st.empty()
         progress_text.markdown(
-            f"### {tr('Documentary Autopilot Progress Running').format(percent=0)}"
+            "### "
+            + tr("Documentary Autopilot Progress Running").format(
+                percent=0,
+            )
         )
         progress_bar = st.progress(0.0)
         status = st.status(
@@ -1124,7 +1127,10 @@ def _render_autopilot(tr: Tr) -> None:
             progress_state["percent"] = percent
             progress_bar.progress(percent / 100)
             progress_text.markdown(
-                f"### {tr('Documentary Autopilot Progress Running').format(percent=percent)}"
+                "### "
+                + tr("Documentary Autopilot Progress Running").format(
+                    percent=percent,
+                )
             )
             status.update(
                 label=tr("Documentary Autopilot Progress Stage").format(
@@ -1152,7 +1158,10 @@ def _render_autopilot(tr: Tr) -> None:
         except AutopilotError as exc:
             failed_stage = _autopilot_progress_label(exc.stage, tr)
             progress_text.markdown(
-                f"### {tr('Documentary Autopilot Progress Failed').format(percent=progress_state['percent'])}"
+                "### "
+                + tr("Documentary Autopilot Progress Failed").format(
+                    percent=progress_state["percent"],
+                )
             )
             status.update(
                 label=tr("Documentary Autopilot Progress Failed Stage").format(
@@ -1170,7 +1179,10 @@ def _render_autopilot(tr: Tr) -> None:
         progress_state["percent"] = 100
         progress_bar.progress(1.0)
         progress_text.markdown(
-            f"### {tr('Documentary Autopilot Progress Complete').format(percent=100)}"
+            "### "
+            + tr("Documentary Autopilot Progress Complete").format(
+                percent=100,
+            )
         )
         status.update(
             label=tr("Documentary Autopilot Progress Complete Stage").format(
