@@ -23,14 +23,27 @@ MAX_LOCALIZATION_REPAIR_PASSES = 2
 MAX_LOCALIZATION_PROMPT_CHARS = 120_000
 MAX_LOCALIZATION_REVIEW_PROMPT_CHARS = 180_000
 COMPACT_LOCALIZATION_THRESHOLD_CHARS = 4_000
-COMPACT_LOCALIZATION_BATCH_CHARS = 3_500
-COMPACT_LOCALIZATION_BATCH_ITEMS = 24
+COMPACT_LOCALIZATION_BATCH_CHARS = 1_800
+COMPACT_LOCALIZATION_BATCH_ITEMS = 12
 COMPACT_REVIEW_THRESHOLD_CHARS = 5_000
-COMPACT_REVIEW_BATCH_CHARS = 4_000
-COMPACT_REVIEW_BATCH_ITEMS = 24
+COMPACT_REVIEW_BATCH_CHARS = 1_800
+COMPACT_REVIEW_BATCH_ITEMS = 10
 CURRENT_LOCALIZATION_REVIEW_VERSION = 1
 
 LocalizationProgressCallback = Callable[[float], None]
+LocalizationStatusCallback = Callable[[str, int, int, int, int], None]
+
+
+def _report_localization_status(
+    callback: LocalizationStatusCallback | None,
+    phase: str,
+    current: int,
+    total: int,
+    attempt: int = 0,
+    attempts: int = 0,
+) -> None:
+    if callback is not None:
+        callback(phase, current, total, attempt, attempts)
 
 
 def _report_localization_progress(
@@ -629,6 +642,7 @@ def _localize_compact(
     source_scenes: list[dict],
     generator: Callable[[str], str],
     progress: LocalizationProgressCallback | None = None,
+    status: LocalizationStatusCallback | None = None,
 ) -> list[LocalizedSceneText]:
     units = _localization_text_units(source_scenes)
     if not units:
@@ -648,6 +662,12 @@ def _localize_compact(
     batches = _compact_localization_batches(units)
     _report_localization_progress(progress, 0.0)
     for index, batch in enumerate(batches, start=1):
+        _report_localization_status(
+            status,
+            "translation_batch",
+            index,
+            len(batches),
+        )
         translations.update(
             _translate_compact_batch(
                 source_language=source_language,
@@ -1412,6 +1432,7 @@ def _review_and_repair_localization(
     source_scenes: list[dict],
     localized_scenes: list[LocalizedSceneText],
     progress: LocalizationProgressCallback | None = None,
+    status: LocalizationStatusCallback | None = None,
 ) -> tuple[list[LocalizedSceneText], list[str]]:
     source_units, translations = _localized_translation_map(
         source_scenes,
@@ -1431,6 +1452,12 @@ def _review_and_repair_localization(
     _report_localization_progress(progress, 0.0)
 
     for batch_index, review_batch in enumerate(batches, start=1):
+        _report_localization_status(
+            status,
+            "review_batch",
+            batch_index,
+            len(batches),
+        )
         batch_issues = _run_compact_review_batch(
             reviewer=reviewer,
             source_language=source_language,
@@ -1449,7 +1476,15 @@ def _review_and_repair_localization(
                 if item_id in source_units_by_id
             ]
 
-            for _ in range(MAX_LOCALIZATION_REPAIR_PASSES):
+            for repair_attempt in range(1, MAX_LOCALIZATION_REPAIR_PASSES + 1):
+                _report_localization_status(
+                    status,
+                    "repair_batch",
+                    batch_index,
+                    len(batches),
+                    repair_attempt,
+                    MAX_LOCALIZATION_REPAIR_PASSES,
+                )
                 repaired = _repair_compact_review_batch(
                     generator=generator,
                     source_language=source_language,
@@ -1601,6 +1636,7 @@ def localize_project(
     generate_fn: Callable[[str], str] | None = None,
     review_fn: Callable[[str], str] | None = None,
     progress: LocalizationProgressCallback | None = None,
+    status: LocalizationStatusCallback | None = None,
 ) -> LocalizationPlan:
     project, transcripts = _load_localization_context(project_id, root=root)
     source_language = _normalize_language(project.master_language)
@@ -1638,6 +1674,7 @@ def localize_project(
                 progress,
                 0.70 * fraction,
             ),
+            status=status,
         )
         _validate_candidate_against_source(localized_scenes, source_scenes)
         localized_scenes, review_issues = _review_and_repair_localization(
@@ -1651,6 +1688,7 @@ def localize_project(
                 progress,
                 0.70 + 0.30 * fraction,
             ),
+            status=status,
         )
         if review_issues:
             raise _LocalizationSemanticError(
@@ -1679,6 +1717,7 @@ def localize_project(
                     progress,
                     0.70 + 0.30 * fraction,
                 ),
+                status=status,
             )
             if review_issues:
                 raise _LocalizationSemanticError(
@@ -1700,6 +1739,7 @@ def localize_project(
                     progress,
                     0.70 * fraction,
                 ),
+                status=status,
             )
             _validate_candidate_against_source(localized_scenes, source_scenes)
             localized_scenes, review_issues = _review_and_repair_localization(
@@ -1713,6 +1753,7 @@ def localize_project(
                     progress,
                     0.70 + 0.30 * fraction,
                 ),
+                status=status,
             )
             if review_issues:
                 raise _LocalizationSemanticError(
