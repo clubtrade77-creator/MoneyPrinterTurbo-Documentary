@@ -29,6 +29,16 @@ COMPACT_REVIEW_BATCH_CHARS = 4_000
 COMPACT_REVIEW_BATCH_ITEMS = 24
 CURRENT_LOCALIZATION_REVIEW_VERSION = 1
 
+LocalizationProgressCallback = Callable[[float], None]
+
+
+def _report_localization_progress(
+    callback: LocalizationProgressCallback | None,
+    fraction: float,
+) -> None:
+    if callback is not None:
+        callback(max(0.0, min(1.0, float(fraction))))
+
 
 class LocalizationError(RuntimeError):
     """Raised when a faithful documentary localization cannot be produced safely."""
@@ -613,6 +623,7 @@ def _localize_compact(
     target_language: str,
     source_scenes: list[dict],
     generator: Callable[[str], str],
+    progress: LocalizationProgressCallback | None = None,
 ) -> list[LocalizedSceneText]:
     units = _localization_text_units(source_scenes)
     if not units:
@@ -629,7 +640,9 @@ def _localize_compact(
         ]
 
     translations: dict[int, str] = {}
-    for batch in _compact_localization_batches(units):
+    batches = _compact_localization_batches(units)
+    _report_localization_progress(progress, 0.0)
+    for index, batch in enumerate(batches, start=1):
         translations.update(
             _translate_compact_batch(
                 source_language=source_language,
@@ -637,6 +650,10 @@ def _localize_compact(
                 batch=batch,
                 generator=generator,
             )
+        )
+        _report_localization_progress(
+            progress,
+            index / max(1, len(batches)),
         )
     return _assemble_compact_localization(
         source_scenes,
@@ -1229,10 +1246,13 @@ def _run_compact_localization_review(
     target_language: str,
     source_scenes: list[dict],
     localized_scenes: list[LocalizedSceneText],
+    progress: LocalizationProgressCallback | None = None,
 ) -> list[str]:
     units = _localization_review_units(source_scenes, localized_scenes)
     issues = []
-    for batch in _compact_review_batches(units):
+    batches = _compact_review_batches(units)
+    _report_localization_progress(progress, 0.0)
+    for index, batch in enumerate(batches, start=1):
         issues.extend(
             _run_compact_review_batch(
                 reviewer=reviewer,
@@ -1240,6 +1260,10 @@ def _run_compact_localization_review(
                 target_language=target_language,
                 batch=batch,
             )
+        )
+        _report_localization_progress(
+            progress,
+            index / max(1, len(batches)),
         )
     return issues
 
@@ -1251,6 +1275,7 @@ def _run_localization_review(
     target_language: str,
     source_scenes: list[dict],
     localized_scenes: list[LocalizedSceneText],
+    progress: LocalizationProgressCallback | None = None,
 ) -> list[str]:
     units = _localization_review_units(source_scenes, localized_scenes)
     total_chars = sum(
@@ -1267,6 +1292,7 @@ def _run_localization_review(
             target_language=target_language,
             source_scenes=source_scenes,
             localized_scenes=localized_scenes,
+            progress=progress,
         )
 
     response = reviewer(
@@ -1275,10 +1301,13 @@ def _run_localization_review(
             target_language=target_language,
             source_scenes=source_scenes,
             localized_scenes=localized_scenes,
+            progress=progress,
         )
     )
     try:
-        return _parse_review(response)
+        issues = _parse_review(response)
+        _report_localization_progress(progress, 1.0)
+        return issues
     except _LocalizationReviewSchemaError:
         # The translation itself may still be fine; review it again in a small,
         # tightly constrained batch instead of converting an unclear verdict into
@@ -1309,6 +1338,7 @@ def localize_project(
     root: str | os.PathLike | None = None,
     generate_fn: Callable[[str], str] | None = None,
     review_fn: Callable[[str], str] | None = None,
+    progress: LocalizationProgressCallback | None = None,
 ) -> LocalizationPlan:
     project, transcripts = _load_localization_context(project_id, root=root)
     source_language = _normalize_language(project.master_language)
@@ -1330,6 +1360,7 @@ def localize_project(
             "localization cannot bypass semantic review"
         )
     reviewer = review_fn or llm_service.generate_text
+    _report_localization_progress(progress, 0.0)
 
     current_prompt = prompt
     localized_scenes = None
@@ -1341,6 +1372,10 @@ def localize_project(
             target_language=target_language,
             source_scenes=source_scenes,
             generator=generator,
+            progress=lambda fraction: _report_localization_progress(
+                progress,
+                0.70 * fraction,
+            ),
         )
         _validate_candidate_against_source(localized_scenes, source_scenes)
         review_issues = _run_localization_review(
@@ -1349,6 +1384,10 @@ def localize_project(
             target_language=target_language,
             source_scenes=source_scenes,
             localized_scenes=localized_scenes,
+            progress=lambda fraction: _report_localization_progress(
+                progress,
+                0.70 + 0.30 * fraction,
+            ),
         )
         if review_issues:
             raise LocalizationError(
@@ -1365,12 +1404,17 @@ def localize_project(
                 source_scenes,
             )
             _validate_candidate_against_source(candidate, source_scenes)
+            _report_localization_progress(progress, 0.70)
             review_issues = _run_localization_review(
                 reviewer=reviewer,
                 source_language=source_language,
                 target_language=target_language,
                 source_scenes=source_scenes,
                 localized_scenes=candidate,
+                progress=lambda fraction: _report_localization_progress(
+                    progress,
+                    0.70 + 0.30 * fraction,
+                ),
             )
             if review_issues:
                 raise LocalizationError(
@@ -1453,6 +1497,7 @@ def localize_project(
         localization_plan_path(project_id, target_language, root),
         plan.model_dump(mode="json"),
     )
+    _report_localization_progress(progress, 1.0)
     return plan
 
 
