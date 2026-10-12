@@ -660,6 +660,7 @@ def test_compact_localization_reports_real_batch_progress(
         1,
     )
     progress = []
+    status_events = []
 
     def generate(prompt: str) -> str:
         items = json.loads(prompt.split("INPUT ITEMS:\n", 1)[1])
@@ -683,6 +684,9 @@ def test_compact_localization_reports_real_batch_progress(
         generate_fn=generate,
         review_fn=_approved_review,
         progress=progress.append,
+        status=lambda phase, current, total, attempt, attempts: status_events.append(
+            (phase, current, total, attempt, attempts)
+        ),
     )
 
     assert plan.semantic_reviewed is True
@@ -691,6 +695,8 @@ def test_compact_localization_reports_real_batch_progress(
     assert progress == sorted(progress)
     assert any(0.0 < value < 0.70 for value in progress)
     assert any(0.70 < value < 1.0 for value in progress)
+    assert any(event[0] == "translation_batch" for event in status_events)
+    assert any(event[0] == "review_batch" for event in status_events)
 
 
 def test_compact_localization_retries_only_missing_items(
