@@ -1174,11 +1174,10 @@ def _render_autopilot(tr: Tr) -> None:
                 percent=0,
                 stage=tr("Documentary Autopilot Starting"),
             ),
-            expanded=True,
+            expanded=False,
         )
         progress_state = {
             "percent": 0,
-            "stage": "",
         }
 
         def on_progress(event):
@@ -1225,21 +1224,8 @@ def _render_autopilot(tr: Tr) -> None:
                     ),
                 ),
                 state="running",
-                expanded=True,
+                expanded=False,
             )
-            if event.stage != progress_state["stage"]:
-                status.write(
-                    tr("Documentary Autopilot Progress Log Detail").format(
-                        overall=percent,
-                        stage=label,
-                        stage_percent=(
-                            stage_progress[event.stage]["percent"]
-                            if event.stage in stage_progress
-                            else 100
-                        ),
-                    )
-                )
-                progress_state["stage"] = event.stage
 
         try:
             result = run_autopilot(
@@ -1261,7 +1247,7 @@ def _render_autopilot(tr: Tr) -> None:
                     stage=failed_stage,
                 ),
                 state="error",
-                expanded=True,
+                expanded=False,
             )
             st.error(str(exc))
             if exc.project_id:
