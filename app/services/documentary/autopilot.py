@@ -1057,6 +1057,22 @@ def run_autopilot(
                     resumed = True
                     _emit(
                         progress,
+                        "story",
+                        "Reusing saved story checkpoint",
+                        0.12,
+                        stage_fraction=1.0,
+                        status="reused",
+                    )
+                    _emit(
+                        progress,
+                        "sources",
+                        "Reusing saved source checkpoint",
+                        0.22,
+                        stage_fraction=1.0,
+                        status="reused",
+                    )
+                    _emit(
+                        progress,
                         "transcription",
                         "Reusing saved transcript checkpoint",
                         0.34,
@@ -1405,7 +1421,7 @@ def run_autopilot(
                 0.75,
                 stage_fraction=0.0,
             )
-            synthesize_narration(
+            voice_result = synthesize_narration(
                 project.id,
                 _resolve_voice(master_language, profile.voice_name),
                 language=master_language,
@@ -1423,7 +1439,11 @@ def run_autopilot(
                 "Narrator audio ready",
                 0.82,
                 stage_fraction=1.0,
-                status="completed",
+                status=(
+                    "reused"
+                    if not voice_result.generated and voice_result.reused
+                    else "completed"
+                ),
             )
 
         stage = "preview"
