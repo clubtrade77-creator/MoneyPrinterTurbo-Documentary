@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from app.models.documentary import AudioMode, NarrationAudioAsset
 from app.services import voice as voice_service
@@ -245,6 +246,7 @@ def synthesize_narration(
     *,
     language: str | None = None,
     root: str | os.PathLike | None = None,
+    progress: Callable[[float], None] | None = None,
 ) -> NarrationSynthesisResult:
     project = load_project(project_id, root)
     language = _normalize_language(language or project.master_language)
@@ -282,6 +284,10 @@ def synthesize_narration(
             reused.append(current)
         else:
             pending.append(scene)
+
+    total_scenes = max(1, len(scenes))
+    if progress is not None:
+        progress(len(reused) / total_scenes)
 
     generated: list[NarrationAudioAsset] = []
     with tempfile.TemporaryDirectory(prefix="documentary-narration-") as temp_dir:
@@ -353,6 +359,13 @@ def synthesize_narration(
                         root=root,
                     )
                 )
+                if progress is not None:
+                    progress(
+                        min(
+                            1.0,
+                            (len(reused) + len(generated)) / total_scenes,
+                        )
+                    )
             except Exception as exc:
                 raise NarrationSynthesisError(
                     f"could not register narration audio for scene {scene.id}: {exc}"
@@ -364,6 +377,8 @@ def synthesize_narration(
         raise NarrationSynthesisError(
             f"could not persist narrator voice selection: {exc}"
         ) from exc
+    if progress is not None:
+        progress(1.0)
     return NarrationSynthesisResult(
         generated=tuple(generated),
         reused=tuple(reused),
