@@ -19,6 +19,7 @@ from app.services.documentary.project import load_project, project_dir
 from app.services.documentary.transcription import load_source_transcript
 
 MAX_LOCALIZATION_ATTEMPTS = 3
+MAX_LOCALIZATION_REPAIR_PASSES = 2
 MAX_LOCALIZATION_PROMPT_CHARS = 120_000
 MAX_LOCALIZATION_REVIEW_PROMPT_CHARS = 180_000
 COMPACT_LOCALIZATION_THRESHOLD_CHARS = 4_000
@@ -1293,6 +1294,209 @@ def _run_compact_review_batch(
         ) from exc
 
 
+def _localized_translation_map(
+    source_scenes: list[dict],
+    localized_scenes: list[LocalizedSceneText],
+) -> tuple[list[dict], dict[int, str]]:
+    units = _localization_text_units(source_scenes)
+    translations: dict[int, str] = {}
+    for unit in units:
+        scene = localized_scenes[unit["scene_index"]]
+        if unit["kind"] == "narration":
+            text = scene.narration_text
+        elif unit["kind"] == "on_screen":
+            text = scene.on_screen_text
+        else:
+            text = scene.subtitle_segments[unit["subtitle_index"]].text
+        translations[unit["i"]] = str(text or "").strip()
+    return units, translations
+
+
+def _build_compact_repair_prompt(
+    *,
+    source_language: str,
+    target_language: str,
+    batch: list[dict],
+    translations: dict[int, str],
+    issues: list[str],
+) -> str:
+    issue_text = "; ".join(str(issue) for issue in issues)
+    if len(issue_text) > 4000:
+        issue_text = issue_text[:4000]
+
+    payload = [
+        {
+            "i": unit["i"],
+            "source": unit["text"],
+            "current_translation": translations.get(unit["i"], ""),
+        }
+        for unit in batch
+    ]
+    return f"""
+Repair ONLY this rejected documentary translation batch from
+{source_language} to {target_language}.
+
+The semantic reviewer found one or more fidelity problems in this batch.
+Translate each SOURCE again from scratch. Use current_translation only to understand
+what went wrong; do not preserve wording that conflicts with the source.
+
+Requirements:
+- preserve exact item ids;
+- preserve names, numbers, dates, gender, attribution, uncertainty, and meaning;
+- do not omit or add material information;
+- do not shift a translation to a neighboring item;
+- keep every item complete even when adjacent source items overlap;
+- return every input item exactly once.
+
+REVIEW ISSUES:
+{issue_text}
+
+Return exactly:
+{{"items":[{{"i":0,"text":"corrected translation"}}]}}
+
+ITEMS:
+{json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}
+""".strip()
+
+
+def _repair_compact_review_batch(
+    *,
+    generator: Callable[[str], str],
+    source_language: str,
+    target_language: str,
+    batch: list[dict],
+    translations: dict[int, str],
+    issues: list[str],
+) -> dict[int, str]:
+    response = generator(
+        _build_compact_repair_prompt(
+            source_language=source_language,
+            target_language=target_language,
+            batch=batch,
+            translations=translations,
+            issues=issues,
+        )
+    )
+    try:
+        repaired = _parse_compact_localization_response(response, batch)
+    except _LocalizationSchemaError:
+        repaired = {}
+
+    missing = [
+        unit
+        for unit in batch
+        if unit["i"] not in repaired
+    ]
+    if missing:
+        repaired.update(
+            _translate_compact_batch(
+                source_language=source_language,
+                target_language=target_language,
+                batch=missing,
+                generator=generator,
+            )
+        )
+    return repaired
+
+
+def _review_and_repair_localization(
+    *,
+    generator: Callable[[str], str],
+    reviewer: Callable[[str], str],
+    source_language: str,
+    target_language: str,
+    source_scenes: list[dict],
+    localized_scenes: list[LocalizedSceneText],
+    progress: LocalizationProgressCallback | None = None,
+) -> tuple[list[LocalizedSceneText], list[str]]:
+    source_units, translations = _localized_translation_map(
+        source_scenes,
+        localized_scenes,
+    )
+    source_units_by_id = {
+        unit["i"]: unit
+        for unit in source_units
+    }
+
+    review_units = _localization_review_units(
+        source_scenes,
+        localized_scenes,
+    )
+    batches = _compact_review_batches(review_units)
+    unresolved_issues: list[str] = []
+    _report_localization_progress(progress, 0.0)
+
+    for batch_index, review_batch in enumerate(batches, start=1):
+        batch_issues = _run_compact_review_batch(
+            reviewer=reviewer,
+            source_language=source_language,
+            target_language=target_language,
+            batch=review_batch,
+        )
+
+        if batch_issues:
+            batch_ids = {
+                unit["i"]
+                for unit in review_batch
+            }
+            repair_batch = [
+                source_units_by_id[item_id]
+                for item_id in sorted(batch_ids)
+                if item_id in source_units_by_id
+            ]
+
+            for _ in range(MAX_LOCALIZATION_REPAIR_PASSES):
+                repaired = _repair_compact_review_batch(
+                    generator=generator,
+                    source_language=source_language,
+                    target_language=target_language,
+                    batch=repair_batch,
+                    translations=translations,
+                    issues=batch_issues,
+                )
+                translations.update(repaired)
+                localized_scenes = _assemble_compact_localization(
+                    source_scenes,
+                    source_units,
+                    translations,
+                )
+                _validate_candidate_against_source(
+                    localized_scenes,
+                    source_scenes,
+                )
+
+                updated_review_units = {
+                    unit["i"]: unit
+                    for unit in _localization_review_units(
+                        source_scenes,
+                        localized_scenes,
+                    )
+                }
+                updated_batch = [
+                    updated_review_units[item_id]
+                    for item_id in sorted(batch_ids)
+                    if item_id in updated_review_units
+                ]
+                batch_issues = _run_compact_review_batch(
+                    reviewer=reviewer,
+                    source_language=source_language,
+                    target_language=target_language,
+                    batch=updated_batch,
+                )
+                if not batch_issues:
+                    break
+
+            if batch_issues:
+                unresolved_issues.extend(batch_issues)
+
+        _report_localization_progress(
+            progress,
+            batch_index / max(1, len(batches)),
+        )
+
+    return localized_scenes, unresolved_issues
+
+
 def _run_compact_localization_review(
     *,
     reviewer: Callable[[str], str],
@@ -1432,7 +1636,8 @@ def localize_project(
             ),
         )
         _validate_candidate_against_source(localized_scenes, source_scenes)
-        review_issues = _run_localization_review(
+        localized_scenes, review_issues = _review_and_repair_localization(
+            generator=generator,
             reviewer=reviewer,
             source_language=source_language,
             target_language=target_language,
@@ -1459,7 +1664,8 @@ def localize_project(
             )
             _validate_candidate_against_source(candidate, source_scenes)
             _report_localization_progress(progress, 0.70)
-            review_issues = _run_localization_review(
+            candidate, review_issues = _review_and_repair_localization(
+                generator=generator,
                 reviewer=reviewer,
                 source_language=source_language,
                 target_language=target_language,
@@ -1492,7 +1698,8 @@ def localize_project(
                 ),
             )
             _validate_candidate_against_source(localized_scenes, source_scenes)
-            review_issues = _run_localization_review(
+            localized_scenes, review_issues = _review_and_repair_localization(
+                generator=generator,
                 reviewer=reviewer,
                 source_language=source_language,
                 target_language=target_language,
