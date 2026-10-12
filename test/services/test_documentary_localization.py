@@ -435,6 +435,61 @@ def test_localize_project_uses_compact_batches_for_large_payload(
     ]
 
 
+def test_compact_localization_reports_real_batch_progress(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_THRESHOLD_CHARS",
+        1,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_BATCH_ITEMS",
+        1,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_THRESHOLD_CHARS",
+        1,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_ITEMS",
+        1,
+    )
+    progress = []
+
+    def generate(prompt: str) -> str:
+        items = json.loads(prompt.split("INPUT ITEMS:\n", 1)[1])
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "i": item["i"],
+                        "text": f"Перевод {item['i']}",
+                    }
+                    for item in items
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=_approved_review,
+        progress=progress.append,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert progress[0] == 0.0
+    assert progress[-1] == 1.0
+    assert progress == sorted(progress)
+    assert any(0.0 < value < 0.70 for value in progress)
+    assert any(0.70 < value < 1.0 for value in progress)
+
+
 def test_compact_localization_retries_only_missing_items(
     tmp_path: Path,
     monkeypatch,
