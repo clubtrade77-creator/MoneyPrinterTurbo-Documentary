@@ -179,6 +179,49 @@ def test_synthesis_resumes_without_repeating_completed_scene(tmp_path, monkeypat
     assert len(result.generated) == 1
 
 
+def test_synthesis_reports_scene_progress(tmp_path, monkeypatch):
+    project = _make_project(tmp_path)
+    project = load_project(project.id, tmp_path)
+    project.plan.scenes.append(
+        DocumentaryScene(
+            id="scene_second_progress",
+            scene_type="narration_over_source",
+            source_id="source_video",
+            source_start=5.0,
+            source_end=10.0,
+            audio_mode=AudioMode.narration,
+            narration_text="Second narration.",
+        )
+    )
+    save_project(project, tmp_path)
+    progress = []
+
+    def fake_tts(**kwargs):
+        Path(kwargs["voice_file"]).write_bytes(b"audio")
+        return object()
+
+    monkeypatch.setattr(narration_synthesis.voice_service, "tts", fake_tts)
+    monkeypatch.setattr(
+        narration_synthesis.voice_service,
+        "get_audio_duration",
+        lambda path: 2.0,
+    )
+    monkeypatch.setattr(audio_service, "_probe_audio", lambda path: (2.0, "mp3"))
+
+    result = narration_synthesis.synthesize_narration(
+        project.id,
+        "en-US-TestVoice",
+        root=tmp_path,
+        progress=progress.append,
+    )
+
+    assert len(result.generated) == 2
+    assert progress[0] == 0.0
+    assert 0.5 in progress
+    assert progress[-1] == 1.0
+    assert progress == sorted(progress)
+
+
 def test_synthesis_wraps_tts_provider_errors(tmp_path, monkeypatch):
     project = _make_project(tmp_path)
 
