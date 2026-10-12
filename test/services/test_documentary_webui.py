@@ -7,6 +7,7 @@ from app.models.documentary import AudioMode
 from app.services.documentary.localization import LocalizationError
 import webui.documentary as documentary_ui
 from webui.documentary import (
+    _autopilot_progress_detail,
     _default_story_target_seconds,
     _documentary_voice_options,
     _documentary_voice_preview_text,
@@ -19,6 +20,28 @@ from webui.documentary import (
     _story_evidence_timecode,
     _write_uploaded_video_to_temp,
 )
+
+
+def test_autopilot_progress_detail_formats_localization_batch():
+    event = SimpleNamespace(
+        detail_phase="repair_batch",
+        detail_current=4,
+        detail_total=12,
+        detail_attempt=1,
+        detail_attempts=2,
+    )
+
+    translations = {
+        "Documentary Autopilot Detail Repair Batch": (
+            "Исправление batch {current} из {total} · "
+            "попытка {attempt} из {attempts}"
+        )
+    }
+
+    assert _autopilot_progress_detail(
+        event,
+        lambda key: translations[key],
+    ) == "Исправление batch 4 из 12 · попытка 1 из 2"
 
 
 class _Upload(BytesIO):
