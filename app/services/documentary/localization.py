@@ -1228,15 +1228,69 @@ def _run_compact_review_batch(
     try:
         return _parse_review(first_response)
     except _LocalizationReviewSchemaError:
-        # Retry only this small review batch with an even simpler output contract.
-        retry_prompt = (
-            prompt
-            + "\n\nYour verdict format was unclear. Re-read the SAME ITEMS above. "
-            + 'Reply only with {"supported":true,"issues":[]} or '
-            + '{"supported":false,"issues":["specific issue with item i"]}.'
+        pass
+
+    # Ollama models sometimes explain a correct verdict instead of following the
+    # JSON schema. Ask for the smallest possible contract before doing more work.
+    pass_fail_prompt = (
+        "Review the SAME documentary translation items below for factual fidelity. "
+        "Return exactly PASS if every translation is faithful and complete. "
+        "Otherwise return exactly FAIL: followed by one short specific reason. "
+        "Do not explain anything else.\n\n"
+        + json.dumps(
+            [
+                {
+                    "i": unit["i"],
+                    "source": unit["source"],
+                    "translation": unit["translation"],
+                }
+                for unit in batch
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
         )
-        second_response = reviewer(retry_prompt)
+    )
+    second_response = reviewer(pass_fail_prompt)
+    try:
         return _parse_review(second_response)
+    except _LocalizationReviewSchemaError:
+        pass
+
+    # If a multi-item batch is still ambiguous, isolate the problematic model
+    # interaction to smaller batches rather than failing the whole language.
+    if len(batch) > 1:
+        midpoint = max(1, len(batch) // 2)
+        left = _run_compact_review_batch(
+            reviewer=reviewer,
+            source_language=source_language,
+            target_language=target_language,
+            batch=batch[:midpoint],
+        )
+        right = _run_compact_review_batch(
+            reviewer=reviewer,
+            source_language=source_language,
+            target_language=target_language,
+            batch=batch[midpoint:],
+        )
+        return [*left, *right]
+
+    # One final ultra-minimal attempt for a single translation unit. We still do
+    # not auto-approve an unclear review: a genuine lack of verdict remains safe.
+    unit = batch[0]
+    final_prompt = (
+        "Decide whether this translation preserves the source meaning exactly "
+        "enough for a factual documentary. Reply with only PASS or FAIL.\n"
+        f"SOURCE: {unit['source']}\n"
+        f"TRANSLATION: {unit['translation']}"
+    )
+    final_response = reviewer(final_prompt)
+    try:
+        return _parse_review(final_response)
+    except _LocalizationReviewSchemaError as exc:
+        raise _LocalizationReviewSchemaError(
+            "documentary localization reviewer could not produce PASS or FAIL "
+            f"for translation item {unit['i']}"
+        ) from exc
 
 
 def _run_compact_localization_review(
