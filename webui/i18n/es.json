@@ -717,6 +717,13 @@
     "Documentary Manual Mode": "Modo manual",
     "Documentary Autopilot Resume": "CONTINUAR GENERACIÓN ANTERIOR",
     "Documentary Autopilot Resume Available": "Se encontró un documental sin terminar. Se reutilizarán los puntos de control ya completados sin repetir búsqueda, descargas, Whisper ni artefactos de IA válidos.",
-    "Documentary Autopilot Stage Resume": "Continuando desde el punto guardado"
+    "Documentary Autopilot Stage Resume": "Continuando desde el punto guardado",
+    "Documentary Autopilot Progress Running": "Generación en curso — {percent}%",
+    "Documentary Autopilot Progress Stage": "{percent}% · {stage}",
+    "Documentary Autopilot Progress Log": "{percent}% — {stage}",
+    "Documentary Autopilot Progress Failed": "Generación detenida — {percent}%",
+    "Documentary Autopilot Progress Failed Stage": "Detenido en {percent}% · {stage}",
+    "Documentary Autopilot Progress Complete": "Generación completada — {percent}%",
+    "Documentary Autopilot Progress Complete Stage": "{percent}% · {stage}"
   }
 }
