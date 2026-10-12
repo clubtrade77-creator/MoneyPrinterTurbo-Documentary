@@ -329,8 +329,8 @@ def test_compact_review_retries_only_unclear_batch(
         review_calls.append(prompt)
         if len(review_calls) == 1:
             return "I cannot format the verdict."
-        assert "Your verdict format was unclear" in prompt
-        return json.dumps({"supported": True, "issues": []})
+        assert "Return exactly PASS" in prompt
+        return "PASS"
 
     plan = localize_project(
         project.id,
