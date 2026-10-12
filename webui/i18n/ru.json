@@ -717,6 +717,13 @@
     "Documentary Manual Mode": "Ручной режим",
     "Documentary Autopilot Resume": "ПРОДОЛЖИТЬ ПРЕДЫДУЩУЮ ГЕНЕРАЦИЮ",
     "Documentary Autopilot Resume Available": "Найден незавершённый фильм. Уже готовые этапы будут использованы повторно — поиск, скачивание, Whisper и валидные AI-артефакты заново не запускаются.",
-    "Documentary Autopilot Stage Resume": "Продолжаю с сохранённого этапа"
+    "Documentary Autopilot Stage Resume": "Продолжаю с сохранённого этапа",
+    "Documentary Autopilot Progress Running": "Генерация выполняется — {percent}%",
+    "Documentary Autopilot Progress Stage": "{percent}% · {stage}",
+    "Documentary Autopilot Progress Log": "{percent}% — {stage}",
+    "Documentary Autopilot Progress Failed": "Генерация остановлена — {percent}%",
+    "Documentary Autopilot Progress Failed Stage": "Остановлено на {percent}% · {stage}",
+    "Documentary Autopilot Progress Complete": "Генерация завершена — {percent}%",
+    "Documentary Autopilot Progress Complete Stage": "{percent}% · {stage}"
   }
 }
