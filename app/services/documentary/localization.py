@@ -57,6 +57,10 @@ class _LocalizationReviewSchemaError(LocalizationError):
     """Raised when a reviewer verdict cannot be parsed safely."""
 
 
+class _LocalizationSemanticError(LocalizationError):
+    """Raised when targeted semantic repair still leaves review failures."""
+
+
 def _normalize_language(language: str) -> str:
     value = (language or "").strip().lower()
     parts = value.split("-")
@@ -1649,7 +1653,7 @@ def localize_project(
             ),
         )
         if review_issues:
-            raise LocalizationError(
+            raise _LocalizationSemanticError(
                 "semantic localization review failed: "
                 + "; ".join(review_issues)
             )
@@ -1716,6 +1720,10 @@ def localize_project(
                     + "; ".join(review_issues)
                 )
             break
+        except _LocalizationSemanticError:
+            # Targeted batch repair has already been attempted. Do not throw away
+            # good translations by regenerating the entire language.
+            raise
         except LocalizationError as exc:
             last_error = exc
             if attempt >= MAX_LOCALIZATION_ATTEMPTS:
