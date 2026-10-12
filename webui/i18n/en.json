@@ -871,6 +871,13 @@
     "Documentary Manual Mode": "Manual mode",
     "Documentary Autopilot Resume": "CONTINUE PREVIOUS GENERATION",
     "Documentary Autopilot Resume Available": "An unfinished documentary was found. Completed checkpoints will be reused instead of repeating discovery, downloads, Whisper, or valid AI artifacts.",
-    "Documentary Autopilot Stage Resume": "Resuming from saved checkpoint"
+    "Documentary Autopilot Stage Resume": "Resuming from saved checkpoint",
+    "Documentary Autopilot Progress Running": "Generation in progress — {percent}%",
+    "Documentary Autopilot Progress Stage": "{percent}% · {stage}",
+    "Documentary Autopilot Progress Log": "{percent}% — {stage}",
+    "Documentary Autopilot Progress Failed": "Generation stopped — {percent}%",
+    "Documentary Autopilot Progress Failed Stage": "Stopped at {percent}% · {stage}",
+    "Documentary Autopilot Progress Complete": "Generation complete — {percent}%",
+    "Documentary Autopilot Progress Complete Stage": "{percent}% · {stage}"
   }
 }
