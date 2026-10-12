@@ -1441,9 +1441,22 @@ def run_autopilot(
                 stage_fraction=1.0,
                 status=(
                     "reused"
-                    if not voice_result.generated and voice_result.reused
+                    if (
+                        not getattr(voice_result, "generated", ())
+                        and getattr(voice_result, "reused", ())
+                    )
                     else "completed"
                 ),
+            )
+
+        else:
+            _emit(
+                progress,
+                "voice",
+                "Narrator audio is not required for this documentary",
+                0.82,
+                stage_fraction=1.0,
+                status="skipped",
             )
 
         stage = "preview"
