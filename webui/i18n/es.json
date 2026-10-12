@@ -724,6 +724,14 @@
     "Documentary Autopilot Progress Failed": "Generación detenida — {percent}%",
     "Documentary Autopilot Progress Failed Stage": "Detenido en {percent}% · {stage}",
     "Documentary Autopilot Progress Complete": "Generación completada — {percent}%",
-    "Documentary Autopilot Progress Complete Stage": "{percent}% · {stage}"
+    "Documentary Autopilot Progress Complete Stage": "{percent}% · {stage}",
+    "Documentary Autopilot Stage Progress Title": "Etapas de generación",
+    "Documentary Autopilot Stage Status Pending": "Pendiente",
+    "Documentary Autopilot Stage Status Running": "En curso",
+    "Documentary Autopilot Stage Status Completed": "Completado",
+    "Documentary Autopilot Stage Status Reused": "Resultado guardado reutilizado",
+    "Documentary Autopilot Stage Status Skipped": "No requerido",
+    "Documentary Autopilot Progress Stage Detail": "Progreso total {overall}% · {stage}: {stage_percent}%",
+    "Documentary Autopilot Progress Log Detail": "Total {overall}% · {stage}: {stage_percent}%"
   }
 }
