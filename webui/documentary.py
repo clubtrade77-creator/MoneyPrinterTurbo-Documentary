@@ -2459,7 +2459,10 @@ def _render_master_video(
         )
 
         if mode in {"both", "final"} and final_issues:
-            st.warning(tr("Documentary Render Not Ready"))
+            if not preview_issues:
+                st.warning(tr("Documentary Final Rights Pending"))
+            else:
+                st.warning(tr("Documentary Render Not Ready"))
             for issue in final_issues:
                 st.caption(f"• {issue}")
         if mode == "preview" and preview_issues:
@@ -2761,6 +2764,73 @@ def _render_localized_versions(project, tr: Tr) -> None:
         else:
             st.info(tr("Documentary Localization No Narration"))
 
+        preview_path = documentary_preview_path(
+            project.id,
+            language=target_language,
+        )
+        current_preview = _render_output_is_current(
+            project.id,
+            language=target_language,
+            preview=True,
+        )
+        preview_issues = documentary_render_readiness_issues(
+            project.id,
+            language=target_language,
+            require_publishable_rights=False,
+        )
+
+        if preview_path.is_file():
+            if current_preview:
+                st.info(
+                    tr("Documentary Localization Preview Current").format(
+                        language=_documentary_language_label(target_language)
+                    )
+                )
+                st.video(str(preview_path))
+            else:
+                st.warning(tr("Documentary Preview Stale"))
+
+        if preview_issues:
+            st.warning(tr("Documentary Preview Not Ready"))
+            for issue in preview_issues:
+                st.caption(f"• {issue}")
+
+        preview_button_label = (
+            tr("Documentary Preview Again")
+            if preview_path.is_file()
+            else tr("Documentary Localization Preview Build")
+        )
+        if st.button(
+            preview_button_label,
+            type="primary",
+            width="stretch",
+            disabled=bool(preview_issues),
+            key=(
+                "documentary_localization_preview_"
+                f"{project.id}_{target_language}"
+            ),
+        ):
+            try:
+                with st.spinner(tr("Documentary Rendering")):
+                    result = render_documentary(
+                        project.id,
+                        language=target_language,
+                        preview=True,
+                    )
+            except (OSError, ValueError, DocumentaryRenderError) as exc:
+                st.error(
+                    tr("Documentary Render Failed").format(
+                        error=str(exc)
+                    )
+                )
+            else:
+                st.success(
+                    tr("Documentary Preview Complete").format(
+                        filename=result.name
+                    )
+                )
+                st.rerun()
+
         output_path = documentary_render_path(
             project.id,
             language=target_language,
@@ -2769,6 +2839,11 @@ def _render_localized_versions(project, tr: Tr) -> None:
             project.id,
             language=target_language,
         )
+        final_issues = documentary_render_readiness_issues(
+            project.id,
+            language=target_language,
+        )
+
         if output_path.is_file():
             if current_render:
                 st.success(
@@ -2780,13 +2855,12 @@ def _render_localized_versions(project, tr: Tr) -> None:
             else:
                 st.warning(tr("Documentary Render Stale"))
 
-        readiness_issues = documentary_render_readiness_issues(
-            project.id,
-            language=target_language,
-        )
-        if readiness_issues:
-            st.warning(tr("Documentary Render Not Ready"))
-            for issue in readiness_issues:
+        if final_issues:
+            if not preview_issues:
+                st.warning(tr("Documentary Final Rights Pending"))
+            else:
+                st.warning(tr("Documentary Render Not Ready"))
+            for issue in final_issues:
                 st.caption(f"• {issue}")
 
         render_button_label = (
@@ -2796,9 +2870,8 @@ def _render_localized_versions(project, tr: Tr) -> None:
         )
         if st.button(
             render_button_label,
-            type="primary",
             width="stretch",
-            disabled=bool(readiness_issues),
+            disabled=bool(final_issues),
             key=(
                 "documentary_localization_render_"
                 f"{project.id}_{target_language}"
