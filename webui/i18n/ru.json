@@ -739,6 +739,7 @@
     "Documentary Final Rights Pending": "Технический preview готов или доступен для сборки. Финальный master ожидает проверки прав на публикацию.",
     "Documentary Preview Not Ready": "Технический preview пока не готов. Сначала исправь указанные ниже технические блокеры.",
     "Documentary Localization Preview Current": "Технический preview на {language} актуален. Права на публикацию при этом могут ещё требовать проверки.",
-    "Documentary Localization Preview Build": "Собрать технический preview на этом языке"
+    "Documentary Localization Preview Build": "Собрать технический preview на этом языке",
+    "Documentary Autopilot Detail Repair Item": "Исправление item {current} из {total} · попытка {attempt} из {attempts}"
   }
 }
