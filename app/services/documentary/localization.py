@@ -1928,6 +1928,34 @@ def localize_project(
         target_language=target_language,
         source_scenes=source_scenes,
     )
+    source_fingerprint = _localization_source_fingerprint(
+        source_language=source_language,
+        target_language=target_language,
+        source_scenes=source_scenes,
+    )
+    work_translations, work_reviewed = _load_localization_work(
+        project_id,
+        target_language,
+        source_fingerprint=source_fingerprint,
+        root=root,
+    )
+
+    def save_work(
+        translations: dict[int, str],
+        reviewed: dict[int, str] | None = None,
+    ) -> None:
+        nonlocal work_translations, work_reviewed
+        work_translations = dict(translations)
+        if reviewed is not None:
+            work_reviewed = dict(reviewed)
+        _save_localization_work(
+            project_id,
+            target_language,
+            source_fingerprint=source_fingerprint,
+            translations=work_translations,
+            reviewed=work_reviewed,
+            root=root,
+        )
 
     generator = generate_fn or llm_service.generate_text
     if generate_fn is not None and review_fn is None:
@@ -1953,6 +1981,8 @@ def localize_project(
                 0.70 * fraction,
             ),
             status=status,
+            initial_translations=work_translations,
+            checkpoint=lambda translations: save_work(translations),
         )
         _validate_candidate_against_source(localized_scenes, source_scenes)
         localized_scenes, review_issues = _review_and_repair_localization(
@@ -1967,6 +1997,8 @@ def localize_project(
                 0.70 + 0.30 * fraction,
             ),
             status=status,
+            reviewed_fingerprints=work_reviewed,
+            checkpoint=save_work,
         )
         if review_issues:
             raise _LocalizationSemanticError(
@@ -1983,6 +2015,11 @@ def localize_project(
                 source_scenes,
             )
             _validate_candidate_against_source(candidate, source_scenes)
+            _, candidate_translations = _localized_translation_map(
+                source_scenes,
+                candidate,
+            )
+            save_work(candidate_translations)
             _report_localization_progress(progress, 0.70)
             candidate, review_issues = _review_and_repair_localization(
                 generator=generator,
@@ -1996,6 +2033,8 @@ def localize_project(
                     0.70 + 0.30 * fraction,
                 ),
                 status=status,
+                reviewed_fingerprints=work_reviewed,
+                checkpoint=save_work,
             )
             if review_issues:
                 raise _LocalizationSemanticError(
@@ -2018,6 +2057,8 @@ def localize_project(
                     0.70 * fraction,
                 ),
                 status=status,
+                initial_translations=work_translations,
+                checkpoint=lambda translations: save_work(translations),
             )
             _validate_candidate_against_source(localized_scenes, source_scenes)
             localized_scenes, review_issues = _review_and_repair_localization(
@@ -2032,6 +2073,8 @@ def localize_project(
                     0.70 + 0.30 * fraction,
                 ),
                 status=status,
+                reviewed_fingerprints=work_reviewed,
+                checkpoint=save_work,
             )
             if review_issues:
                 raise _LocalizationSemanticError(
@@ -2093,6 +2136,11 @@ def localize_project(
         localization_plan_path(project_id, target_language, root),
         plan.model_dump(mode="json"),
     )
+    localization_work_path(
+        project_id,
+        target_language,
+        root,
+    ).unlink(missing_ok=True)
     _report_localization_progress(progress, 1.0)
     return plan
 
