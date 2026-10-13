@@ -19,6 +19,7 @@ from app.services.documentary.localization import (
     LocalizationError,
     load_localization_plan,
     localization_plan_path,
+    localization_work_path,
     localize_project,
 )
 from app.services.documentary.project import (
@@ -999,6 +1000,150 @@ def test_repair_items_use_neighbor_context_without_shifting_content(
         if "Repair ONLY this rejected documentary translation item" in prompt
     ]
     assert len(repair_prompts) == 2
+
+
+def test_localization_resume_reuses_translated_batches_after_review_crash(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_THRESHOLD_CHARS",
+        1,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_BATCH_ITEMS",
+        1,
+    )
+    first_generate_calls = []
+
+    def first_generate(prompt: str) -> str:
+        first_generate_calls.append(prompt)
+        items = json.loads(prompt.split("INPUT ITEMS:\n", 1)[1])
+        translated = {
+            0: "Офицер подходит к автомобилю.",
+            1: "Записанная встреча",
+            2: "Офицер подошёл.",
+            3: "Всё изменилось.",
+        }
+        return json.dumps(
+            {
+                "items": [
+                    {"i": item["i"], "text": translated[item["i"]]}
+                    for item in items
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    def crashing_review(prompt: str) -> str:
+        raise RuntimeError("review provider interrupted")
+
+    with pytest.raises(RuntimeError, match="review provider interrupted"):
+        localize_project(
+            project.id,
+            "ru",
+            root=tmp_path,
+            generate_fn=first_generate,
+            review_fn=crashing_review,
+        )
+
+    assert len(first_generate_calls) == 4
+    assert localization_work_path(project.id, "ru", tmp_path).is_file()
+
+    def must_not_translate(prompt: str) -> str:
+        raise AssertionError("saved translation batches must be reused")
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=must_not_translate,
+        review_fn=_approved_review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert not localization_work_path(project.id, "ru", tmp_path).exists()
+
+
+def test_localization_resume_skips_reviewed_batches_after_review_crash(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_THRESHOLD_CHARS",
+        1,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_ITEMS",
+        2,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_CHARS",
+        100000,
+    )
+
+    translated = {
+        0: "Офицер подходит к автомобилю.",
+        1: "Записанная встреча",
+        2: "Офицер подошёл.",
+        3: "Всё изменилось.",
+    }
+
+    def generate(prompt: str) -> str:
+        items = json.loads(prompt.split("INPUT ITEMS:\n", 1)[1])
+        return json.dumps(
+            {
+                "items": [
+                    {"i": item["i"], "text": translated[item["i"]]}
+                    for item in items
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    first_reviewed = []
+
+    def first_review(prompt: str) -> str:
+        items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+        ids = [item["i"] for item in items]
+        first_reviewed.append(ids)
+        if ids == [2, 3]:
+            raise RuntimeError("second review batch interrupted")
+        return json.dumps({"supported": True, "issues": []})
+
+    with pytest.raises(RuntimeError, match="second review batch interrupted"):
+        localize_project(
+            project.id,
+            "ru",
+            root=tmp_path,
+            generate_fn=generate,
+            review_fn=first_review,
+        )
+
+    assert first_reviewed == [[0, 1], [2, 3]]
+
+    resumed_reviewed = []
+
+    def resumed_review(prompt: str) -> str:
+        items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+        resumed_reviewed.append([item["i"] for item in items])
+        return json.dumps({"supported": True, "issues": []})
+
+    def must_not_translate(prompt: str) -> str:
+        raise AssertionError("saved translation batches must be reused")
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=must_not_translate,
+        review_fn=resumed_review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert resumed_reviewed == [[2, 3]]
 
 
 def test_localize_project_preserves_empty_master_text_fields(tmp_path: Path):
