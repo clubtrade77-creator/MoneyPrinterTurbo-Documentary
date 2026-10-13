@@ -739,6 +739,7 @@
     "Documentary Final Rights Pending": "El preview técnico está listo o puede generarse. El master final espera la revisión de derechos de publicación.",
     "Documentary Preview Not Ready": "El preview técnico aún no está listo. Corrige primero los bloqueos técnicos indicados abajo.",
     "Documentary Localization Preview Current": "El preview técnico en {language} está actualizado. Los derechos de publicación aún pueden requerir revisión.",
-    "Documentary Localization Preview Build": "Crear preview técnico en este idioma"
+    "Documentary Localization Preview Build": "Crear preview técnico en este idioma",
+    "Documentary Autopilot Detail Repair Item": "Corrigiendo elemento {current} de {total} · intento {attempt} de {attempts}"
   }
 }
