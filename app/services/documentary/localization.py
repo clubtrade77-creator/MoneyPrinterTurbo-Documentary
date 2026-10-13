@@ -29,6 +29,7 @@ COMPACT_REVIEW_THRESHOLD_CHARS = 5_000
 COMPACT_REVIEW_BATCH_CHARS = 1_800
 COMPACT_REVIEW_BATCH_ITEMS = 10
 CURRENT_LOCALIZATION_REVIEW_VERSION = 1
+_LOCALIZATION_WORK_VERSION = 1
 
 LocalizationProgressCallback = Callable[[float], None]
 LocalizationStatusCallback = Callable[[str, int, int, int, int], None]
@@ -94,6 +95,117 @@ def localization_plan_path(
     language = _normalize_language(target_language)
     safe_language = language.replace("-", "_")
     return project_dir(project_id, root) / "plans" / f"localization-{safe_language}.json"
+
+
+def localization_work_path(
+    project_id: str,
+    target_language: str,
+    root: str | os.PathLike | None = None,
+) -> Path:
+    language = _normalize_language(target_language)
+    safe_language = language.replace("-", "_")
+    return project_dir(project_id, root) / "plans" / f"localization-{safe_language}.work.json"
+
+
+def _localization_source_fingerprint(
+    *,
+    source_language: str,
+    target_language: str,
+    source_scenes: list[dict],
+) -> str:
+    canonical = json.dumps(
+        {
+            "source_language": source_language,
+            "target_language": target_language,
+            "source_scenes": source_scenes,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _load_localization_work(
+    project_id: str,
+    target_language: str,
+    *,
+    source_fingerprint: str,
+    root: str | os.PathLike | None,
+) -> tuple[dict[int, str], dict[int, str]]:
+    path = localization_work_path(project_id, target_language, root)
+    if not path.is_file():
+        return {}, {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}, {}
+    if (
+        not isinstance(payload, dict)
+        or payload.get("version") != _LOCALIZATION_WORK_VERSION
+        or payload.get("source_fingerprint") != source_fingerprint
+    ):
+        return {}, {}
+
+    translations: dict[int, str] = {}
+    for raw_id, raw_text in dict(payload.get("translations") or {}).items():
+        try:
+            item_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        text = str(raw_text or "").strip()
+        if text:
+            translations[item_id] = text
+
+    reviewed: dict[int, str] = {}
+    for raw_id, raw_fingerprint in dict(payload.get("reviewed") or {}).items():
+        try:
+            item_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        fingerprint = str(raw_fingerprint or "").strip()
+        if fingerprint:
+            reviewed[item_id] = fingerprint
+    return translations, reviewed
+
+
+def _save_localization_work(
+    project_id: str,
+    target_language: str,
+    *,
+    source_fingerprint: str,
+    translations: dict[int, str],
+    reviewed: dict[int, str],
+    root: str | os.PathLike | None,
+) -> None:
+    _atomic_write_json(
+        localization_work_path(project_id, target_language, root),
+        {
+            "version": _LOCALIZATION_WORK_VERSION,
+            "source_fingerprint": source_fingerprint,
+            "translations": {
+                str(item_id): text
+                for item_id, text in sorted(translations.items())
+            },
+            "reviewed": {
+                str(item_id): fingerprint
+                for item_id, fingerprint in sorted(reviewed.items())
+            },
+        },
+    )
+
+
+def _review_unit_fingerprint(unit: dict) -> str:
+    canonical = json.dumps(
+        {
+            "source": str(unit.get("source") or ""),
+            "translation": str(unit.get("translation") or ""),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _atomic_write_json(path: Path, payload: dict) -> None:
