@@ -38,7 +38,11 @@ from app.services.documentary.project import (
     project_dir,
     save_project,
 )
-from app.services.documentary.renderer import render_documentary
+from app.services.documentary.renderer import (
+    documentary_preview_path,
+    documentary_render_is_current,
+    render_documentary,
+)
 from app.services.documentary.source_hunter import (
     SourceHunterError,
     candidate_to_web_source,
@@ -1482,39 +1486,58 @@ def run_autopilot(
             )
 
         stage = "preview"
-        _emit(
-            progress,
-            stage,
-            "Rendering master-language preview",
-            0.83,
-            stage_fraction=0.0,
-        )
-        master_preview = render_documentary(
+        if documentary_render_is_current(
             project.id,
             preview=True,
             root=root,
-            progress=lambda fraction: _emit(
+        ):
+            master_preview = documentary_preview_path(
+                project.id,
+                root,
+            )
+            _emit(
                 progress,
                 "preview",
+                "Reusing current master-language preview",
+                0.84,
+                stage_fraction=1.0,
+                status="reused",
+            )
+        else:
+            _emit(
+                progress,
+                stage,
                 "Rendering master-language preview",
-                0.83 + 0.01 * fraction,
-                stage_fraction=fraction,
-            ),
-        )
+                0.83,
+                stage_fraction=0.0,
+            )
+            master_preview = render_documentary(
+                project.id,
+                preview=True,
+                root=root,
+                progress=lambda fraction: _emit(
+                    progress,
+                    "preview",
+                    "Rendering master-language preview",
+                    0.83 + 0.01 * fraction,
+                    stage_fraction=fraction,
+                ),
+            )
+            _emit(
+                progress,
+                "preview",
+                "Master-language preview ready",
+                0.84,
+                stage_fraction=1.0,
+                status="completed",
+            )
+
         previews = {master_language: str(master_preview)}
         state = _checkpoint_autopilot(
             project.id,
             state,
             stage="preview",
             root=root,
-        )
-        _emit(
-            progress,
-            "preview",
-            "Master-language preview ready",
-            0.84,
-            stage_fraction=1.0,
-            status="completed",
         )
         _emit(
             progress,
@@ -1625,36 +1648,57 @@ def run_autopilot(
                         status="skipped",
                     )
 
-                _emit(
-                    progress,
-                    stage,
-                    f"Rendering {language.upper()} preview",
-                    base_fraction + step * 0.80,
-                    stage_fraction=0.80,
-                )
-                localized_preview = render_documentary(
+                if documentary_render_is_current(
                     project.id,
                     language=language,
                     preview=True,
                     root=root,
-                    progress=lambda fraction: _emit(
+                ):
+                    localized_preview = documentary_preview_path(
+                        project.id,
+                        root,
+                        language=language,
+                    )
+                    _emit(
+                        progress,
+                        stage,
+                        f"Reusing current {language.upper()} preview",
+                        min(0.97, base_fraction + step),
+                        stage_fraction=1.0,
+                        status="reused",
+                    )
+                else:
+                    _emit(
                         progress,
                         stage,
                         f"Rendering {language.upper()} preview",
-                        base_fraction
-                        + step * (0.80 + 0.20 * fraction),
-                        stage_fraction=0.80 + 0.20 * fraction,
-                    ),
-                )
+                        base_fraction + step * 0.80,
+                        stage_fraction=0.80,
+                    )
+                    localized_preview = render_documentary(
+                        project.id,
+                        language=language,
+                        preview=True,
+                        root=root,
+                        progress=lambda fraction: _emit(
+                            progress,
+                            stage,
+                            f"Rendering {language.upper()} preview",
+                            base_fraction
+                            + step * (0.80 + 0.20 * fraction),
+                            stage_fraction=0.80 + 0.20 * fraction,
+                        ),
+                    )
+                    _emit(
+                        progress,
+                        stage,
+                        f"{language.upper()} version ready",
+                        min(0.97, base_fraction + step),
+                        stage_fraction=1.0,
+                        status="completed",
+                    )
+
                 previews[language] = str(localized_preview)
-                _emit(
-                    progress,
-                    stage,
-                    f"{language.upper()} version ready",
-                    min(0.97, base_fraction + step),
-                    stage_fraction=1.0,
-                    status="completed",
-                )
 
         rights_review_required = _rights_review_source_ids(
             project.id,
