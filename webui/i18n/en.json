@@ -893,6 +893,7 @@
     "Documentary Final Rights Pending": "The technical preview is ready or can be built. The final master is waiting for publication-rights review.",
     "Documentary Preview Not Ready": "The technical preview is not ready yet. Fix the technical blockers below first.",
     "Documentary Localization Preview Current": "The {language} technical preview is current. Publication rights may still require review.",
-    "Documentary Localization Preview Build": "Build technical preview in this language"
+    "Documentary Localization Preview Build": "Build technical preview in this language",
+    "Documentary Autopilot Detail Repair Item": "Repairing item {current} of {total} · attempt {attempt} of {attempts}"
   }
 }
