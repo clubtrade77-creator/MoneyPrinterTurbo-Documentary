@@ -273,16 +273,18 @@ def test_semantic_review_repairs_only_rejected_batch(
 
     def generate(prompt: str) -> str:
         generate_calls.append(prompt)
-        if "Repair ONLY this rejected documentary translation batch" not in prompt:
+        if "Repair ONLY this rejected documentary translation item" not in prompt:
             return bad_response
 
-        items = json.loads(prompt.split("ITEMS:\n", 1)[1])
-        assert [item["i"] for item in items] == [2, 3]
+        item_id = int(prompt.split("CURRENT ITEM ID:\n", 1)[1].splitlines()[0])
+        translated = {
+            2: "Офицер подошёл.",
+            3: "Всё изменилось.",
+        }
         return json.dumps(
             {
                 "items": [
-                    {"i": 2, "text": "Офицер подошёл."},
-                    {"i": 3, "text": "Всё изменилось."},
+                    {"i": item_id, "text": translated[item_id]},
                 ]
             },
             ensure_ascii=False,
@@ -310,8 +312,13 @@ def test_semantic_review_repairs_only_rejected_batch(
     )
 
     assert plan.semantic_reviewed is True
-    assert len(generate_calls) == 2
-    assert "Repair ONLY this rejected documentary translation batch" in generate_calls[1]
+    assert len(generate_calls) == 3
+    assert all(
+        "Repair ONLY this rejected documentary translation item" in prompt
+        for prompt in generate_calls[1:]
+    )
+    assert "CURRENT ITEM ID:\n2" in generate_calls[1]
+    assert "CURRENT ITEM ID:\n3" in generate_calls[2]
     assert plan.scenes[0].narration_text == "Офицер подходит к автомобилю."
     assert plan.scenes[0].on_screen_text == "Записанная встреча"
     assert [
@@ -340,13 +347,14 @@ def test_unresolved_semantic_batch_does_not_retry_whole_language(
 
     def generate(prompt: str) -> str:
         generate_calls.append(prompt)
-        if "Repair ONLY this rejected documentary translation batch" in prompt:
-            items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+            item_id = int(
+                prompt.split("CURRENT ITEM ID:\n", 1)[1].splitlines()[0]
+            )
             return json.dumps(
                 {
                     "items": [
-                        {"i": item["i"], "text": "Всё ещё неверно."}
-                        for item in items
+                        {"i": item_id, "text": "Всё ещё неверно."}
                     ]
                 },
                 ensure_ascii=False,
@@ -380,15 +388,15 @@ def test_unresolved_semantic_batch_does_not_retry_whole_language(
     full_generation_calls = [
         prompt
         for prompt in generate_calls
-        if "Repair ONLY this rejected documentary translation batch" not in prompt
+        if "Repair ONLY this rejected documentary translation item" not in prompt
     ]
     repair_calls = [
         prompt
         for prompt in generate_calls
-        if "Repair ONLY this rejected documentary translation batch" in prompt
+        if "Repair ONLY this rejected documentary translation item" in prompt
     ]
     assert len(full_generation_calls) == 1
-    assert len(repair_calls) == 2
+    assert len(repair_calls) == 4
 
 
 def test_compact_review_accepts_minimal_pass_after_unclear_json(
@@ -876,8 +884,10 @@ def test_localize_project_repairs_semantically_rejected_translation(
 
     def generate(prompt: str) -> str:
         generate_calls.append(prompt)
-        if "Repair ONLY this rejected documentary translation batch" in prompt:
-            items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+            item_id = int(
+                prompt.split("CURRENT ITEM ID:\n", 1)[1].splitlines()[0]
+            )
             translated = {
                 0: "Офицер подходит к автомобилю.",
                 1: "Записанная встреча",
@@ -887,8 +897,7 @@ def test_localize_project_repairs_semantically_rejected_translation(
             return json.dumps(
                 {
                     "items": [
-                        {"i": item["i"], "text": translated[item["i"]]}
-                        for item in items
+                        {"i": item_id, "text": translated[item_id]}
                     ]
                 },
                 ensure_ascii=False,
@@ -916,9 +925,80 @@ def test_localize_project_repairs_semantically_rejected_translation(
 
     assert plan.target_language == "ru"
     assert len(review_calls) == 2
-    assert len(generate_calls) == 2
-    assert "Repair ONLY this rejected documentary translation batch" in generate_calls[1]
+    assert len(generate_calls) == 5
+    assert all(
+        "Repair ONLY this rejected documentary translation item" in prompt
+        for prompt in generate_calls[1:]
+    )
 
+
+
+def test_repair_items_use_neighbor_context_without_shifting_content(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_ITEMS",
+        2,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_CHARS",
+        100000,
+    )
+    prompts = []
+    rejected_once = {"value": False}
+
+    def generate(prompt: str) -> str:
+        prompts.append(prompt)
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+            item_id = int(
+                prompt.split("CURRENT ITEM ID:\n", 1)[1].splitlines()[0]
+            )
+            expected = {
+                2: "Офицер подошёл.",
+                3: "Всё изменилось.",
+            }
+            if item_id == 2:
+                assert "CURRENT SOURCE:\nOfficer approached." in prompt
+                assert "NEXT SOURCE:\nEverything changed." in prompt
+            if item_id == 3:
+                assert "PREVIOUS SOURCE:\nOfficer approached." in prompt
+                assert "CURRENT SOURCE:\nEverything changed." in prompt
+            return json.dumps(
+                {"items": [{"i": item_id, "text": expected[item_id]}]},
+                ensure_ascii=False,
+            )
+        return _russian_response()
+
+    def review(prompt: str) -> str:
+        items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+        ids = [item["i"] for item in items]
+        if ids == [2, 3] and not rejected_once["value"]:
+            rejected_once["value"] = True
+            return json.dumps(
+                {
+                    "supported": False,
+                    "issues": ["item 2 shifted into neighboring item"],
+                }
+            )
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    repair_prompts = [
+        prompt
+        for prompt in prompts
+        if "Repair ONLY this rejected documentary translation item" in prompt
+    ]
+    assert len(repair_prompts) == 2
 
 
 def test_localize_project_preserves_empty_master_text_fields(tmp_path: Path):
