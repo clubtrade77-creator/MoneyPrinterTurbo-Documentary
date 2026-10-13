@@ -1669,6 +1669,8 @@ def _review_and_repair_localization(
     localized_scenes: list[LocalizedSceneText],
     progress: LocalizationProgressCallback | None = None,
     status: LocalizationStatusCallback | None = None,
+    reviewed_fingerprints: dict[int, str] | None = None,
+    checkpoint: Callable[[dict[int, str], dict[int, str]], None] | None = None,
 ) -> tuple[list[LocalizedSceneText], list[str]]:
     source_units, translations = _localized_translation_map(
         source_scenes,
@@ -1678,6 +1680,7 @@ def _review_and_repair_localization(
         unit["i"]: unit
         for unit in source_units
     }
+    reviewed = dict(reviewed_fingerprints or {})
 
     review_units = _localization_review_units(
         source_scenes,
@@ -1699,12 +1702,22 @@ def _review_and_repair_localization(
             batch_index,
             len(batches),
         )
-        batch_issues = _run_compact_review_batch(
-            reviewer=reviewer,
-            source_language=source_language,
-            target_language=target_language,
-            batch=review_batch,
-        )
+        current_fingerprints = {
+            unit["i"]: _review_unit_fingerprint(unit)
+            for unit in review_batch
+        }
+        if all(
+            reviewed.get(item_id) == fingerprint
+            for item_id, fingerprint in current_fingerprints.items()
+        ):
+            batch_issues = []
+        else:
+            batch_issues = _run_compact_review_batch(
+                reviewer=reviewer,
+                source_language=source_language,
+                target_language=target_language,
+                batch=review_batch,
+            )
 
         if batch_issues:
             batch_ids = {
@@ -1739,6 +1752,10 @@ def _review_and_repair_localization(
                     repair_attempts=MAX_LOCALIZATION_REPAIR_PASSES,
                 )
                 translations.update(repaired)
+                for item_id in repaired:
+                    reviewed.pop(item_id, None)
+                if checkpoint is not None:
+                    checkpoint(translations, reviewed)
                 localized_scenes = _assemble_compact_localization(
                     source_scenes,
                     source_units,
@@ -1768,10 +1785,22 @@ def _review_and_repair_localization(
                     batch=updated_batch,
                 )
                 if not batch_issues:
+                    reviewed.update(
+                        {
+                            unit["i"]: _review_unit_fingerprint(unit)
+                            for unit in updated_batch
+                        }
+                    )
+                    if checkpoint is not None:
+                        checkpoint(translations, reviewed)
                     break
 
             if batch_issues:
                 unresolved_issues.extend(batch_issues)
+        else:
+            reviewed.update(current_fingerprints)
+            if checkpoint is not None:
+                checkpoint(translations, reviewed)
 
         completed_weight += sum(
             max(1, len(unit["source"]) + len(unit["translation"]))
