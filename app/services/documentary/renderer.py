@@ -16,10 +16,14 @@ from app.models.documentary import (
     VideoMetadata,
 )
 from app.services.documentary.audio import NarrationAudioError, load_narration_audio
-from app.services.documentary.clip_selector import story_plan_fingerprint
+from app.services.documentary.clip_selector import (
+    clip_plan_path,
+    story_plan_fingerprint,
+)
 from app.services.documentary.localization import (
     LocalizationError,
     load_localization_plan,
+    localization_plan_path,
 )
 from app.services.documentary.localized_subtitles import (
     LocalizedSubtitleError,
@@ -28,7 +32,11 @@ from app.services.documentary.localized_subtitles import (
 )
 from app.services.documentary.metadata import MediaProbeError, probe_video_metadata
 from app.services.documentary.project import load_project, project_dir, sha256_file
-from app.services.documentary.story_planner import StoryPlannerError, load_story_plan
+from app.services.documentary.story_planner import (
+    StoryPlannerError,
+    load_story_plan,
+    story_plan_path,
+)
 from app.utils import utils
 
 DEFAULT_RENDER_WIDTH = 1920
@@ -98,6 +106,141 @@ def documentary_preview_path(
         safe_language = _normalize_render_language(language).replace("-", "_")
         filename = f"preview-{safe_language}.mp4"
     return project_dir(project_id, root) / "renders" / filename
+
+
+def documentary_render_is_current(
+    project_id: str,
+    *,
+    language: str | None = None,
+    preview: bool = False,
+    root: str | os.PathLike | None = None,
+) -> bool:
+    """Return whether an existing render still matches all render dependencies."""
+    try:
+        project = load_project(project_id, root)
+    except (FileNotFoundError, OSError, ValueError):
+        return False
+
+    master_language = _normalize_render_language(project.master_language)
+    render_language = _normalize_render_language(language or master_language)
+    localized = render_language != master_language
+
+    if localized:
+        try:
+            load_localization_plan(
+                project_id,
+                render_language,
+                root=root,
+            )
+        except (FileNotFoundError, LocalizationError, OSError, ValueError):
+            return False
+
+    output = (
+        documentary_preview_path(
+            project_id,
+            root,
+            language=render_language if localized else None,
+        )
+        if preview
+        else documentary_render_path(
+            project_id,
+            root,
+            language=render_language if localized else None,
+        )
+    )
+    if not output.is_file():
+        return False
+
+    referenced_source_ids = {
+        scene.source_id
+        for scene in project.plan.scenes
+        if scene.source_id
+    }
+    referenced_sources = [
+        source
+        for source in project.sources
+        if source.id in referenced_source_ids
+    ]
+
+    if not preview and any(
+        not source.rights_cleared_for_publish
+        for source in referenced_sources
+    ):
+        return False
+
+    metadata_dependencies = [
+        story_plan_path(project_id, root),
+        clip_plan_path(project_id, root),
+    ]
+    if localized:
+        metadata_dependencies.append(
+            localization_plan_path(
+                project_id,
+                render_language,
+                root,
+            )
+        )
+
+    media_dependencies = []
+    for source in referenced_sources:
+        if not source.local_path:
+            return False
+        media_dependencies.append(Path(source.local_path).expanduser().resolve())
+
+    narration_scene_ids = {
+        scene.id
+        for scene in project.plan.scenes
+        if scene.audio_mode in {AudioMode.narration, AudioMode.mixed}
+    }
+    narration_assets = [
+        asset
+        for asset in project.narration_audio
+        if (
+            asset.scene_id in narration_scene_ids
+            and _normalize_render_language(asset.language) == render_language
+        )
+    ]
+    narration_by_scene = {
+        asset.scene_id: asset
+        for asset in narration_assets
+        if asset.local_path
+    }
+    for scene_id in narration_scene_ids:
+        asset = narration_by_scene.get(scene_id)
+        if asset is None:
+            return False
+        media_dependencies.append(
+            Path(asset.local_path).expanduser().resolve()
+        )
+
+    if any(
+        dependency.is_file() is False
+        for dependency in media_dependencies
+    ):
+        return False
+
+    try:
+        output_mtime = output.stat().st_mtime
+    except OSError:
+        return False
+
+    for dependency in metadata_dependencies:
+        if not dependency.is_file():
+            continue
+        try:
+            if output_mtime < dependency.stat().st_mtime:
+                return False
+        except OSError:
+            return False
+
+    for dependency in media_dependencies:
+        try:
+            if output_mtime < dependency.stat().st_mtime:
+                return False
+        except OSError:
+            return False
+
+    return True
 
 
 def _escape_subtitle_filter_path(path: Path) -> str:
