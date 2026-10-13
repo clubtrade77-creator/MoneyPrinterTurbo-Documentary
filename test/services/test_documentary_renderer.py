@@ -26,6 +26,7 @@ from app.services.documentary.renderer import (
     documentary_preview_path,
     documentary_render_path,
     documentary_render_readiness_issues,
+    documentary_render_is_current,
     render_documentary,
 )
 
@@ -87,6 +88,69 @@ def _save_scene(
         )
     ]
     save_project(project, tmp_path)
+
+
+def test_render_currentness_reuses_preview_until_dependency_changes(
+    tmp_path: Path,
+):
+    project, source, source_path = _project_with_video_source(
+        tmp_path,
+        has_audio=True,
+    )
+    _save_scene(project, source, tmp_path, start=0.0, end=2.0)
+
+    preview = documentary_preview_path(project.id, tmp_path)
+    preview.parent.mkdir(parents=True, exist_ok=True)
+    preview.write_bytes(b"preview")
+
+    import os
+
+    os.utime(source_path, (10, 10))
+    os.utime(preview, (20, 20))
+    assert documentary_render_is_current(
+        project.id,
+        preview=True,
+        root=tmp_path,
+    ) is True
+
+    os.utime(source_path, (30, 30))
+    assert documentary_render_is_current(
+        project.id,
+        preview=True,
+        root=tmp_path,
+    ) is False
+
+
+def test_render_currentness_allows_preview_but_not_final_with_pending_rights(
+    tmp_path: Path,
+):
+    project, source, source_path = _project_with_video_source(
+        tmp_path,
+        has_audio=True,
+    )
+    source.rights_status = RightsStatus.unknown_review_required
+    project.sources = [source]
+    _save_scene(project, source, tmp_path, start=0.0, end=2.0)
+
+    preview = documentary_preview_path(project.id, tmp_path)
+    preview.parent.mkdir(parents=True, exist_ok=True)
+    preview.write_bytes(b"preview")
+
+    import os
+
+    os.utime(source_path, (10, 10))
+    os.utime(preview, (20, 20))
+
+    assert documentary_render_is_current(
+        project.id,
+        preview=True,
+        root=tmp_path,
+    ) is True
+    assert documentary_render_is_current(
+        project.id,
+        preview=False,
+        root=tmp_path,
+    ) is False
 
 
 def test_render_readiness_accepts_valid_original_scene(tmp_path: Path):
