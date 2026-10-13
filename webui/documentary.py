@@ -1100,6 +1100,13 @@ def _autopilot_progress_detail(event, tr: Tr) -> str:
             attempt=attempt,
             attempts=attempts,
         )
+    if phase == "repair_item" and total:
+        return tr("Documentary Autopilot Detail Repair Item").format(
+            current=current,
+            total=total,
+            attempt=attempt,
+            attempts=attempts,
+        )
     return ""
 
 
