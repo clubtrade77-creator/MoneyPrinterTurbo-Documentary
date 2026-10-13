@@ -961,10 +961,10 @@ def test_repair_items_use_neighbor_context_without_shifting_content(
                 3: "Всё изменилось.",
             }
             if item_id == 2:
-                assert "CURRENT SOURCE:\nOfficer approached." in prompt
+                assert "CURRENT SOURCE:\nThe officer approached." in prompt
                 assert "NEXT SOURCE:\nEverything changed." in prompt
             if item_id == 3:
-                assert "PREVIOUS SOURCE:\nOfficer approached." in prompt
+                assert "PREVIOUS SOURCE:\nThe officer approached." in prompt
                 assert "CURRENT SOURCE:\nEverything changed." in prompt
             return json.dumps(
                 {"items": [{"i": item_id, "text": expected[item_id]}]},
