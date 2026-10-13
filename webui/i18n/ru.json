@@ -735,6 +735,10 @@
     "Documentary Autopilot Progress Log Detail": "Общий {overall}% · {stage}: {stage_percent}%",
     "Documentary Autopilot Detail Translation Batch": "Перевод: batch {current} из {total}",
     "Documentary Autopilot Detail Review Batch": "Проверка перевода: batch {current} из {total}",
-    "Documentary Autopilot Detail Repair Batch": "Исправление batch {current} из {total} · попытка {attempt} из {attempts}"
+    "Documentary Autopilot Detail Repair Batch": "Исправление batch {current} из {total} · попытка {attempt} из {attempts}",
+    "Documentary Final Rights Pending": "Технический preview готов или доступен для сборки. Финальный master ожидает проверки прав на публикацию.",
+    "Documentary Preview Not Ready": "Технический preview пока не готов. Сначала исправь указанные ниже технические блокеры.",
+    "Documentary Localization Preview Current": "Технический preview на {language} актуален. Права на публикацию при этом могут ещё требовать проверки.",
+    "Documentary Localization Preview Build": "Собрать технический preview на этом языке"
   }
 }
