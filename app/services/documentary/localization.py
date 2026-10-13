@@ -755,6 +755,8 @@ def _localize_compact(
     generator: Callable[[str], str],
     progress: LocalizationProgressCallback | None = None,
     status: LocalizationStatusCallback | None = None,
+    initial_translations: dict[int, str] | None = None,
+    checkpoint: Callable[[dict[int, str]], None] | None = None,
 ) -> list[LocalizedSceneText]:
     units = _localization_text_units(source_scenes)
     if not units:
@@ -770,15 +772,34 @@ def _localize_compact(
             for scene in source_scenes
         ]
 
-    translations: dict[int, str] = {}
+    valid_ids = {unit["i"] for unit in units}
+    translations = {
+        item_id: text
+        for item_id, text in dict(initial_translations or {}).items()
+        if item_id in valid_ids and str(text or "").strip()
+    }
     batches = _compact_localization_batches(units)
     total_weight = sum(
         max(1, len(unit["text"]))
         for unit in units
     )
-    completed_weight = 0
-    _report_localization_progress(progress, 0.0)
+    completed_weight = sum(
+        max(1, len(unit["text"]))
+        for unit in units
+        if unit["i"] in translations
+    )
+    _report_localization_progress(
+        progress,
+        completed_weight / max(1, total_weight),
+    )
     for index, batch in enumerate(batches, start=1):
+        missing = [
+            unit
+            for unit in batch
+            if unit["i"] not in translations
+        ]
+        if not missing:
+            continue
         _report_localization_status(
             status,
             "translation_batch",
@@ -789,13 +810,15 @@ def _localize_compact(
             _translate_compact_batch(
                 source_language=source_language,
                 target_language=target_language,
-                batch=batch,
+                batch=missing,
                 generator=generator,
             )
         )
+        if checkpoint is not None:
+            checkpoint(translations)
         completed_weight += sum(
             max(1, len(unit["text"]))
-            for unit in batch
+            for unit in missing
         )
         _report_localization_progress(
             progress,
