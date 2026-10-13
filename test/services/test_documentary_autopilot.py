@@ -650,6 +650,8 @@ def test_run_autopilot_resume_reuses_saved_transcript_and_story_plan(
     }
     calls = []
     events = []
+    saved_preview = tmp_path / "saved-preview.mp4"
+    saved_preview.write_bytes(b"video")
 
     monkeypatch.setattr(autopilot, "_load_autopilot_state", lambda *a, **k: state)
     monkeypatch.setattr(autopilot, "_checkpoint_autopilot", _checkpoint_stub)
@@ -716,7 +718,23 @@ def test_run_autopilot_resume_reuses_saved_transcript_and_story_plan(
         path.write_bytes(b"video")
         return path
 
-    monkeypatch.setattr(autopilot, "render_documentary", fake_render)
+    monkeypatch.setattr(
+        autopilot,
+        "documentary_render_is_current",
+        lambda *a, **k: True,
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "documentary_preview_path",
+        lambda *a, **k: saved_preview,
+    )
+    monkeypatch.setattr(
+        autopilot,
+        "render_documentary",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("current preview must not be rendered again")
+        ),
+    )
     monkeypatch.setattr(
         autopilot,
         "load_localization_plan",
@@ -738,11 +756,20 @@ def test_run_autopilot_resume_reuses_saved_transcript_and_story_plan(
     assert result.project_id == project.id
     assert result.source_id == source.id
     assert result.title == project.title
-    assert calls == [(None, True)]
+    assert calls == []
+    assert result.preview_paths["en"] == str(saved_preview)
     assert all(event.stage != "resume" for event in events)
     reused = {
         event.stage
         for event in events
         if event.status == "reused" and event.stage_fraction == 1.0
     }
-    assert {"story", "sources", "transcription", "story_plan", "clips", "narration"} <= reused
+    assert {
+        "story",
+        "sources",
+        "transcription",
+        "story_plan",
+        "clips",
+        "narration",
+        "preview",
+    } <= reused
