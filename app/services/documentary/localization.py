@@ -1345,51 +1345,136 @@ def _localized_translation_map(
     return units, translations
 
 
-def _build_compact_repair_prompt(
+def _repair_context_for_unit(
+    source_units: list[dict],
+    unit: dict,
+) -> tuple[str, str]:
+    position = next(
+        (
+            index
+            for index, candidate in enumerate(source_units)
+            if candidate["i"] == unit["i"]
+        ),
+        -1,
+    )
+    if position < 0:
+        return "", ""
+
+    previous = ""
+    following = ""
+
+    def related(candidate: dict) -> bool:
+        if candidate["kind"] != unit["kind"]:
+            return False
+        if unit["kind"] == "subtitle":
+            return candidate["scene_index"] == unit["scene_index"]
+        return True
+
+    for candidate in reversed(source_units[:position]):
+        if related(candidate):
+            previous = candidate["text"]
+            break
+
+    for candidate in source_units[position + 1 :]:
+        if related(candidate):
+            following = candidate["text"]
+            break
+
+    return previous, following
+
+
+def _build_single_item_repair_prompt(
     *,
     source_language: str,
     target_language: str,
-    batch: list[dict],
-    translations: dict[int, str],
+    unit: dict,
+    source_units: list[dict],
+    current_translation: str,
     issues: list[str],
 ) -> str:
     issue_text = "; ".join(str(issue) for issue in issues)
-    if len(issue_text) > 4000:
-        issue_text = issue_text[:4000]
+    if len(issue_text) > 3000:
+        issue_text = issue_text[:3000]
 
-    payload = [
-        {
-            "i": unit["i"],
-            "source": unit["text"],
-            "current_translation": translations.get(unit["i"], ""),
-        }
-        for unit in batch
-    ]
+    previous, following = _repair_context_for_unit(
+        source_units,
+        unit,
+    )
+
     return f"""
-Repair ONLY this rejected documentary translation batch from
+Repair ONLY this rejected documentary translation item from
 {source_language} to {target_language}.
 
-The semantic reviewer found one or more fidelity problems in this batch.
-Translate each SOURCE again from scratch. Use current_translation only to understand
-what went wrong; do not preserve wording that conflicts with the source.
+You are translating CURRENT SOURCE only.
+PREVIOUS SOURCE and NEXT SOURCE are context only. Never translate text from the
+context into the current item. Never continue a neighboring sentence unless those
+words are literally present in CURRENT SOURCE.
 
-Requirements:
-- preserve exact item ids;
-- preserve names, numbers, dates, gender, attribution, uncertainty, and meaning;
-- do not omit or add material information;
-- do not shift a translation to a neighboring item;
-- keep every item complete even when adjacent source items overlap;
-- return every input item exactly once.
+Preserve:
+- exact factual meaning;
+- names and proper nouns;
+- numbers, dates, tense, grammatical gender, attribution, and uncertainty;
+- whether the source is a complete sentence or only a fragment.
+
+Do not add missing words from neighboring items.
+Do not omit words that are present in CURRENT SOURCE.
+Do not move content to or from another item.
+For proper nouns, preserve the canonical name instead of inventing a literal
+translation.
 
 REVIEW ISSUES:
 {issue_text}
 
-Return exactly:
-{{"items":[{{"i":0,"text":"corrected translation"}}]}}
+PREVIOUS SOURCE:
+{previous}
 
-ITEMS:
-{json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}
+CURRENT ITEM ID:
+{unit["i"]}
+
+CURRENT SOURCE:
+{unit["text"]}
+
+CURRENT BAD TRANSLATION:
+{current_translation}
+
+NEXT SOURCE:
+{following}
+
+Return exactly one JSON object and nothing else:
+{{"items":[{{"i":{unit["i"]},"text":"corrected translation of CURRENT SOURCE only"}}]}}
 """.strip()
+
+
+def _repair_single_localization_item(
+    *,
+    generator: Callable[[str], str],
+    source_language: str,
+    target_language: str,
+    unit: dict,
+    source_units: list[dict],
+    current_translation: str,
+    issues: list[str],
+) -> str:
+    response = generator(
+        _build_single_item_repair_prompt(
+            source_language=source_language,
+            target_language=target_language,
+            unit=unit,
+            source_units=source_units,
+            current_translation=current_translation,
+            issues=issues,
+        )
+    )
+    repaired = _parse_compact_localization_response(
+        response,
+        [unit],
+    )
+    text = str(repaired.get(unit["i"]) or "").strip()
+    if not text:
+        raise _LocalizationSchemaError(
+            f"localization repair returned no text for item {unit['i']}"
+        )
+    return text
 
 
 def _repair_compact_review_batch(
@@ -1398,38 +1483,45 @@ def _repair_compact_review_batch(
     source_language: str,
     target_language: str,
     batch: list[dict],
+    source_units: list[dict],
     translations: dict[int, str],
     issues: list[str],
+    status: LocalizationStatusCallback | None = None,
+    repair_attempt: int = 1,
+    repair_attempts: int = 1,
 ) -> dict[int, str]:
-    response = generator(
-        _build_compact_repair_prompt(
-            source_language=source_language,
-            target_language=target_language,
-            batch=batch,
-            translations=translations,
-            issues=issues,
+    repaired: dict[int, str] = {}
+    for item_index, unit in enumerate(batch, start=1):
+        _report_localization_status(
+            status,
+            "repair_item",
+            item_index,
+            len(batch),
+            repair_attempt,
+            repair_attempts,
         )
-    )
-    try:
-        repaired = _parse_compact_localization_response(response, batch)
-    except _LocalizationSchemaError:
-        repaired = {}
-
-    missing = [
-        unit
-        for unit in batch
-        if unit["i"] not in repaired
-    ]
-    if missing:
-        repaired.update(
-            _translate_compact_batch(
+        try:
+            repaired[unit["i"]] = _repair_single_localization_item(
+                generator=generator,
                 source_language=source_language,
                 target_language=target_language,
-                batch=missing,
+                unit=unit,
+                source_units=source_units,
+                current_translation=translations.get(unit["i"], ""),
+                issues=issues,
+            )
+        except (_LocalizationSchemaError, _NonRetryableLocalizationError):
+            # Preserve isolation even if the strict repair format drifts: fall back
+            # to the ordinary translator for this one item only, never the batch.
+            translated = _translate_compact_batch(
+                source_language=source_language,
+                target_language=target_language,
+                batch=[unit],
                 generator=generator,
             )
-        )
+            repaired[unit["i"]] = translated[unit["i"]]
     return repaired
+
 
 
 def _review_and_repair_localization(
@@ -1504,8 +1596,12 @@ def _review_and_repair_localization(
                     source_language=source_language,
                     target_language=target_language,
                     batch=repair_batch,
+                    source_units=source_units,
                     translations=translations,
                     issues=batch_issues,
+                    status=status,
+                    repair_attempt=repair_attempt,
+                    repair_attempts=MAX_LOCALIZATION_REPAIR_PASSES,
                 )
                 translations.update(repaired)
                 localized_scenes = _assemble_compact_localization(
