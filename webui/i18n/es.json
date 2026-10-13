@@ -735,6 +735,10 @@
     "Documentary Autopilot Progress Log Detail": "Total {overall}% · {stage}: {stage_percent}%",
     "Documentary Autopilot Detail Translation Batch": "Traducción: lote {current} de {total}",
     "Documentary Autopilot Detail Review Batch": "Revisión de traducción: lote {current} de {total}",
-    "Documentary Autopilot Detail Repair Batch": "Corrigiendo lote {current} de {total} · intento {attempt} de {attempts}"
+    "Documentary Autopilot Detail Repair Batch": "Corrigiendo lote {current} de {total} · intento {attempt} de {attempts}",
+    "Documentary Final Rights Pending": "El preview técnico está listo o puede generarse. El master final espera la revisión de derechos de publicación.",
+    "Documentary Preview Not Ready": "El preview técnico aún no está listo. Corrige primero los bloqueos técnicos indicados abajo.",
+    "Documentary Localization Preview Current": "El preview técnico en {language} está actualizado. Los derechos de publicación aún pueden requerir revisión.",
+    "Documentary Localization Preview Build": "Crear preview técnico en este idioma"
   }
 }
