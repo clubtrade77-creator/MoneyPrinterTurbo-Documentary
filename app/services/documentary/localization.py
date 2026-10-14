@@ -1261,6 +1261,34 @@ def _untranslated_copy_issue(unit: dict) -> str | None:
     )
 
 
+def _suspicious_length_issue(unit: dict) -> str | None:
+    source = re.sub(
+        r"\s+",
+        " ",
+        str(unit.get("source") or ""),
+    ).strip()
+    translation = re.sub(
+        r"\s+",
+        " ",
+        str(unit.get("translation") or ""),
+    ).strip()
+    if len(source) < 80 or not translation:
+        return None
+
+    ratio = len(translation) / max(1, len(source))
+    if ratio < 0.22:
+        return (
+            f"item {unit['i']}: translation is suspiciously short "
+            f"({len(translation)} vs {len(source)} characters) and may be truncated"
+        )
+    if len(source) >= 120 and ratio > 4.0:
+        return (
+            f"item {unit['i']}: translation is suspiciously long "
+            f"({len(translation)} vs {len(source)} characters) and may contain additions"
+        )
+    return None
+
+
 def _protected_literal_tokens(text: str) -> set[str]:
     value = str(text or "")
     tokens: set[str] = set()
@@ -1375,6 +1403,9 @@ def _deterministic_review_issues(batch: list[dict]) -> list[str]:
         untranslated_issue = _untranslated_copy_issue(unit)
         if untranslated_issue:
             issues.append(untranslated_issue)
+        length_issue = _suspicious_length_issue(unit)
+        if length_issue:
+            issues.append(length_issue)
         protected_issue = _protected_literal_issue(unit)
         if protected_issue:
             issues.append(protected_issue)
@@ -2009,7 +2040,8 @@ def _split_review_issue_clauses(issues: list[str]) -> list[str]:
         if not text:
             continue
         parts = re.split(
-            r";\s*(?=items?\s+\d+\b)|\n+(?=items?\s+\d+\b)",
+            r"(?:;|,)\s*(?=items?\s+\d+\s*:)"
+            r"|\n+(?=items?\s+\d+\b)",
             text,
             flags=re.IGNORECASE,
         )
@@ -2053,6 +2085,15 @@ def _review_issue_item_ids(issue: str) -> set[int]:
             last = int(last_text)
             if 0 <= last - first <= 50:
                 parsed.update(range(first, last + 1))
+
+    parsed.update(
+        int(match.group(1))
+        for match in re.finditer(
+            r"\bitems?\s+(\d+)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
     return parsed
 
 
@@ -2188,6 +2229,8 @@ REVIEW ISSUES FOR THIS ITEM ONLY:
 {issue_text}
 
 The reviewer wording is advisory. Verify it against CURRENT SOURCE.
+If the current translation is already faithful and the reviewer complaint is only
+stylistic, you may return the same faithful translation unchanged.
 If the reviewer suggests a replacement phrase that would be less accurate than the
 source, do not copy it blindly; produce the most faithful natural translation.
 
@@ -2203,7 +2246,7 @@ CURRENT ITEM ID:
 CURRENT SOURCE:
 {unit["text"]}
 
-CURRENT BAD TRANSLATION:
+CURRENT TRANSLATION UNDER REVIEW:
 {current_translation}
 
 NEXT SOURCE:
