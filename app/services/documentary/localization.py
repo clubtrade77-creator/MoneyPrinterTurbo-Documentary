@@ -77,6 +77,11 @@ class _LocalizationSemanticError(LocalizationError):
     """Raised when targeted semantic repair still leaves review failures."""
 
 
+def _is_retryable_llm_timeout(error: Exception) -> bool:
+    message = str(error or "").lower()
+    return "timed out" in message or "timeout" in message
+
+
 def _normalize_language(language: str) -> str:
     value = (language or "").strip().lower()
     parts = value.split("-")
@@ -2510,13 +2515,13 @@ def localize_project(
             root=root,
         )
 
-    generator = generate_fn or llm_service.generate_text
+    generator = generate_fn or llm_service.generate_text_precise
     if generate_fn is not None and review_fn is None:
         raise ValueError(
             "review_fn is required when generate_fn is supplied so custom "
             "localization cannot bypass semantic review"
         )
-    reviewer = review_fn or llm_service.generate_text
+    reviewer = review_fn or llm_service.generate_text_precise
     _report_localization_progress(progress, 0.0)
 
     current_prompt = prompt
