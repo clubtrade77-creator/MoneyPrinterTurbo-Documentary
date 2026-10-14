@@ -1766,6 +1766,18 @@ def test_review_issue_parser_extracts_lists_ranges_and_repeated_items():
     assert _review_issue_item_ids(
         "item 16: Christmas Eve 2025 is wrong"
     ) == {16}
+    assert _review_issue_item_ids(
+        "item #86: wrong name form"
+    ) == {86}
+    assert _review_issue_item_ids(
+        "пункты 86, 89 и 90: ошибки перевода"
+    ) == {86, 89, 90}
+    assert _review_issue_item_ids(
+        "ítems 95 y 166: errores temporales"
+    ) == {95, 166}
+    assert _review_issue_item_ids(
+        "пункты 209–213: сдвиг перевода"
+    ) == {209, 210, 211, 212, 213}
 
 
 def test_suspicious_length_detector_flags_clear_truncation_only():
