@@ -313,13 +313,9 @@ def test_semantic_review_repairs_only_rejected_batch(
     )
 
     assert plan.semantic_reviewed is True
-    assert len(generate_calls) == 3
-    assert all(
-        "Repair ONLY this rejected documentary translation item" in prompt
-        for prompt in generate_calls[1:]
-    )
+    assert len(generate_calls) == 2
+    assert "Repair ONLY this rejected documentary translation item" in generate_calls[1]
     assert "CURRENT ITEM ID:\n2" in generate_calls[1]
-    assert "CURRENT ITEM ID:\n3" in generate_calls[2]
     assert plan.scenes[0].narration_text == "Офицер подходит к автомобилю."
     assert plan.scenes[0].on_screen_text == "Записанная встреча"
     assert [
@@ -397,7 +393,7 @@ def test_unresolved_semantic_batch_does_not_retry_whole_language(
         if "Repair ONLY this rejected documentary translation item" in prompt
     ]
     assert len(full_generation_calls) == 1
-    assert len(repair_calls) == 4
+    assert len(repair_calls) == 6
 
 
 def test_compact_review_accepts_minimal_pass_after_unclear_json(
@@ -999,7 +995,68 @@ def test_repair_items_use_neighbor_context_without_shifting_content(
         for prompt in prompts
         if "Repair ONLY this rejected documentary translation item" in prompt
     ]
-    assert len(repair_prompts) == 2
+    assert len(repair_prompts) == 1
+    assert "CURRENT ITEM ID:\n2" in repair_prompts[0]
+    assert "NEXT SOURCE:\nEverything changed." in repair_prompts[0]
+
+
+def test_semantic_repair_uses_only_issue_for_flagged_item(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_ITEMS",
+        2,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_CHARS",
+        100000,
+    )
+    repair_prompts = []
+    rejected_once = {"value": False}
+
+    def generate(prompt: str) -> str:
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+            repair_prompts.append(prompt)
+            item_id = int(
+                prompt.split("CURRENT ITEM ID:\n", 1)[1].splitlines()[0]
+            )
+            return json.dumps(
+                {"items": [{"i": item_id, "text": "Офицер подошёл."}]},
+                ensure_ascii=False,
+            )
+        return _russian_response()
+
+    def review(prompt: str) -> str:
+        items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+        ids = [item["i"] for item in items]
+        if ids == [2, 3] and not rejected_once["value"]:
+            rejected_once["value"] = True
+            return json.dumps(
+                {
+                    "supported": False,
+                    "issues": [
+                        "item 2: omitted the word almost",
+                        "item 99: unrelated issue outside this batch",
+                    ],
+                }
+            )
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert len(repair_prompts) == 1
+    assert "CURRENT ITEM ID:\n2" in repair_prompts[0]
+    assert "item 2: omitted the word almost" in repair_prompts[0]
+    assert "item 99: unrelated issue outside this batch" not in repair_prompts[0]
 
 
 def test_localization_resume_reuses_translated_batches_after_review_crash(
