@@ -1504,15 +1504,46 @@ def _year_fidelity_issue(unit: dict) -> str | None:
     )
 
 
+def _hard_truncation_issue(unit: dict) -> str | None:
+    source = re.sub(
+        r"\s+",
+        " ",
+        str(unit.get("source") or ""),
+    ).strip()
+    translation = re.sub(
+        r"\s+",
+        " ",
+        str(unit.get("translation") or ""),
+    ).strip()
+    if len(source) < 120 or not translation:
+        return None
+    ratio = len(translation) / max(1, len(source))
+    if ratio >= 0.15:
+        return None
+    return (
+        f"item {unit['i']}: translation is severely truncated "
+        f"({len(translation)} vs {len(source)} characters)"
+    )
+
+
 def _hard_deterministic_review_issues(batch: list[dict]) -> list[str]:
     issues = []
     for unit in batch:
+        numeric_issue = _numeric_fidelity_issue(unit)
+        if numeric_issue:
+            issues.append(numeric_issue)
         year_issue = _year_fidelity_issue(unit)
-        if year_issue:
+        if year_issue and year_issue not in issues:
             issues.append(year_issue)
         protected_issue = _protected_literal_issue(unit)
         if protected_issue:
             issues.append(protected_issue)
+        untranslated_issue = _untranslated_copy_issue(unit)
+        if untranslated_issue:
+            issues.append(untranslated_issue)
+        truncation_issue = _hard_truncation_issue(unit)
+        if truncation_issue:
+            issues.append(truncation_issue)
     return issues
 
 
@@ -2692,7 +2723,7 @@ def _review_and_repair_localization(
                     # individual item. Avoid destructively rewriting the whole
                     # batch; let final materiality checks decide instead.
                     repair_ids = set()
-            if flagged_ids:
+            if repair_ids:
                 accepted_ids = batch_ids - repair_ids
                 reviewed.update(
                     {
