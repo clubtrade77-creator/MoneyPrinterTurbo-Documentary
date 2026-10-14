@@ -3101,7 +3101,10 @@ def localize_project(
                     for source_id, transcript in transcripts.items()
                 }
                 if (
-                    existing_plan.source_language == source_language
+                    existing_plan.semantic_reviewed
+                    and existing_plan.reviewed_content_fingerprint
+                    == _localized_scenes_fingerprint(existing_plan.scenes)
+                    and existing_plan.source_language == source_language
                     and existing_plan.target_language == target_language
                     and existing_plan.master_plan_fingerprint
                     == current_master_fingerprint
