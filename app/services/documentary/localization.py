@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
+from app.config import config
 from app.models.documentary import (
     DocumentaryProject,
     DocumentaryTranscript,
@@ -2932,13 +2933,28 @@ def localize_project(
             root=root,
         )
 
-    generator = generate_fn or llm_service.generate_text_precise
     if generate_fn is not None and review_fn is None:
         raise ValueError(
             "review_fn is required when generate_fn is supplied so custom "
             "localization cannot bypass semantic review"
         )
-    reviewer = review_fn or llm_service.generate_text_precise
+
+    llm_config_snapshot = dict(config.app)
+    if generate_fn is None:
+        generator = lambda prompt: llm_service.generate_text_precise(
+            prompt,
+            app_config=llm_config_snapshot,
+        )
+    else:
+        generator = generate_fn
+
+    if review_fn is None:
+        reviewer = lambda prompt: llm_service.generate_text_precise(
+            prompt,
+            app_config=llm_config_snapshot,
+        )
+    else:
+        reviewer = review_fn
     _report_localization_progress(progress, 0.0)
 
     current_prompt = prompt
