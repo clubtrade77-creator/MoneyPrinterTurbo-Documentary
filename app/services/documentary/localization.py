@@ -1172,15 +1172,25 @@ def _untranslated_copy_issue(unit: dict) -> str | None:
     if not source or source.casefold() != translation.casefold():
         return None
 
-    word_count = len(
-        re.findall(
-            r"[^\W\d_]+",
-            source,
-            flags=re.UNICODE,
-        )
+    words = re.findall(
+        r"[^\W\d_]+",
+        source,
+        flags=re.UNICODE,
     )
-    if word_count < 3:
+    if len(words) < 3:
         return None
+
+    # A sequence made entirely of title-cased/all-caps tokens is likely a person,
+    # organization, place, acronym, or title whose unchanged spelling can be valid
+    # in some target languages. Keep this detector conservative and leave such
+    # cases to semantic review.
+    if all(
+        word.isupper()
+        or (word[:1].isupper() and word[1:].islower())
+        for word in words
+    ):
+        return None
+
     return (
         f"item {unit['i']}: translation appears to be unchanged source-language "
         "prose rather than a translation"
