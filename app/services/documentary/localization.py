@@ -3081,6 +3081,48 @@ def localize_project(
         root=root,
     )
 
+    if not work_translations:
+        existing_path = localization_plan_path(
+            project_id,
+            target_language,
+            root,
+        )
+        if existing_path.is_file():
+            try:
+                existing_payload = json.loads(
+                    existing_path.read_text(encoding="utf-8")
+                )
+                existing_plan = LocalizationPlan.model_validate(
+                    existing_payload
+                )
+                current_master_fingerprint = master_plan_fingerprint(project)
+                current_transcript_fingerprints = {
+                    source_id: _transcript_fingerprint(transcript)
+                    for source_id, transcript in transcripts.items()
+                }
+                if (
+                    existing_plan.source_language == source_language
+                    and existing_plan.target_language == target_language
+                    and existing_plan.master_plan_fingerprint
+                    == current_master_fingerprint
+                    and existing_plan.transcript_fingerprints
+                    == current_transcript_fingerprints
+                ):
+                    _validate_candidate_against_source(
+                        existing_plan.scenes,
+                        source_scenes,
+                    )
+                    _, work_translations = _localized_translation_map(
+                        source_scenes,
+                        existing_plan.scenes,
+                    )
+                    # A prior final plan may be reused as translation text even
+                    # when the review policy changed. Re-review it under the
+                    # current policy instead of regenerating the language.
+                    work_reviewed = {}
+            except (OSError, json.JSONDecodeError, ValueError, LocalizationError):
+                pass
+
     def save_work(
         translations: dict[int, str],
         reviewed: dict[int, str] | None = None,
