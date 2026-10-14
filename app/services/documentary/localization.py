@@ -3228,6 +3228,112 @@ def _review_and_repair_localization(
             completed_weight / max(1, total_weight),
         )
 
+    if not unresolved_issues:
+        consistency_issues = _run_global_consistency_review(
+            reviewer=reviewer,
+            source_language=source_language,
+            target_language=target_language,
+            source_units=source_units,
+            translations=translations,
+        )
+        consistency_attempts = 0
+        while consistency_issues and consistency_attempts < 2:
+            consistency_attempts += 1
+            flagged_ids = {
+                item_id
+                for issue in consistency_issues
+                for item_id in _review_issue_item_ids(issue)
+                if item_id in source_units_by_id
+            }
+            if not flagged_ids:
+                break
+
+            repair_batch = [
+                source_units_by_id[item_id]
+                for item_id in sorted(flagged_ids)
+            ]
+            before = {
+                item_id: translations.get(item_id, "")
+                for item_id in flagged_ids
+            }
+            repaired = _repair_compact_review_batch(
+                generator=generator,
+                source_language=source_language,
+                target_language=target_language,
+                batch=repair_batch,
+                source_units=source_units,
+                translations=translations,
+                issues=consistency_issues,
+                status=status,
+                repair_attempt=consistency_attempts,
+                repair_attempts=2,
+            )
+            translations.update(repaired)
+            for item_id in repaired:
+                reviewed.pop(item_id, None)
+            if checkpoint is not None:
+                checkpoint(translations, reviewed)
+
+            localized_scenes = _assemble_compact_localization(
+                source_scenes,
+                source_units,
+                translations,
+            )
+            _validate_candidate_against_source(
+                localized_scenes,
+                source_scenes,
+            )
+
+            current_review_units = {
+                unit["i"]: unit
+                for unit in _localization_review_units(
+                    source_scenes,
+                    localized_scenes,
+                )
+            }
+            repaired_review_batch = [
+                current_review_units[item_id]
+                for item_id in sorted(flagged_ids)
+                if item_id in current_review_units
+            ]
+            semantic_issues = _filter_review_issues_for_batch(
+                [
+                    *_deterministic_review_issues(repaired_review_batch),
+                    *_run_compact_review_batch(
+                        reviewer=reviewer,
+                        source_language=source_language,
+                        target_language=target_language,
+                        batch=repaired_review_batch,
+                    ),
+                ],
+                repaired_review_batch,
+            )
+            if semantic_issues:
+                unresolved_issues.extend(semantic_issues)
+                break
+
+            for unit in repaired_review_batch:
+                reviewed[unit["i"]] = _review_unit_fingerprint(unit)
+            if checkpoint is not None:
+                checkpoint(translations, reviewed)
+
+            consistency_issues = _run_global_consistency_review(
+                reviewer=reviewer,
+                source_language=source_language,
+                target_language=target_language,
+                source_units=source_units,
+                translations=translations,
+            )
+            if repaired and all(
+                str(repaired.get(item_id, "")).strip()
+                == str(before.get(item_id, "")).strip()
+                for item_id in repaired
+            ):
+                break
+
+        if consistency_issues and not unresolved_issues:
+            unresolved_issues.extend(consistency_issues)
+
     return localized_scenes, unresolved_issues
 
 
