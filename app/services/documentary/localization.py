@@ -2139,6 +2139,9 @@ Check ONLY MATERIAL factual fidelity and translation completeness:
   ordinal/cardinal meaning, negation, attribution, uncertainty, legal/procedural
   status, person/party role, causality, temporal relationships, protected
   identifiers, or meaning;
+- numbers written as words are still numbers: preserve their exact numeric value and
+  preserve cardinal/ordinal meaning ("four" is not "fourth", and "third" is not
+  cardinal "three");
 - reject untranslated source-language prose that should have been translated;
 - reject a proper-name form only when it changes identity or creates a materially
   inconsistent identity across nearby translations;
