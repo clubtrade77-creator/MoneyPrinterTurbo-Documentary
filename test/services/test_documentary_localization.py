@@ -1534,6 +1534,123 @@ def test_generic_batch_issue_is_isolated_before_repair(
     assert "CURRENT ITEM ID:\n2" in repair_prompts[0]
 
 
+def test_noop_repair_goes_to_materiality_instead_of_repeating_all_passes(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_ITEMS",
+        2,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_CHARS",
+        100000,
+    )
+
+    repair_calls = []
+    final_checks = []
+
+    def generate(prompt: str) -> str:
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+            repair_calls.append(prompt)
+            item_id = int(
+                prompt.split("CURRENT ITEM ID:\n", 1)[1].splitlines()[0]
+            )
+            current = prompt.split(
+                "CURRENT TRANSLATION UNDER REVIEW:\n",
+                1,
+            )[1].split("\n\nNEXT SOURCE:", 1)[0]
+            return json.dumps(
+                {"items": [{"i": item_id, "text": current}]},
+                ensure_ascii=False,
+            )
+        return _russian_response()
+
+    def review(prompt: str) -> str:
+        if "FINAL MATERIALITY CHECK" in prompt:
+            final_checks.append(prompt)
+            return "PASS"
+        items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+        ids = [item["i"] for item in items]
+        if 2 in ids:
+            return json.dumps(
+                {
+                    "supported": False,
+                    "issues": ["item 2: different wording preferred"],
+                }
+            )
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert len(repair_calls) == 1
+    assert len(final_checks) == 1
+
+
+def test_prompts_explicitly_cover_word_numbers_ordinals_and_scope(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_THRESHOLD_CHARS",
+        1,
+    )
+    generation_prompts = []
+    review_prompts = []
+
+    def generate(prompt: str) -> str:
+        generation_prompts.append(prompt)
+        items = json.loads(prompt.split("INPUT ITEMS:\n", 1)[1])
+        translated = {
+            0: "Офицер подходит к автомобилю.",
+            1: "Записанная встреча",
+            2: "Офицер подошёл.",
+            3: "Всё изменилось.",
+        }
+        return json.dumps(
+            {
+                "items": [
+                    {"i": item["i"], "text": translated[item["i"]]}
+                    for item in items
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    def review(prompt: str) -> str:
+        review_prompts.append(prompt)
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert generation_prompts
+    assert "numbers written as WORDS" in generation_prompts[0]
+    assert "four" in generation_prompts[0]
+    assert "fourth" in generation_prompts[0]
+    assert "only/except/unless" in generation_prompts[0]
+    assert any(
+        "numbers written as words" in prompt
+        and "cardinal/ordinal" in prompt
+        for prompt in review_prompts
+    )
+
+
 def test_review_issue_parser_extracts_lists_ranges_and_repeated_items():
     assert _review_issue_item_ids(
         "items 86, 89 and 90: material errors"
