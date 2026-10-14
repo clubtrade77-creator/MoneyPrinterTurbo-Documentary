@@ -19,6 +19,8 @@ from app.services.documentary.localization import (
     LocalizationError,
     build_localization_prompt,
     _build_reviewer_config_snapshot,
+    _build_compact_localization_prompt,
+    _build_compact_review_prompt,
     _build_global_consistency_payload,
     _copied_source_span_issue,
     _global_consistency_batches,
@@ -2609,3 +2611,57 @@ def test_localization_prompt_covers_semantic_traps_and_review_policy_v5():
     assert "who did what to whom" in prompt
     assert "since/until/by" in prompt
     assert "Christmas Eve morning" in prompt
+
+
+def test_compact_localization_and_review_prompts_cover_semantic_traps():
+    source_batch = [
+        {
+            "i": 86,
+            "kind": "narration",
+            "previous_text": "Bayharr spoke earlier.",
+            "text": (
+                "Bayharr had to grapple with the reality that this could happen "
+                "almost anywhere in the country."
+            ),
+            "next_text": "It happened on Christmas Eve morning.",
+            "consistency_context": [],
+        }
+    ]
+    translation_prompt = _build_compact_localization_prompt(
+        source_language="en",
+        target_language="ru",
+        batch=source_batch,
+    )
+
+    assert "stable transliteration stem" in translation_prompt
+    assert "first dictionary sense" in translation_prompt
+    assert '"almost anywhere"' in translation_prompt
+    assert "who did what to whom" in translation_prompt
+    assert "silently back-check each item" in translation_prompt
+
+    review_prompt = _build_compact_review_prompt(
+        source_language="en",
+        target_language="ru",
+        batch=[
+            {
+                "i": 86,
+                "kind": "narration",
+                "previous_source": "Bayharr spoke earlier.",
+                "source": source_batch[0]["text"],
+                "next_source": "It happened on Christmas Eve morning.",
+                "previous_translation": "Ранее выступил Бейхарр.",
+                "translation": (
+                    "Бейхарр должен был бороться с реальностью, что это могло "
+                    "произойти в любой точке страны."
+                ),
+                "next_translation": (
+                    "Это произошло утром в канун Рождества."
+                ),
+            }
+        ],
+    )
+
+    assert "polysemous words" in review_prompt
+    assert '"almost anywhere"' in review_prompt
+    assert "who did what to whom" in review_prompt
+    assert "since/until/by" in review_prompt
