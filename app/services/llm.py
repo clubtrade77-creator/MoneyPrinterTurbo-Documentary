@@ -688,6 +688,7 @@ def _generate_ollama_precise(
         "think": False,
         "options": {
             "temperature": OLLAMA_PRECISE_TEMPERATURE,
+            "num_predict": 2048,
         },
     }
     request = urllib.request.Request(
