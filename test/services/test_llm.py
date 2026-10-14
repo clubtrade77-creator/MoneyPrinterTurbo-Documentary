@@ -351,6 +351,10 @@ class TestPreciseOllamaMode(unittest.TestCase):
             captured["payload"]["options"]["temperature"],
             llm.OLLAMA_PRECISE_TEMPERATURE,
         )
+        self.assertEqual(
+            captured["payload"]["options"]["num_predict"],
+            2048,
+        )
 
     def test_generate_text_precise_uses_native_ollama_path(self):
         app_config = {
