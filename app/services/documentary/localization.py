@@ -1727,6 +1727,23 @@ def _run_compact_review_batch(
     second_response = reviewer(pass_fail_prompt)
     try:
         return _parse_review(second_response)
+    except _NonRetryableLocalizationError as exc:
+        if _is_retryable_llm_timeout(exc) and len(batch) > 1:
+            midpoint = max(1, len(batch) // 2)
+            left_issues = _run_compact_review_batch(
+                reviewer=reviewer,
+                source_language=source_language,
+                target_language=target_language,
+                batch=batch[:midpoint],
+            )
+            right_issues = _run_compact_review_batch(
+                reviewer=reviewer,
+                source_language=source_language,
+                target_language=target_language,
+                batch=batch[midpoint:],
+            )
+            return left_issues + right_issues
+        raise
     except _LocalizationReviewSchemaError:
         pass
 
