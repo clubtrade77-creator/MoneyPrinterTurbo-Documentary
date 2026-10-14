@@ -1327,12 +1327,51 @@ def _protected_literal_issue(unit: dict) -> str | None:
     )
 
 
+def _year_fidelity_issue(unit: dict) -> str | None:
+    source_years = Counter(
+        re.findall(
+            r"\b(?:19|20)\d{2}\b",
+            str(unit.get("source") or ""),
+        )
+    )
+    if not source_years:
+        return None
+    translation_years = Counter(
+        re.findall(
+            r"\b(?:19|20)\d{2}\b",
+            str(unit.get("translation") or ""),
+        )
+    )
+    if source_years == translation_years:
+        return None
+    return (
+        f"item {unit['i']}: calendar year changed or disappeared; "
+        f"source years={dict(source_years)}, "
+        f"translation years={dict(translation_years)}"
+    )
+
+
+def _hard_deterministic_review_issues(batch: list[dict]) -> list[str]:
+    issues = []
+    for unit in batch:
+        year_issue = _year_fidelity_issue(unit)
+        if year_issue:
+            issues.append(year_issue)
+        protected_issue = _protected_literal_issue(unit)
+        if protected_issue:
+            issues.append(protected_issue)
+    return issues
+
+
 def _deterministic_review_issues(batch: list[dict]) -> list[str]:
     issues = []
     for unit in batch:
         numeric_issue = _numeric_fidelity_issue(unit)
         if numeric_issue:
             issues.append(numeric_issue)
+        year_issue = _year_fidelity_issue(unit)
+        if year_issue and year_issue not in issues:
+            issues.append(year_issue)
         untranslated_issue = _untranslated_copy_issue(unit)
         if untranslated_issue:
             issues.append(untranslated_issue)
@@ -2588,6 +2627,13 @@ def _review_and_repair_localization(
                         unit = latest_review_units.get(item_id)
                         if unit is None:
                             continue
+                        hard_issues = _hard_deterministic_review_issues(
+                            [unit]
+                        )
+                        if hard_issues:
+                            final_issues.extend(hard_issues)
+                            continue
+
                         item_issues = _run_final_materiality_review_item(
                             reviewer=reviewer,
                             source_language=source_language,
