@@ -28,8 +28,9 @@ COMPACT_LOCALIZATION_BATCH_ITEMS = 12
 COMPACT_REVIEW_THRESHOLD_CHARS = 5_000
 COMPACT_REVIEW_BATCH_CHARS = 1_800
 COMPACT_REVIEW_BATCH_ITEMS = 10
-CURRENT_LOCALIZATION_REVIEW_VERSION = 1
+CURRENT_LOCALIZATION_REVIEW_VERSION = 2
 _LOCALIZATION_WORK_VERSION = 1
+_LOCALIZATION_WORK_REVIEW_POLICY_VERSION = 2
 
 LocalizationProgressCallback = Callable[[float], None]
 LocalizationStatusCallback = Callable[[str, int, int, int, int], None]
@@ -158,14 +159,18 @@ def _load_localization_work(
             translations[item_id] = text
 
     reviewed: dict[int, str] = {}
-    for raw_id, raw_fingerprint in dict(payload.get("reviewed") or {}).items():
-        try:
-            item_id = int(raw_id)
-        except (TypeError, ValueError):
-            continue
-        fingerprint = str(raw_fingerprint or "").strip()
-        if fingerprint:
-            reviewed[item_id] = fingerprint
+    if (
+        payload.get("review_policy_version")
+        == _LOCALIZATION_WORK_REVIEW_POLICY_VERSION
+    ):
+        for raw_id, raw_fingerprint in dict(payload.get("reviewed") or {}).items():
+            try:
+                item_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            fingerprint = str(raw_fingerprint or "").strip()
+            if fingerprint:
+                reviewed[item_id] = fingerprint
     return translations, reviewed
 
 
@@ -182,6 +187,7 @@ def _save_localization_work(
         localization_work_path(project_id, target_language, root),
         {
             "version": _LOCALIZATION_WORK_VERSION,
+            "review_policy_version": _LOCALIZATION_WORK_REVIEW_POLICY_VERSION,
             "source_fingerprint": source_fingerprint,
             "translations": {
                 str(item_id): text
@@ -478,6 +484,30 @@ def _localization_text_units(source_scenes: list[dict]) -> list[dict]:
                 }
             )
             unit_index += 1
+
+    for position, unit in enumerate(units):
+        previous = ""
+        following = ""
+
+        def related(candidate: dict) -> bool:
+            if candidate["kind"] != unit["kind"]:
+                return False
+            if unit["kind"] == "subtitle":
+                return candidate["scene_index"] == unit["scene_index"]
+            return True
+
+        for candidate in reversed(units[:position]):
+            if related(candidate):
+                previous = candidate["text"]
+                break
+        for candidate in units[position + 1 :]:
+            if related(candidate):
+                following = candidate["text"]
+                break
+
+        unit["previous_text"] = previous
+        unit["next_text"] = following
+
     return units
 
 
@@ -517,28 +547,70 @@ def _build_compact_localization_prompt(
     batch: list[dict],
 ) -> str:
     payload = [
-        {"i": unit["i"], "text": unit["text"]}
+        {
+            "i": unit["i"],
+            "kind": unit["kind"],
+            "previous_source": unit.get("previous_text", ""),
+            "text": unit["text"],
+            "next_source": unit.get("next_text", ""),
+        }
         for unit in batch
     ]
     return f"""
-You are translating a compact batch of factual documentary text from
+You are translating a compact batch of FACTUAL documentary text from
 {source_language} to {target_language}.
 
-Translate ONLY the text. Preserve names, numbers, dates, attribution, uncertainty,
-and factual meaning. Do not add explanations or facts. Keep translations concise.
+For each item, translate ONLY the field "text".
+"previous_source" and "next_source" are CONTEXT ONLY. Use them to resolve pronouns,
+gender, tense, referents, and sentence fragments, but NEVER copy facts or words from
+context into the current translation unless they are literally present in "text".
+
+FIDELITY RULES — these override elegance and brevity:
+- Preserve every material fact and every meaning-changing modifier.
+- Preserve names and entity identity. Transliterate proper names consistently;
+  never literally translate a surname, organization, or place name into a different
+  meaning.
+- Preserve all numbers, years, dates, times, ranges, percentages, currencies,
+  measurements, ordinals/cardinals, and quantities.
+- Preserve negation and scope: "not", "never", "only", "no longer", etc.
+- Preserve uncertainty and evidentiary strength: "allegedly", "reportedly",
+  "apparently", "may", "might", "could", "likely", "according to", "police said".
+  Never turn an allegation or possibility into a fact.
+- Preserve quantifiers and limits: "almost", "nearly", "about", "approximately",
+  "at least", "at most", "more than", "less than", "up to", "as many as".
+- Preserve temporal relationships exactly: before/after, earlier/later,
+  previous/next, ago/from now, morning/evening/night, and eve/day distinctions.
+  An expression meaning "the eve/day before an event" must NOT become the event
+  day itself. A morning on that eve must remain a morning, not a night.
+- Preserve grammatical gender when source or context establishes it. If gender is
+  genuinely unknown and the target language would force an unsupported gender,
+  rephrase naturally rather than inventing one.
+- Translate idioms by MEANING, not word-for-word. Do not create nonsensical calques.
+- If "text" is a sentence fragment, translate it as that fragment. Do not complete
+  it with words from previous_source or next_source.
+- Preserve quotations and attribution. Do not move a quote or claim to another
+  speaker.
+- Keep terminology consistent across repeated names/events when context shows they
+  refer to the same thing.
+- Do not add explanations, background, connective facts, or emotional language.
+- Do not omit words merely to sound smoother.
+- Natural synonyms and normal target-language word order are allowed when meaning
+  is unchanged.
 
 Return exactly one JSON object:
 {{"items":[{{"i":0,"text":"translated text"}}]}}
 
-Rules:
+OUTPUT CONTRACT:
 - Return every input item exactly once and in the same order.
 - Preserve each integer "i" exactly.
-- "text" must contain the translation only.
+- "text" must contain the translation of that item's "text" field only.
+- Never merge, split, reorder, or shift content between item ids.
 - No markdown and no explanatory prose.
 
 INPUT ITEMS:
 {json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}
 """.strip()
+
 
 
 def _parse_compact_localization_response(
