@@ -10,13 +10,13 @@ from typing import Callable
 from uuid import uuid4
 
 from app.config import config
-from app.models.llm_provider import get_llm_provider
 from app.models.documentary import (
     DocumentaryProject,
     DocumentaryTranscript,
     LocalizationPlan,
     LocalizedSceneText,
 )
+from app.models.llm_provider import get_llm_provider
 from app.services import llm as llm_service
 from app.services.documentary.project import load_project, project_dir
 from app.services.documentary.transcription import load_source_transcript
