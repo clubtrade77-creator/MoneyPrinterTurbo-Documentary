@@ -2177,6 +2177,48 @@ def test_load_localization_plan_rejects_old_review_policy(tmp_path: Path):
         load_localization_plan(project.id, "ru", root=tmp_path)
 
 
+def test_review_policy_upgrade_reuses_existing_translation_without_regeneration(
+    tmp_path: Path,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    original = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=_approved_review,
+    )
+
+    path = localization_plan_path(project.id, "ru", tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["semantic_review_version"] = 0
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    def must_not_regenerate(prompt: str) -> str:
+        raise AssertionError(
+            "review policy upgrade must reuse existing translated text"
+        )
+
+    refreshed = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=must_not_regenerate,
+        review_fn=_approved_review,
+    )
+
+    assert refreshed.semantic_review_version == CURRENT_LOCALIZATION_REVIEW_VERSION
+    assert refreshed.scenes == original.scenes
+    assert load_localization_plan(
+        project.id,
+        "ru",
+        root=tmp_path,
+    ) == refreshed
+
+
 def test_localize_project_rejects_master_language_as_target(tmp_path: Path):
     project, _ = _project_with_localizable_scene(tmp_path)
 
