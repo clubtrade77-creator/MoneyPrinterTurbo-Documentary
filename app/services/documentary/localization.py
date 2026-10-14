@@ -2285,7 +2285,7 @@ def _split_review_issue_clauses(issues: list[str]) -> list[str]:
             + r"\s+#?\d+"
         )
         parts = re.split(
-            rf"(?:;|,)\s*(?={item_start}\s*:)"
+            rf"(?:;|,)\s*(?={item_start}\b)"
             rf"|\n+(?={item_start}\b)",
             text,
             flags=re.IGNORECASE,
