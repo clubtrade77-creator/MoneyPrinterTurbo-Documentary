@@ -1877,6 +1877,7 @@ def _run_compact_review_batch(
     source_language: str,
     target_language: str,
     batch: list[dict],
+    timeout_retry_attempt: int = 0,
 ) -> list[str]:
     prompt = _build_compact_review_prompt(
         source_language=source_language,
@@ -1902,6 +1903,14 @@ def _run_compact_review_batch(
                 batch=batch[midpoint:],
             )
             return left_issues + right_issues
+        if _is_retryable_llm_timeout(exc) and timeout_retry_attempt < 1:
+            return _run_compact_review_batch(
+                reviewer=reviewer,
+                source_language=source_language,
+                target_language=target_language,
+                batch=batch,
+                timeout_retry_attempt=timeout_retry_attempt + 1,
+            )
         raise
     except _LocalizationReviewSchemaError:
         pass
@@ -1951,6 +1960,14 @@ def _run_compact_review_batch(
                 batch=batch[midpoint:],
             )
             return left_issues + right_issues
+        if _is_retryable_llm_timeout(exc) and timeout_retry_attempt < 1:
+            return _run_compact_review_batch(
+                reviewer=reviewer,
+                source_language=source_language,
+                target_language=target_language,
+                batch=batch,
+                timeout_retry_attempt=timeout_retry_attempt + 1,
+            )
         raise
     except _LocalizationReviewSchemaError:
         pass
@@ -1987,6 +2004,16 @@ def _run_compact_review_batch(
     final_response = reviewer(final_prompt)
     try:
         return _parse_review(final_response)
+    except _NonRetryableLocalizationError as exc:
+        if _is_retryable_llm_timeout(exc) and timeout_retry_attempt < 1:
+            return _run_compact_review_batch(
+                reviewer=reviewer,
+                source_language=source_language,
+                target_language=target_language,
+                batch=batch,
+                timeout_retry_attempt=timeout_retry_attempt + 1,
+            )
+        raise
     except _LocalizationReviewSchemaError as exc:
         raise _LocalizationReviewSchemaError(
             "documentary localization reviewer could not produce PASS or FAIL "
