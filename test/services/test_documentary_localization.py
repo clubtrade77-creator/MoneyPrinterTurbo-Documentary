@@ -18,7 +18,10 @@ from app.services.documentary.localization import (
     CURRENT_LOCALIZATION_REVIEW_VERSION,
     LocalizationError,
     _build_reviewer_config_snapshot,
+    _build_global_consistency_payload,
     _copied_source_span_issue,
+    _global_consistency_batches,
+    _likely_consistency_keys,
     _review_issue_item_ids,
     _suspicious_length_issue,
     load_localization_plan,
@@ -1802,6 +1805,68 @@ def test_reviewer_config_rejects_unknown_provider():
                 "documentary_reviewer_provider": "not-a-provider",
             }
         )
+
+
+def test_consistency_keys_exclude_temporal_words_and_normalize_possessives():
+    assert "christmas" not in _likely_consistency_keys(
+        "Christmas Eve morning changed everything."
+    )
+    assert "morning" not in _likely_consistency_keys(
+        "Christmas Eve morning changed everything."
+    )
+    assert "bayharr" in _likely_consistency_keys(
+        "Bayharr arrived."
+    )
+    assert "bayharr" in _likely_consistency_keys(
+        "Bayharr's family arrived."
+    )
+
+
+def test_global_consistency_payload_dedupes_shared_name_sequences():
+    units = [
+        {"i": 0, "text": "John Smith arrived."},
+        {"i": 1, "text": "John Smith left."},
+    ]
+    translations = {
+        0: "Джон Смит прибыл.",
+        1: "Джон Смит ушёл.",
+    }
+
+    payload = _build_global_consistency_payload(units, translations)
+
+    assert len(payload) == 1
+    assert payload[0]["anchor"]["i"] == 0
+    assert payload[0]["repeats"][0]["i"] == 1
+
+
+def test_global_consistency_batches_are_bounded():
+    payload = [
+        {
+            "term": f"name{index}",
+            "anchor": {
+                "i": index * 2,
+                "source": "A" * 180,
+                "translation": "Б" * 180,
+            },
+            "repeats": [
+                {
+                    "i": index * 2 + 1,
+                    "source": "C" * 180,
+                    "translation": "Д" * 180,
+                }
+            ],
+        }
+        for index in range(12)
+    ]
+
+    batches = _global_consistency_batches(
+        payload,
+        max_chars=1200,
+        max_groups=3,
+    )
+
+    assert len(batches) > 1
+    assert all(len(batch) <= 3 for batch in batches)
 
 
 def test_review_issue_parser_extracts_lists_ranges_and_repeated_items():
