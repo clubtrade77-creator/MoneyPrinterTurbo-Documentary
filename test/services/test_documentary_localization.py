@@ -17,6 +17,7 @@ from app.models.documentary import (
 from app.services.documentary.localization import (
     CURRENT_LOCALIZATION_REVIEW_VERSION,
     LocalizationError,
+    build_localization_prompt,
     _build_reviewer_config_snapshot,
     _build_global_consistency_payload,
     _copied_source_span_issue,
@@ -2582,3 +2583,29 @@ def test_localize_project_rejects_master_language_as_target(tmp_path: Path):
             generate_fn=lambda prompt: _russian_response(),
             review_fn=_approved_review,
         )
+
+
+def test_localization_prompt_covers_semantic_traps_and_review_policy_v5():
+    prompt = build_localization_prompt(
+        source_language="en",
+        target_language="ru",
+        source_scenes=[
+            {
+                "scene_id": "scene_semantic_traps",
+                "narration_text": (
+                    "They had to grapple with the reality that it could happen "
+                    "almost anywhere in the country."
+                ),
+                "on_screen_text": "Christmas Eve morning",
+                "subtitle_segments": [],
+            }
+        ],
+    )
+
+    assert CURRENT_LOCALIZATION_REVIEW_VERSION >= 5
+    assert "phrasal verbs, collocations" in prompt
+    assert "first dictionary sense" in prompt
+    assert '"almost anywhere"' in prompt
+    assert "who did what to whom" in prompt
+    assert "since/until/by" in prompt
+    assert "Christmas Eve morning" in prompt
