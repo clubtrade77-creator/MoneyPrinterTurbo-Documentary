@@ -58,7 +58,7 @@ CLAUDE_CODE_SYSTEM_PROMPT = (
     "format exactly, and output nothing else."
 )
 CLAUDE_CODE_DEFAULT_TIMEOUT = 300.0
-OLLAMA_PRECISE_TIMEOUT_SECONDS = 240.0
+OLLAMA_PRECISE_TIMEOUT_SECONDS = 120.0
 OLLAMA_PRECISE_TEMPERATURE = 0.1
 # `--tools ""` 关闭全部内置工具，`--safe-mode` 关闭 CLAUDE.md、skills、hooks、
 # plugins、MCP 等所有用户级定制，同时保持鉴权、模型选择和权限正常工作。
