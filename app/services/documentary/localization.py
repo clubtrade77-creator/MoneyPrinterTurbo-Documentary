@@ -1787,6 +1787,18 @@ def _review_and_repair_localization(
                 if flagged_ids
                 else batch_ids
             )
+            if flagged_ids:
+                accepted_ids = batch_ids - repair_ids
+                reviewed.update(
+                    {
+                        item_id: current_fingerprints[item_id]
+                        for item_id in accepted_ids
+                        if item_id in current_fingerprints
+                    }
+                )
+                if checkpoint is not None:
+                    checkpoint(translations, reviewed)
+
             repair_batch = [
                 source_units_by_id[item_id]
                 for item_id in sorted(repair_ids)
