@@ -697,9 +697,15 @@ def _build_compact_localization_prompt(
         {
             "i": unit["i"],
             "kind": unit["kind"],
-            "previous_source": unit.get("previous_text", ""),
+            "previous_source": _compact_consistency_text(
+                unit.get("previous_text", ""),
+                max_chars=480,
+            ),
             "text": unit["text"],
-            "next_source": unit.get("next_text", ""),
+            "next_source": _compact_consistency_text(
+                unit.get("next_text", ""),
+                max_chars=480,
+            ),
             "consistency_context": unit.get("consistency_context", []),
         }
         for unit in batch
@@ -1960,12 +1966,24 @@ def _build_compact_review_prompt(
         {
             "i": unit["i"],
             "kind": unit["kind"],
-            "previous_source": unit.get("previous_source", ""),
+            "previous_source": _compact_consistency_text(
+                unit.get("previous_source", ""),
+                max_chars=480,
+            ),
             "source": unit["source"],
-            "next_source": unit.get("next_source", ""),
-            "previous_translation": unit.get("previous_translation", ""),
+            "next_source": _compact_consistency_text(
+                unit.get("next_source", ""),
+                max_chars=480,
+            ),
+            "previous_translation": _compact_consistency_text(
+                unit.get("previous_translation", ""),
+                max_chars=480,
+            ),
             "translation": unit["translation"],
-            "next_translation": unit.get("next_translation", ""),
+            "next_translation": _compact_consistency_text(
+                unit.get("next_translation", ""),
+                max_chars=480,
+            ),
         }
         for unit in batch
     ]
@@ -2346,6 +2364,8 @@ def _build_single_item_repair_prompt(
         source_units,
         unit,
     )
+    previous = _compact_consistency_text(previous, max_chars=480)
+    following = _compact_consistency_text(following, max_chars=480)
     repeated_keys = _repeated_consistency_keys(source_units)
     consistency_context = _with_consistency_context(
         [unit],
