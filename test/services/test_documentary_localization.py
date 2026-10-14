@@ -17,6 +17,7 @@ from app.models.documentary import (
 from app.services.documentary.localization import (
     CURRENT_LOCALIZATION_REVIEW_VERSION,
     LocalizationError,
+    _build_reviewer_config_snapshot,
     _review_issue_item_ids,
     _suspicious_length_issue,
     load_localization_plan,
@@ -1753,6 +1754,52 @@ def test_numeric_drift_cannot_be_approved_by_final_materiality(
             root=tmp_path,
             generate_fn=generate,
             review_fn=review,
+        )
+
+
+def test_reviewer_config_can_use_independent_provider_and_model():
+    base = {
+        "llm_provider": "ollama",
+        "ollama_model_name": "qwen3:8b",
+        "openai_api_key": "stored-key",
+        "documentary_reviewer_provider": "openai",
+        "documentary_reviewer_model_name": "gpt-5.5",
+    }
+
+    reviewer = _build_reviewer_config_snapshot(base)
+
+    assert reviewer is not base
+    assert reviewer["llm_provider"] == "openai"
+    assert reviewer["openai_model_name"] == "gpt-5.5"
+    assert reviewer["openai_api_key"] == "stored-key"
+    assert base["llm_provider"] == "ollama"
+    assert base["ollama_model_name"] == "qwen3:8b"
+
+
+def test_reviewer_config_can_override_model_on_same_provider():
+    base = {
+        "llm_provider": "ollama",
+        "ollama_model_name": "qwen3:8b",
+        "documentary_reviewer_model_name": "qwen3:14b",
+    }
+
+    reviewer = _build_reviewer_config_snapshot(base)
+
+    assert reviewer["llm_provider"] == "ollama"
+    assert reviewer["ollama_model_name"] == "qwen3:14b"
+    assert base["ollama_model_name"] == "qwen3:8b"
+
+
+def test_reviewer_config_rejects_unknown_provider():
+    with pytest.raises(
+        LocalizationError,
+        match="unsupported documentary reviewer provider",
+    ):
+        _build_reviewer_config_snapshot(
+            {
+                "llm_provider": "ollama",
+                "documentary_reviewer_provider": "not-a-provider",
+            }
         )
 
 
