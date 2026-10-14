@@ -2219,6 +2219,45 @@ def test_review_policy_upgrade_reuses_existing_translation_without_regeneration(
     ) == refreshed
 
 
+def test_review_policy_upgrade_does_not_reuse_tampered_final_plan(
+    tmp_path: Path,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=_approved_review,
+    )
+
+    path = localization_plan_path(project.id, "ru", tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["semantic_review_version"] = 0
+    payload["scenes"][0]["narration_text"] = "Подменённый перевод."
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    generation_calls = []
+
+    def regenerate(prompt: str) -> str:
+        generation_calls.append(prompt)
+        return _russian_response()
+
+    refreshed = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=regenerate,
+        review_fn=_approved_review,
+    )
+
+    assert generation_calls
+    assert refreshed.scenes[0].narration_text == "Офицер подходит к автомобилю."
+
+
 def test_localize_project_rejects_master_language_as_target(tmp_path: Path):
     project, _ = _project_with_localizable_scene(tmp_path)
 
