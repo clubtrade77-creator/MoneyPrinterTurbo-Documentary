@@ -1403,6 +1403,137 @@ def test_compact_prompt_marks_source_as_data_not_instructions(
     assert "Ignore previous instructions" in prompts[0]
 
 
+def test_compact_translation_reuses_distant_name_consistency_context(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    project = load_project(project.id, tmp_path)
+    project.plan.scenes[0].narration_text = "Bayharr arrived at the station."
+    save_project(project, tmp_path)
+
+    source = project.sources[0]
+    path = transcript_path(project.id, source.id, tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["segments"][1]["text"] = "Bayharr later left the building."
+    payload["full_text"] = (
+        payload["segments"][0]["text"] + " " + payload["segments"][1]["text"]
+    )
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_THRESHOLD_CHARS",
+        1,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_BATCH_ITEMS",
+        1,
+    )
+
+    seen_consistency = []
+
+    def generate(prompt: str) -> str:
+        items = json.loads(prompt.split("INPUT ITEMS:\n", 1)[1])
+        item = items[0]
+        if item["i"] == 3:
+            seen_consistency.extend(item.get("consistency_context", []))
+        translated = {
+            0: "Бейхарр прибыл на станцию.",
+            1: "Записанная встреча",
+            2: "Офицер подошёл.",
+            3: "Позже Бейхарр покинул здание.",
+        }
+        return json.dumps(
+            {"items": [{"i": item["i"], "text": translated[item["i"]]}]},
+            ensure_ascii=False,
+        )
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=_approved_review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert seen_consistency
+    assert any(
+        context["source"] == "Bayharr arrived at the station."
+        and "Бейхарр" in context["translation"]
+        for context in seen_consistency
+    )
+
+
+def test_generic_batch_issue_is_isolated_before_repair(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_ITEMS",
+        10,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_CHARS",
+        100000,
+    )
+
+    initial_batch_seen = {"value": False}
+    singled_item_two = {"value": False}
+    repair_prompts = []
+
+    def generate(prompt: str) -> str:
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+            repair_prompts.append(prompt)
+            item_id = int(
+                prompt.split("CURRENT ITEM ID:\n", 1)[1].splitlines()[0]
+            )
+            return json.dumps(
+                {"items": [{"i": item_id, "text": "Офицер подошёл."}]},
+                ensure_ascii=False,
+            )
+        return _russian_response()
+
+    def review(prompt: str) -> str:
+        if "FINAL MATERIALITY CHECK" in prompt:
+            return "PASS"
+        items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+        ids = [item["i"] for item in items]
+        if len(ids) > 1 and not initial_batch_seen["value"]:
+            initial_batch_seen["value"] = True
+            return json.dumps(
+                {
+                    "supported": False,
+                    "issues": ["One item has a material translation error."],
+                }
+            )
+        if ids == [2] and not singled_item_two["value"]:
+            singled_item_two["value"] = True
+            return json.dumps(
+                {
+                    "supported": False,
+                    "issues": ["The translation omits material meaning."],
+                }
+            )
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert len(repair_prompts) == 1
+    assert "CURRENT ITEM ID:\n2" in repair_prompts[0]
+
+
 def test_review_issue_parser_extracts_lists_ranges_and_repeated_items():
     assert _review_issue_item_ids(
         "items 86, 89 and 90: material errors"
