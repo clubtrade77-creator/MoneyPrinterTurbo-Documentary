@@ -1493,6 +1493,46 @@ def test_hard_year_drift_cannot_be_approved_by_final_materiality(
     assert final_checks == []
 
 
+def test_full_mode_resume_reuses_complete_translation_cache_after_review_crash(
+    tmp_path: Path,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    generate_calls = []
+
+    def first_generate(prompt: str) -> str:
+        generate_calls.append(prompt)
+        return _russian_response()
+
+    def crashing_review(prompt: str) -> str:
+        raise RuntimeError("full-mode review interrupted")
+
+    with pytest.raises(RuntimeError, match="full-mode review interrupted"):
+        localize_project(
+            project.id,
+            "ru",
+            root=tmp_path,
+            generate_fn=first_generate,
+            review_fn=crashing_review,
+        )
+
+    assert len(generate_calls) == 1
+    assert localization_work_path(project.id, "ru", tmp_path).is_file()
+
+    def must_not_generate(prompt: str) -> str:
+        raise AssertionError("complete full-mode translation cache must be reused")
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=must_not_generate,
+        review_fn=_approved_review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert not localization_work_path(project.id, "ru", tmp_path).exists()
+
+
 def test_localization_resume_reuses_translated_batches_after_review_crash(
     tmp_path: Path,
     monkeypatch,
