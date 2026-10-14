@@ -405,6 +405,15 @@ FIDELITY RULES — accuracy outranks elegance:
 - Preserve negation and its scope.
 - Preserve evidentiary strength: allegedly/reportedly/apparently/may/might/could/
   likely/according to/police said must not become an asserted fact.
+- Preserve legal/procedural status exactly. Arrested, detained, questioned, charged,
+  accused, suspected, convicted, sentenced, acquitted, and released are materially
+  different. A charge or allegation is not a conviction.
+- Preserve person/party roles exactly: suspect, defendant, victim, witness, officer,
+  prosecutor, attorney, judge, parent, child, spouse, sibling, etc. Do not swap or
+  upgrade roles.
+- Preserve death/injury causality and intent. "Died" does not automatically mean
+  "was killed"; "was killed" does not automatically mean "was murdered"; injured,
+  hospitalized, missing, and deceased are not interchangeable.
 - Preserve quantifiers and limits: almost/nearly/about/approximately/at least/
   at most/more than/less than/up to/as many as.
 - Preserve chronology precisely: before/after, earlier/later, previous/next,
@@ -744,6 +753,13 @@ FIDELITY RULES — these override elegance and brevity:
 - Preserve uncertainty and evidentiary strength: "allegedly", "reportedly",
   "apparently", "may", "might", "could", "likely", "according to", "police said".
   Never turn an allegation or possibility into a fact.
+- Preserve legal/procedural status exactly. arrested/detained/questioned/charged/
+  accused/suspected/convicted/sentenced/acquitted/released are not synonyms.
+- Preserve person/party roles exactly: suspect/defendant/victim/witness/officer/
+  prosecutor/attorney/judge and family relationships must not be swapped.
+- Preserve death/injury causality and intent: died/killed/murdered/injured/
+  hospitalized/missing/deceased are materially different unless the source itself
+  equates them.
 - Preserve quantifiers and limits: "almost", "nearly", "about", "approximately",
   "at least", "at most", "more than", "less than", "up to", "as many as".
 - Preserve temporal relationships exactly: before/after, earlier/later,
@@ -2003,8 +2019,9 @@ current translation to contain facts that appear only in a neighbor.
 Check ONLY MATERIAL factual fidelity and translation completeness:
 - reject additions or omissions of material facts;
 - reject changed identity, numbers, dates, times, quantities, tense when meaningful,
-  ordinal/cardinal meaning, negation, attribution, uncertainty, temporal
-  relationships, protected identifiers, or meaning;
+  ordinal/cardinal meaning, negation, attribution, uncertainty, legal/procedural
+  status, person/party role, causality, temporal relationships, protected
+  identifiers, or meaning;
 - reject untranslated source-language prose that should have been translated;
 - reject a proper-name form only when it changes identity or creates a materially
   inconsistent identity across nearby translations;
@@ -2017,6 +2034,10 @@ Check ONLY MATERIAL factual fidelity and translation completeness:
   event day, morning versus night, before versus after, previous versus next;
 - qualifiers are material: almost/nearly/about/at least/up to/reportedly/allegedly/
   may/might/could/according to must not disappear or become stronger facts;
+- legal/procedural status is material: arrested/charged/convicted/sentenced and
+  suspect/victim/witness roles must not be interchanged;
+- causality/status is material: died/killed/murdered/injured/missing/deceased must
+  not be strengthened, weakened, or swapped without source support;
 - do not critique style, punctuation, or harmless grammar unless it changes meaning.
 
 Before rejecting an item, ask: "Would a viewer learn a materially different fact
@@ -2445,6 +2466,9 @@ Preserve:
 - quantifiers such as almost/nearly/about/at least/up to;
 - chronology and time-of-day/eve distinctions;
 - ambiguity when the source itself is ambiguous;
+- legal/procedural status, person/party role, family relationship, and death/injury
+  causality exactly as stated; never strengthen allegation into guilt or death into
+  murder;
 - whether the source is a complete sentence or only a fragment;
 - URLs, email addresses, handles, hashtags, form/model/case identifiers.
 
@@ -2611,8 +2635,8 @@ FAIL only for a real semantic difference such as:
 - changed number/date/time/quantity, including numbers written as words;
 - changed meaningful past/present/future tense or ordinal/cardinal meaning;
 - omitted/added only/except/unless/without or another material scope limiter;
-- changed negation, attribution, uncertainty, chronology, ambiguity, or material
-  qualifier;
+- changed negation, attribution, uncertainty, chronology, ambiguity, legal status,
+  person/party role, causality, or material qualifier;
 - changed protected identifier or entity identity;
 - event-day/eve or morning/night confusion;
 - untranslated material source prose.
