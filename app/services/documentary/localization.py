@@ -1970,8 +1970,6 @@ def _split_review_issue_clauses(issues: list[str]) -> list[str]:
 def _review_issue_item_ids(issue: str) -> set[int]:
     """Extract explicit localization item ids without treating dates as ids."""
     text = str(issue or "")
-    ids: set[int] = []
-
     matches = re.finditer(
         r"\bitems?\s+"
         r"((?:\d+(?:\s*[-–]\s*\d+)?)"
