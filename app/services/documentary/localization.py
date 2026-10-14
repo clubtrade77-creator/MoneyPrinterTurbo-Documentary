@@ -634,6 +634,11 @@ _CONSISTENCY_STOPWORDS = {
     "lawyer", "prosecutor", "suspect", "defendant", "victim", "witness",
     "family", "mother", "father", "parent", "child", "son", "daughter",
     "man", "woman", "boy", "girl", "court", "hospital", "department",
+    # Common components shared by unrelated proper names must not make two
+    # entities look identical (New York vs New Jersey, San Diego vs San Francisco).
+    "new", "san", "saint", "st", "north", "south", "east", "west",
+    "united", "states", "city", "county", "state", "district", "university",
+    "center", "centre", "school", "office", "agency",
 }
 
 
