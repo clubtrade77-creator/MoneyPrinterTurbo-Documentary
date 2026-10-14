@@ -300,6 +300,104 @@ class TestScriptPromptOptions(unittest.TestCase):
             )
 
 
+class TestPreciseOllamaMode(unittest.TestCase):
+    def test_ollama_native_base_url_strips_openai_v1_suffix(self):
+        self.assertEqual(
+            llm._ollama_native_base_url("http://localhost:11434/v1/"),
+            "http://localhost:11434",
+        )
+
+    def test_generate_ollama_precise_disables_thinking_and_lowers_temperature(self):
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {"message": {"content": "OK"}},
+                ).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["timeout"] = timeout
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+        with patch.object(
+            llm.urllib.request,
+            "urlopen",
+            side_effect=fake_urlopen,
+        ):
+            result = llm._generate_ollama_precise(
+                prompt="Return JSON only.",
+                model_name="qwen3:8b",
+                base_url="http://localhost:11434/v1",
+            )
+
+        self.assertEqual(result, "OK")
+        self.assertEqual(captured["url"], "http://localhost:11434/api/chat")
+        self.assertEqual(
+            captured["timeout"],
+            llm.OLLAMA_PRECISE_TIMEOUT_SECONDS,
+        )
+        self.assertIs(captured["payload"]["think"], False)
+        self.assertIs(captured["payload"]["stream"], False)
+        self.assertEqual(
+            captured["payload"]["options"]["temperature"],
+            llm.OLLAMA_PRECISE_TEMPERATURE,
+        )
+
+    def test_generate_text_precise_uses_native_ollama_path(self):
+        app_config = {
+            "llm_provider": "ollama",
+            "ollama_model_name": "qwen3:8b",
+            "ollama_base_url": "http://localhost:11434/v1",
+        }
+        with patch.object(
+            llm,
+            "_generate_ollama_precise",
+            return_value="precise",
+        ) as generate:
+            result = llm.generate_text_precise(
+                "Translate.",
+                app_config=app_config,
+            )
+
+        self.assertEqual(result, "precise")
+        generate.assert_called_once_with(
+            prompt="Translate.",
+            model_name="qwen3:8b",
+            base_url="http://localhost:11434/v1",
+        )
+
+    def test_generate_text_precise_keeps_other_providers_on_normal_dispatcher(self):
+        app_config = {
+            "llm_provider": "openai",
+            "openai_api_key": "test",
+            "openai_model_name": "test-model",
+        }
+        with patch.object(
+            llm,
+            "_generate_response",
+            return_value="normal",
+        ) as generate:
+            result = llm.generate_text_precise(
+                "Translate.",
+                app_config=app_config,
+            )
+
+        self.assertEqual(result, "normal")
+        generate.assert_called_once_with(
+            prompt="Translate.",
+            app_config=app_config,
+        )
+
+
 class TestLLMConnection(unittest.TestCase):
     def test_connection_sends_one_minimal_request(self):
         """连接测试只发送一次固定最小请求，不触发脚本生成重试。"""
