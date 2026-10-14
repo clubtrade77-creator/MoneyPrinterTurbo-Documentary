@@ -6,6 +6,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from time import perf_counter
 from typing import List
 
@@ -56,6 +58,8 @@ CLAUDE_CODE_SYSTEM_PROMPT = (
     "format exactly, and output nothing else."
 )
 CLAUDE_CODE_DEFAULT_TIMEOUT = 300.0
+OLLAMA_PRECISE_TIMEOUT_SECONDS = 240.0
+OLLAMA_PRECISE_TEMPERATURE = 0.1
 # `--tools ""` 关闭全部内置工具，`--safe-mode` 关闭 CLAUDE.md、skills、hooks、
 # plugins、MCP 等所有用户级定制，同时保持鉴权、模型选择和权限正常工作。
 # 二者需要较新的 CLI；低版本会以 "unknown option" 退出，由调用处转成明确提示。
@@ -655,6 +659,113 @@ def _generate_response(prompt: str, app_config=None) -> str:
                     logger.warning(
                         f"could not close LLM transport: {type(cleanup_error).__name__}"
                     )
+
+
+def _ollama_native_base_url(base_url: str) -> str:
+    value = str(base_url or "").strip().rstrip("/")
+    if value.endswith("/v1"):
+        value = value[:-3].rstrip("/")
+    return value
+
+
+def _generate_ollama_precise(
+    *,
+    prompt: str,
+    model_name: str,
+    base_url: str,
+    timeout_seconds: float = OLLAMA_PRECISE_TIMEOUT_SECONDS,
+) -> str:
+    native_base_url = _ollama_native_base_url(base_url)
+    if not native_base_url:
+        raise ValueError("ollama precise mode requires a base URL")
+    if not model_name:
+        raise ValueError("ollama precise mode requires a model name")
+
+    payload = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "think": False,
+        "options": {
+            "temperature": OLLAMA_PRECISE_TEMPERATURE,
+        },
+    }
+    request = urllib.request.Request(
+        f"{native_base_url}/api/chat",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=timeout_seconds,
+        ) as response:
+            body = response.read().decode("utf-8")
+    except TimeoutError as exc:
+        raise TimeoutError(
+            f"ollama precise request timed out after {timeout_seconds:g}s"
+        ) from exc
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", exc)
+        if isinstance(reason, TimeoutError):
+            raise TimeoutError(
+                f"ollama precise request timed out after {timeout_seconds:g}s"
+            ) from exc
+        raise
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise ValueError("ollama precise mode returned invalid JSON") from exc
+
+    message = payload.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    return _normalize_text_response(content, "ollama")
+
+
+def generate_text_precise(prompt: str, app_config=None) -> str:
+    """Low-variance text generation for factual documentary localization.
+
+    Ollama uses its native chat API so Qwen3-style thinking can be disabled
+    explicitly. Other providers retain the normal dispatcher behavior.
+    """
+    runtime_app_config = app_config if app_config is not None else config.app
+    llm_provider = str(
+        runtime_app_config.get("llm_provider", DEFAULT_LLM_PROVIDER_ID)
+    ).lower()
+
+    if llm_provider != "ollama":
+        return _generate_response(
+            prompt=prompt,
+            app_config=app_config,
+        )
+
+    provider = get_llm_provider("ollama")
+    if provider is None:
+        return "Error: ollama: unsupported llm provider"
+
+    configured_model = runtime_app_config.get(
+        provider.config_key("model_name"),
+        "",
+    )
+    model_name = provider.resolve_model_name(configured_model)
+    configured_base_url = runtime_app_config.get(
+        provider.config_key("base_url"),
+        "",
+    )
+    base_url = provider.resolve_base_url(configured_base_url)
+    if not base_url:
+        base_url = config.get_default_ollama_base_url()
+
+    try:
+        return _generate_ollama_precise(
+            prompt=prompt,
+            model_name=model_name,
+            base_url=base_url,
+        )
+    except Exception as exc:
+        return f"Error: {_sanitize_error_message(exc)}"
 
 
 def generate_text(prompt: str, app_config=None) -> str:
