@@ -29,9 +29,9 @@ COMPACT_LOCALIZATION_BATCH_ITEMS = 12
 COMPACT_REVIEW_THRESHOLD_CHARS = 5_000
 COMPACT_REVIEW_BATCH_CHARS = 1_800
 COMPACT_REVIEW_BATCH_ITEMS = 10
-CURRENT_LOCALIZATION_REVIEW_VERSION = 2
+CURRENT_LOCALIZATION_REVIEW_VERSION = 3
 _LOCALIZATION_WORK_VERSION = 1
-_LOCALIZATION_WORK_REVIEW_POLICY_VERSION = 2
+_LOCALIZATION_WORK_REVIEW_POLICY_VERSION = 3
 
 LocalizationProgressCallback = Callable[[float], None]
 LocalizationStatusCallback = Callable[[str, int, int, int, int], None]
@@ -1779,6 +1779,20 @@ def _review_issue_item_ids(issue: str) -> set[int]:
     return ids
 
 
+def _filter_review_issues_for_batch(
+    issues: list[str],
+    batch: list[dict],
+) -> list[str]:
+    valid_ids = {unit["i"] for unit in batch}
+    filtered = []
+    for issue in _split_review_issue_clauses(issues):
+        issue_ids = _review_issue_item_ids(issue)
+        if issue_ids and not (issue_ids & valid_ids):
+            continue
+        filtered.append(issue)
+    return filtered
+
+
 def _issues_for_item(
     issues: list[str],
     item_id: int,
@@ -2113,11 +2127,12 @@ def _review_and_repair_localization(
                 target_language=target_language,
                 batch=review_batch,
             )
-            batch_issues = _split_review_issue_clauses(
+            batch_issues = _filter_review_issues_for_batch(
                 [
                     *deterministic_issues,
                     *reviewer_issues,
-                ]
+                ],
+                review_batch,
             )
 
         if batch_issues:
@@ -2199,7 +2214,7 @@ def _review_and_repair_localization(
                     for item_id in sorted(repair_ids)
                     if item_id in updated_review_units
                 ]
-                batch_issues = _split_review_issue_clauses(
+                batch_issues = _filter_review_issues_for_batch(
                     [
                         *_deterministic_review_issues(updated_batch),
                         *_run_compact_review_batch(
@@ -2208,7 +2223,8 @@ def _review_and_repair_localization(
                             target_language=target_language,
                             batch=updated_batch,
                         ),
-                    ]
+                    ],
+                    updated_batch,
                 )
                 if not batch_issues:
                     reviewed.update(
@@ -2242,8 +2258,11 @@ def _review_and_repair_localization(
                         localized_scenes,
                     )
                 }
-                remaining_ids = set().union(
-                    *(_review_issue_item_ids(issue) for issue in batch_issues)
+                remaining_ids = (
+                    set().union(
+                        *(_review_issue_item_ids(issue) for issue in batch_issues)
+                    )
+                    & batch_ids
                 )
                 final_issues: list[str] = []
                 if remaining_ids:
