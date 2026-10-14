@@ -2834,11 +2834,17 @@ def _review_and_repair_localization(
                             for issue in closure_issues
                         )
                     )
-                    repair_ids = (
-                        batch_ids & closure_flagged_ids
-                        if closure_flagged_ids
-                        else batch_ids
-                    )
+                    if closure_flagged_ids:
+                        repair_ids = batch_ids & closure_flagged_ids
+                    else:
+                        repair_ids = _identify_review_issue_items(
+                            reviewer=reviewer,
+                            source_language=source_language,
+                            target_language=target_language,
+                            batch=closure_batch,
+                        )
+                        if not repair_ids:
+                            generic_materiality_ids = set(batch_ids)
                     for item_id in repair_ids:
                         reviewed.pop(item_id, None)
                     repair_batch = [
