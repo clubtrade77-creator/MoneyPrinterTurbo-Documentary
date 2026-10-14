@@ -2304,6 +2304,13 @@ def _build_single_item_repair_prompt(
         source_units,
         unit,
     )
+    repeated_keys = _repeated_consistency_keys(source_units)
+    consistency_context = _with_consistency_context(
+        [unit],
+        all_units=source_units,
+        translations=translations,
+        repeated_keys=repeated_keys,
+    )[0].get("consistency_context", [])
     position = next(
         (
             index
@@ -2410,8 +2417,13 @@ NEXT SOURCE:
 NEXT TRANSLATION:
 {next_translation}
 
-Neighbor translations are context only. Use them for consistent names, gender, and
-terminology; never copy their facts into CURRENT ITEM.
+CONSISTENCY EXAMPLES:
+{json.dumps(consistency_context, ensure_ascii=False, separators=(",", ":"))}
+
+Neighbor translations and consistency examples are context only. Use them for
+consistent names, gender, and terminology; never copy their facts into CURRENT ITEM.
+When the same opaque name appears again, preserve the same transliteration stem
+unless normal target-language inflection requires a case ending.
 
 Return exactly one JSON object and nothing else:
 {{"items":[{{"i":{unit["i"]},"text":"corrected translation of CURRENT SOURCE only"}}]}}
