@@ -1282,14 +1282,22 @@ def _protected_literal_tokens(text: str) -> set[str]:
             value,
         )
     )
-    tokens.update(
-        re.findall(
-            r"\b(?=[A-Za-z0-9-]*[A-Za-z])(?=[A-Za-z0-9-]*\d)"
-            r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\b",
-            value,
-        )
+    mixed_candidates = re.findall(
+        r"\b(?=[A-Za-z0-9-]*[A-Za-z])(?=[A-Za-z0-9-]*\d)"
+        r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\b",
+        value,
     )
-    return tokens
+    for candidate in mixed_candidates:
+        alpha_parts = re.findall(r"[A-Za-z]+", candidate)
+        if any(part.isupper() for part in alpha_parts):
+            tokens.add(candidate)
+
+    cleaned = set()
+    for token in tokens:
+        if token.lower().startswith(("http://", "https://")):
+            token = token.rstrip(".,;:!?)]}")
+        cleaned.add(token)
+    return cleaned
 
 
 def _protected_literal_issue(unit: dict) -> str | None:
@@ -1962,21 +1970,39 @@ def _split_review_issue_clauses(issues: list[str]) -> list[str]:
 def _review_issue_item_ids(issue: str) -> set[int]:
     """Extract explicit localization item ids without treating dates as ids."""
     text = str(issue or "")
-    ids: set[int] = set()
-    for match in re.finditer(
-        r"\bitems?\s+(\d+)(?:\s*[-–]\s*(\d+))?",
+    ids: set[int] = []
+
+    matches = re.finditer(
+        r"\bitems?\s+"
+        r"((?:\d+(?:\s*[-–]\s*\d+)?)"
+        r"(?:\s*(?:,|&|and)\s*\d+(?:\s*[-–]\s*\d+)?)*)",
         text,
         flags=re.IGNORECASE,
-    ):
-        start = int(match.group(1))
-        end_text = match.group(2)
-        if end_text is None:
-            ids.add(start)
-            continue
-        end = int(end_text)
-        if 0 <= end - start <= 50:
-            ids.update(range(start, end + 1))
-    return ids
+    )
+    parsed: set[int] = set()
+    for match in matches:
+        sequence = match.group(1)
+        for token in re.split(
+            r"\s*(?:,|&|and)\s*",
+            sequence,
+            flags=re.IGNORECASE,
+        ):
+            range_match = re.fullmatch(
+                r"(\d+)(?:\s*[-–]\s*(\d+))?",
+                token.strip(),
+            )
+            if not range_match:
+                continue
+            first = int(range_match.group(1))
+            last_text = range_match.group(2)
+            if last_text is None:
+                parsed.add(first)
+                continue
+            last = int(last_text)
+            if 0 <= last - first <= 50:
+                parsed.update(range(first, last + 1))
+    return parsed
+
 
 
 def _filter_review_issues_for_batch(
