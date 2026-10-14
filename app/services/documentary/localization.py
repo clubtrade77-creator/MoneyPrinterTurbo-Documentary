@@ -620,6 +620,20 @@ _CONSISTENCY_STOPWORDS = {
     "his", "i", "in", "it", "its", "of", "on", "or", "she", "that", "the",
     "their", "they", "this", "to", "we", "with", "you",
     "de", "del", "el", "en", "la", "las", "los", "un", "una", "y",
+    # Temporal/calendar/event words are context-sensitive compounds. Reusing a
+    # prior translation of "Christmas" inside "Christmas Eve" can create a
+    # factual date error, so they must not drive consistency memory.
+    "christmas", "eve", "day", "morning", "afternoon", "evening", "night",
+    "today", "tomorrow", "yesterday", "monday", "tuesday", "wednesday",
+    "thursday", "friday", "saturday", "sunday", "january", "february",
+    "march", "april", "may", "june", "july", "august", "september",
+    "october", "november", "december",
+    # Generic documentary/legal roles also change by context and are not entity
+    # names whose transliteration needs cross-batch memory.
+    "police", "officer", "detective", "sheriff", "judge", "attorney",
+    "lawyer", "prosecutor", "suspect", "defendant", "victim", "witness",
+    "family", "mother", "father", "parent", "child", "son", "daughter",
+    "man", "woman", "boy", "girl", "court", "hospital", "department",
 }
 
 
