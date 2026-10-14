@@ -381,12 +381,14 @@ Translate only human-readable text. Do not change scene_id, source_id, segment_i
 scene order, or subtitle order.
 
 FIDELITY RULES — accuracy outranks elegance:
+- Produce grammatical, natural target-language text without changing source meaning.
 - Do not add facts, explanations, connective background, dates, names, allegations,
   legal conclusions, motives, or emotional framing absent from the source.
 - Do not omit any material fact, qualification, attribution, uncertainty, negation,
   quantity, or temporal relationship.
-- Preserve entity identity and transliterate proper names consistently. Never
-  literally translate a surname, organization, or place name into another meaning.
+- Preserve entity identity. Transliterate personal/opaque proper names consistently.
+  Descriptive organization/place names may use an established natural
+  target-language rendering, but the entity identity must not change.
 - Preserve every numeral used as a numeral in the source. Preserve years, dates,
   times, ranges, percentages, currencies, measurements, ordinals/cardinals, and
   quantities. Formatting may adapt to the target language, but numeric value must
@@ -400,9 +402,10 @@ FIDELITY RULES — accuracy outranks elegance:
   at most/more than/less than/up to/as many as.
 - Preserve chronology precisely: before/after, earlier/later, previous/next,
   ago/from now, morning/evening/night, eve/day distinctions. Keep relative dates
-  relative and never invent an absolute date. An eve/day-before
-  expression must not become the event day itself; a morning on that eve must
-  remain a morning, not a night.
+  relative and never invent an absolute date. An eve/day-before expression must
+  not become the event day itself; a morning on that eve must remain a morning,
+  not a night. "Christmas Eve morning" is the morning on the day before Christmas
+  Day, not Christmas Day or a Christmas night.
 - Preserve grammatical gender when the source establishes it. If gender is unknown
   and the target language would force an unsupported gender, rephrase naturally
   rather than inventing one.
@@ -622,10 +625,11 @@ gender, tense, referents, and sentence fragments, but NEVER copy facts or words 
 context into the current translation unless they are literally present in "text".
 
 FIDELITY RULES — these override elegance and brevity:
+- Produce grammatical, natural target-language text while preserving source meaning.
 - Preserve every material fact and every meaning-changing modifier.
-- Preserve names and entity identity. Transliterate proper names consistently;
-  never literally translate a surname, organization, or place name into a different
-  meaning.
+- Preserve names and entity identity. Transliterate personal/opaque proper names
+  consistently. Descriptive organization/place names may use an established natural
+  target-language rendering, but the entity identity must not change.
 - Preserve all numbers, years, dates, times, ranges, percentages, currencies,
   measurements, ordinals/cardinals, and quantities.
 - Preserve tense and aspect when they carry time meaning: past, present, and future
@@ -641,7 +645,9 @@ FIDELITY RULES — these override elegance and brevity:
   Keep relative dates relative; never invent an absolute calendar date that the
   source does not state.
   An expression meaning "the eve/day before an event" must NOT become the event
-  day itself. A morning on that eve must remain a morning, not a night.
+  day itself. A morning on that eve must remain a morning, not a night. For example,
+  "Christmas Eve morning" means the morning on the day before Christmas Day; it is
+  not Christmas Day and it is not a Christmas night.
 - Preserve grammatical gender when source or context establishes it. If gender is
   genuinely unknown and the target language would force an unsupported gender,
   rephrase naturally rather than inventing one.
@@ -660,7 +666,7 @@ FIDELITY RULES — these override elegance and brevity:
 - Keep terminology consistent across repeated names/events when context shows they
   refer to the same thing.
 - Do not add explanations, background, connective facts, or emotional language.
-- Do not omit words merely to sound smoother.
+- Do not omit meaning-bearing content or modifiers merely to sound smoother.
 - Natural synonyms and normal target-language word order are allowed when meaning
   is unchanged.
 
