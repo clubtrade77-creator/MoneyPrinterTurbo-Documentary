@@ -1136,22 +1136,29 @@ def _canonical_numeric_tokens(text: str) -> Counter[str]:
     return Counter(re.findall(r"\d+", value))
 
 
-def _validate_numeric_fidelity(
-    source_text: str,
-    translated_text: str,
-    *,
-    label: str,
-) -> None:
-    source_numbers = _canonical_numeric_tokens(source_text)
+def _numeric_fidelity_issue(unit: dict) -> str | None:
+    source_numbers = _canonical_numeric_tokens(unit.get("source", ""))
     if not source_numbers:
-        return
-    translated_numbers = _canonical_numeric_tokens(translated_text)
-    if source_numbers != translated_numbers:
-        raise _LocalizationSchemaError(
-            "documentary localization changed numeric information: "
-            f"{label}; source={dict(source_numbers)} "
-            f"translation={dict(translated_numbers)}"
-        )
+        return None
+    translated_numbers = _canonical_numeric_tokens(
+        unit.get("translation", "")
+    )
+    if source_numbers == translated_numbers:
+        return None
+    return (
+        f"item {unit['i']}: numeric information changed; "
+        f"source numbers={dict(source_numbers)}, "
+        f"translation numbers={dict(translated_numbers)}"
+    )
+
+
+def _deterministic_review_issues(batch: list[dict]) -> list[str]:
+    issues = []
+    for unit in batch:
+        numeric_issue = _numeric_fidelity_issue(unit)
+        if numeric_issue:
+            issues.append(numeric_issue)
+    return issues
 
 
 def _validate_candidate_against_source(
@@ -1182,19 +1189,6 @@ def _validate_candidate_against_source(
                 f"{localized.scene_id}"
             )
 
-        if source_narration:
-            _validate_numeric_fidelity(
-                source_narration,
-                localized.narration_text,
-                label=f"{localized.scene_id}/narration",
-            )
-        if source_on_screen:
-            _validate_numeric_fidelity(
-                source_on_screen,
-                localized.on_screen_text,
-                label=f"{localized.scene_id}/on_screen",
-            )
-
         expected_refs = [
             (item["source_id"], item["segment_id"])
             for item in source["subtitle_segments"]
@@ -1209,18 +1203,6 @@ def _validate_candidate_against_source(
                 f"{localized.scene_id}"
             )
 
-        for source_subtitle, localized_subtitle in zip(
-            source["subtitle_segments"],
-            localized.subtitle_segments,
-        ):
-            _validate_numeric_fidelity(
-                str(source_subtitle.get("text") or ""),
-                localized_subtitle.text,
-                label=(
-                    f"{localized.scene_id}/subtitle/"
-                    f"{source_subtitle.get('segment_id')}"
-                ),
-            )
 
 
 def build_localization_review_prompt(
@@ -1242,13 +1224,17 @@ def build_localization_review_prompt(
         },
     }
     prompt = (
-        "Review this documentary translation for factual fidelity and target-language "
-        "completeness. Reject additions, omissions, changed attribution, changed "
-        "uncertainty, changed names/numbers/dates, meaning changes, or untranslated "
-        "source-language prose that should have been translated. Proper names and "
-        "conventional identical forms may remain unchanged. Do not critique style. "
-        'Return JSON only: {"supported": true, "issues": []} when faithful, or '
-        '{"supported": false, "issues": ["specific issue"]} when not.\n\n'
+        "Review this documentary translation ONLY for material factual fidelity and "
+        "target-language completeness. Reject additions, omissions, changed identity, "
+        "numbers, dates, times, quantities, negation, attribution, uncertainty, "
+        "chronology, or meaning. Preserve distinctions such as almost vs absolute, "
+        "alleged vs factual, before/eve vs event day, morning vs night. Accept natural "
+        "synonyms, reasonable transliteration variants, grammatical inflection, idioms, "
+        "and word order when meaning is unchanged. Do not critique style or demand a "
+        "preferred literal wording. Before rejecting, ask whether a viewer would learn "
+        "a materially different fact. Return JSON only: "
+        '{"supported": true, "issues": []} when faithful, or '
+        '{"supported": false, "issues": ["specific material issue"]} when not.\n\n'
         + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     )
     if len(prompt) > MAX_LOCALIZATION_REVIEW_PROMPT_CHARS:
@@ -2021,18 +2007,25 @@ def _review_and_repair_localization(
             unit["i"]: _review_unit_fingerprint(unit)
             for unit in review_batch
         }
+        deterministic_issues = _deterministic_review_issues(
+            review_batch
+        )
         if all(
             reviewed.get(item_id) == fingerprint
             for item_id, fingerprint in current_fingerprints.items()
-        ):
+        ) and not deterministic_issues:
             batch_issues = []
         else:
-            batch_issues = _run_compact_review_batch(
+            reviewer_issues = _run_compact_review_batch(
                 reviewer=reviewer,
                 source_language=source_language,
                 target_language=target_language,
                 batch=review_batch,
             )
+            batch_issues = [
+                *deterministic_issues,
+                *reviewer_issues,
+            ]
 
         if batch_issues:
             batch_ids = {
@@ -2113,12 +2106,15 @@ def _review_and_repair_localization(
                     for item_id in sorted(repair_ids)
                     if item_id in updated_review_units
                 ]
-                batch_issues = _run_compact_review_batch(
-                    reviewer=reviewer,
-                    source_language=source_language,
-                    target_language=target_language,
-                    batch=updated_batch,
-                )
+                batch_issues = [
+                    *_deterministic_review_issues(updated_batch),
+                    *_run_compact_review_batch(
+                        reviewer=reviewer,
+                        source_language=source_language,
+                        target_language=target_language,
+                        batch=updated_batch,
+                    ),
+                ]
                 if not batch_issues:
                     reviewed.update(
                         {
