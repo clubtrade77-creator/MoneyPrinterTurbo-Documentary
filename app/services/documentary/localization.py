@@ -742,6 +742,7 @@ def _translate_compact_batch(
     target_language: str,
     batch: list[dict],
     generator: Callable[[str], str],
+    on_partial: Callable[[dict[int, str]], None] | None = None,
 ) -> dict[int, str]:
     if not batch:
         return {}
@@ -758,6 +759,8 @@ def _translate_compact_batch(
             response,
             batch,
         )
+        if translated and on_partial is not None:
+            on_partial(translated)
     except _NonRetryableLocalizationError as exc:
         if _is_retryable_llm_timeout(exc) and len(batch) > 1:
             midpoint = max(1, len(batch) // 2)
@@ -766,12 +769,14 @@ def _translate_compact_batch(
                 target_language=target_language,
                 batch=batch[:midpoint],
                 generator=generator,
+                on_partial=on_partial,
             )
             right = _translate_compact_batch(
                 source_language=source_language,
                 target_language=target_language,
                 batch=batch[midpoint:],
                 generator=generator,
+                on_partial=on_partial,
             )
             return {**left, **right}
         raise
@@ -784,12 +789,14 @@ def _translate_compact_batch(
             target_language=target_language,
             batch=batch[:midpoint],
             generator=generator,
+            on_partial=on_partial,
         )
         right = _translate_compact_batch(
             source_language=source_language,
             target_language=target_language,
             batch=batch[midpoint:],
             generator=generator,
+            on_partial=on_partial,
         )
         return {**left, **right}
 
@@ -809,6 +816,7 @@ def _translate_compact_batch(
                 target_language=target_language,
                 batch=missing,
                 generator=generator,
+                on_partial=on_partial,
             )
         )
         return translated
@@ -939,12 +947,18 @@ def _localize_compact(
             index,
             len(batches),
         )
+        def on_partial(partial: dict[int, str]) -> None:
+            translations.update(partial)
+            if checkpoint is not None:
+                checkpoint(translations)
+
         translations.update(
             _translate_compact_batch(
                 source_language=source_language,
                 target_language=target_language,
                 batch=missing,
                 generator=generator,
+                on_partial=on_partial,
             )
         )
         if checkpoint is not None:
