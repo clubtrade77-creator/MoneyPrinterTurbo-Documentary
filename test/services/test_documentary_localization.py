@@ -1651,6 +1651,111 @@ def test_prompts_explicitly_cover_word_numbers_ordinals_and_scope(
     )
 
 
+def test_generic_batch_issue_not_reproduced_does_not_rewrite_batch(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_ITEMS",
+        10,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_CHARS",
+        100000,
+    )
+
+    first_batch = {"value": True}
+    repair_calls = []
+    final_checks = []
+
+    def generate(prompt: str) -> str:
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+            repair_calls.append(prompt)
+        return _russian_response()
+
+    def review(prompt: str) -> str:
+        if "FINAL MATERIALITY CHECK" in prompt:
+            final_checks.append(prompt)
+            return "PASS"
+        items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+        if len(items) > 1 and first_batch["value"]:
+            first_batch["value"] = False
+            return json.dumps(
+                {
+                    "supported": False,
+                    "issues": ["There may be a material problem in this batch."],
+                }
+            )
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert repair_calls == []
+    assert final_checks
+
+
+def test_numeric_drift_cannot_be_approved_by_final_materiality(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    project = load_project(project.id, tmp_path)
+    project.plan.scenes[0].narration_text = "The search lasted 10 hours."
+    save_project(project, tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_THRESHOLD_CHARS",
+        1,
+    )
+
+    def generate(prompt: str) -> str:
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+            item_id = int(
+                prompt.split("CURRENT ITEM ID:\n", 1)[1].splitlines()[0]
+            )
+            return json.dumps(
+                {"items": [{"i": item_id, "text": "Поиски длились 11 часов."}]},
+                ensure_ascii=False,
+            )
+        items = json.loads(prompt.split("INPUT ITEMS:\n", 1)[1])
+        translated = {
+            0: "Поиски длились 11 часов.",
+            1: "Записанная встреча",
+            2: "Офицер подошёл.",
+            3: "Всё изменилось.",
+        }
+        return json.dumps(
+            {
+                "items": [
+                    {"i": item["i"], "text": translated[item["i"]]}
+                    for item in items
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    def review(prompt: str) -> str:
+        if "FINAL MATERIALITY CHECK" in prompt:
+            return "PASS"
+        return json.dumps({"supported": True, "issues": []})
+
+    with pytest.raises(LocalizationError, match="numeric information changed"):
+        localize_project(
+            project.id,
+            "ru",
+            root=tmp_path,
+            generate_fn=generate,
+            review_fn=review,
+        )
+
+
 def test_review_issue_parser_extracts_lists_ranges_and_repeated_items():
     assert _review_issue_item_ids(
         "items 86, 89 and 90: material errors"
