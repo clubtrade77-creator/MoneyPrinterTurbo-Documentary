@@ -2121,16 +2121,29 @@ context into the current item. Never continue a neighboring sentence unless thos
 words are literally present in CURRENT SOURCE.
 
 Preserve:
-- exact factual meaning;
-- names and proper nouns;
-- numbers, dates, tense, grammatical gender, attribution, and uncertainty;
-- whether the source is a complete sentence or only a fragment.
+- exact factual meaning and every meaning-bearing modifier;
+- entity identity and consistent personal/opaque proper-name transliteration;
+- numbers, dates, times, quantities, tense/aspect when meaningful, ordinal versus
+  cardinal meaning, grammatical gender, negation, attribution, and uncertainty;
+- quantifiers such as almost/nearly/about/at least/up to;
+- chronology and time-of-day/eve distinctions;
+- ambiguity when the source itself is ambiguous;
+- whether the source is a complete sentence or only a fragment;
+- URLs, email addresses, handles, hashtags, form/model/case identifiers.
 
-Do not add missing words from neighboring items.
-Do not omit words that are present in CURRENT SOURCE.
+Produce grammatical, natural target-language text. Translate idioms by meaning,
+not word-for-word. Descriptive organization/place names may use an established
+target-language rendering as long as entity identity does not change.
+
+Do not add missing facts from neighboring items.
+Do not omit meaning-bearing content from CURRENT SOURCE.
 Do not move content to or from another item.
-For proper nouns, preserve the canonical name instead of inventing a literal
-translation.
+Do not invent an absolute date from a relative date.
+Do not silently "correct" awkward or possibly mistranscribed source text by
+inventing facts.
+An eve/day-before expression must not become the event day itself. For example,
+"Christmas Eve morning" is the morning on the day before Christmas Day, not
+Christmas Day and not a Christmas night.
 
 REVIEW ISSUES FOR THIS ITEM ONLY:
 {issue_text}
