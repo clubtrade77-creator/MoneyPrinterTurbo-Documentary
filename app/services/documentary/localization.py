@@ -770,6 +770,7 @@ def _translate_compact_batch(
     batch: list[dict],
     generator: Callable[[str], str],
     on_partial: Callable[[dict[int, str]], None] | None = None,
+    single_retry_attempt: int = 0,
 ) -> dict[int, str]:
     if not batch:
         return {}
@@ -806,9 +807,27 @@ def _translate_compact_batch(
                 on_partial=on_partial,
             )
             return {**left, **right}
+        if _is_retryable_llm_timeout(exc) and single_retry_attempt < 1:
+            return _translate_compact_batch(
+                source_language=source_language,
+                target_language=target_language,
+                batch=batch,
+                generator=generator,
+                on_partial=on_partial,
+                single_retry_attempt=single_retry_attempt + 1,
+            )
         raise
     except _LocalizationSchemaError:
         if len(batch) == 1:
+            if single_retry_attempt < 1:
+                return _translate_compact_batch(
+                    source_language=source_language,
+                    target_language=target_language,
+                    batch=batch,
+                    generator=generator,
+                    on_partial=on_partial,
+                    single_retry_attempt=single_retry_attempt + 1,
+                )
             raise
         midpoint = max(1, len(batch) // 2)
         left = _translate_compact_batch(
