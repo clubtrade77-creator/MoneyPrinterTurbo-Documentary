@@ -10,6 +10,7 @@ from typing import Callable
 from uuid import uuid4
 
 from app.config import config
+from app.models.llm_provider import get_llm_provider
 from app.models.documentary import (
     DocumentaryProject,
     DocumentaryTranscript,
@@ -3120,6 +3121,50 @@ def _retry_prompt(base_prompt: str, error: Exception, attempt: int) -> str:
     )
 
 
+def _build_reviewer_config_snapshot(base_snapshot: dict) -> dict:
+    provider_override = str(
+        base_snapshot.get("documentary_reviewer_provider") or ""
+    ).strip().lower()
+    model_override = str(
+        base_snapshot.get("documentary_reviewer_model_name") or ""
+    ).strip()
+    base_url_override = str(
+        base_snapshot.get("documentary_reviewer_base_url") or ""
+    ).strip()
+    api_key_override = str(
+        base_snapshot.get("documentary_reviewer_api_key") or ""
+    ).strip()
+
+    if not any(
+        (
+            provider_override,
+            model_override,
+            base_url_override,
+            api_key_override,
+        )
+    ):
+        return base_snapshot
+
+    provider_id = provider_override or str(
+        base_snapshot.get("llm_provider") or ""
+    ).strip().lower()
+    provider = get_llm_provider(provider_id)
+    if provider is None:
+        raise LocalizationError(
+            f"unsupported documentary reviewer provider: {provider_id}"
+        )
+
+    reviewer_snapshot = dict(base_snapshot)
+    reviewer_snapshot["llm_provider"] = provider_id
+    if model_override:
+        reviewer_snapshot[provider.config_key("model_name")] = model_override
+    if base_url_override:
+        reviewer_snapshot[provider.config_key("base_url")] = base_url_override
+    if api_key_override:
+        reviewer_snapshot[provider.config_key("api_key")] = api_key_override
+    return reviewer_snapshot
+
+
 def localize_project(
     project_id: str,
     target_language: str,
@@ -3234,14 +3279,24 @@ def localize_project(
             config.app
         )
 
+    reviewer_config_snapshot = _build_reviewer_config_snapshot(
+        llm_config_snapshot
+    )
+
     def default_precise_generation(prompt: str) -> str:
         return llm_service.generate_text_precise(
             prompt,
             app_config=llm_config_snapshot,
         )
 
+    def default_precise_review(prompt: str) -> str:
+        return llm_service.generate_text_precise(
+            prompt,
+            app_config=reviewer_config_snapshot,
+        )
+
     generator = generate_fn or default_precise_generation
-    reviewer = review_fn or default_precise_generation
+    reviewer = review_fn or default_precise_review
     _report_localization_progress(progress, 0.0)
 
     current_prompt = prompt
