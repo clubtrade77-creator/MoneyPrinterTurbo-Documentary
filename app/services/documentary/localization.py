@@ -712,18 +712,17 @@ def _parse_compact_localization_response(
     expected_ids = {unit["i"] for unit in batch}
     translated: dict[int, str] = {}
 
-    # A plain string array has no stable ids. It is safe only when the model
-    # returned exactly one string for every requested item in order.
+    # A plain string array has no stable ids. For documentary fidelity it is
+    # safe only for a single requested item; multi-item positional mapping can
+    # silently shift translations between neighboring ids.
     if items and all(isinstance(item, str) for item in items):
-        if len(items) != len(batch):
+        if len(batch) != 1 or len(items) != 1:
             raise _LocalizationSchemaError(
-                "compact documentary localization returned unidentifiable partial items"
+                "compact documentary localization returned items without stable ids"
             )
-        for expected, item in zip(batch, items):
-            text = item.strip()
-            if not text:
-                continue
-            translated[expected["i"]] = text
+        text = items[0].strip()
+        if text:
+            translated[batch[0]["i"]] = text
         return translated
 
     for item in items:
