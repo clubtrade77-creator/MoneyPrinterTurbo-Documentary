@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Callable
 from uuid import uuid4
@@ -365,23 +366,52 @@ def build_localization_prompt(
         separators=(",", ":"),
     )
     prompt = f"""
-You are localizing a documentary timeline from {source_language} to {target_language}.
+You are localizing a FACTUAL documentary timeline from
+{source_language} to {target_language}.
 
-Translate only the human-readable text. Do not change scene_id, source_id, or segment_id.
-Do not add facts, explanations, dates, names, numbers, allegations, legal conclusions,
-or emotional framing that are absent from the source.
-Do not omit factual qualifications or uncertainty.
-Preserve names, numbers, dates, quoted claims, and attribution faithfully.
-For narration_text, keep the translation concise and close to the source's likely
-spoken duration. Prefer natural compact phrasing over expansion, while preserving
-every material fact, qualification, attribution, and uncertainty.
-An empty narration_text or on_screen_text must remain an empty string.
-Every source scene must appear exactly once and in the same order.
-Every subtitle segment must appear exactly once and in the same order.
-The top-level JSON object must contain one "scenes" array. Do not wrap it in
-"translation", "translations", "result", "output", or add explanatory prose.
-Inside each scene, preserve the exact field names shown below.
-Return JSON only, with exactly this shape:
+Translate only human-readable text. Do not change scene_id, source_id, segment_id,
+scene order, or subtitle order.
+
+FIDELITY RULES — accuracy outranks elegance:
+- Do not add facts, explanations, connective background, dates, names, allegations,
+  legal conclusions, motives, or emotional framing absent from the source.
+- Do not omit any material fact, qualification, attribution, uncertainty, negation,
+  quantity, or temporal relationship.
+- Preserve entity identity and transliterate proper names consistently. Never
+  literally translate a surname, organization, or place name into another meaning.
+- Preserve every numeral used as a numeral in the source. Preserve years, dates,
+  times, ranges, percentages, currencies, measurements, ordinals/cardinals, and
+  quantities. Formatting may adapt to the target language, but numeric value must
+  not change.
+- Preserve negation and its scope.
+- Preserve evidentiary strength: allegedly/reportedly/apparently/may/might/could/
+  likely/according to/police said must not become an asserted fact.
+- Preserve quantifiers and limits: almost/nearly/about/approximately/at least/
+  at most/more than/less than/up to/as many as.
+- Preserve chronology precisely: before/after, earlier/later, previous/next,
+  ago/from now, morning/evening/night, eve/day distinctions. An eve/day-before
+  expression must not become the event day itself; a morning on that eve must
+  remain a morning, not a night.
+- Preserve grammatical gender when the source establishes it. If gender is unknown
+  and the target language would force an unsupported gender, rephrase naturally
+  rather than inventing one.
+- Translate idioms by meaning, not word-for-word. Avoid nonsensical calques.
+- If a source field is a sentence fragment, translate it as a fragment. Do not
+  finish it using words from another field or neighboring scene.
+- Preserve quotations and speaker/claim attribution.
+- Natural synonyms, idioms, inflection, and target-language word order are allowed
+  when meaning is unchanged.
+- For narration_text, keep spoken duration reasonably close, but NEVER shorten by
+  deleting material meaning.
+- Empty narration_text or on_screen_text must remain empty.
+
+STRUCTURE RULES:
+- Every source scene appears exactly once and in the same order.
+- Every subtitle segment appears exactly once and in the same order.
+- Never merge, split, reorder, or shift content between scenes or subtitle segments.
+- The top-level JSON object contains one "scenes" array only.
+- Do not wrap output in translation/translations/result/output.
+- Return JSON only, with exactly this shape:
 {{
   "scenes": [
     {{
@@ -407,6 +437,7 @@ SOURCE:
             "documentary localization prompt exceeds safe size; split the project"
         )
     return prompt
+
 
 
 def _decode_localization_json(response_text: str):
@@ -1093,6 +1124,36 @@ def _parse_candidate(
 
 
 
+def _canonical_numeric_tokens(text: str) -> Counter[str]:
+    value = str(text or "")
+    # Normalize common thousands separators while leaving decimal/date/time
+    # separators to be compared as their digit components.
+    value = re.sub(
+        r"(?<=\d)[,\s\u00a0\u202f'’](?=\d{3}(?:\D|$))",
+        "",
+        value,
+    )
+    return Counter(re.findall(r"\d+", value))
+
+
+def _validate_numeric_fidelity(
+    source_text: str,
+    translated_text: str,
+    *,
+    label: str,
+) -> None:
+    source_numbers = _canonical_numeric_tokens(source_text)
+    if not source_numbers:
+        return
+    translated_numbers = _canonical_numeric_tokens(translated_text)
+    if source_numbers != translated_numbers:
+        raise _LocalizationSchemaError(
+            "documentary localization changed numeric information: "
+            f"{label}; source={dict(source_numbers)} "
+            f"translation={dict(translated_numbers)}"
+        )
+
+
 def _validate_candidate_against_source(
     localized_scenes: list[LocalizedSceneText],
     source_scenes: list[dict],
@@ -1121,6 +1182,19 @@ def _validate_candidate_against_source(
                 f"{localized.scene_id}"
             )
 
+        if source_narration:
+            _validate_numeric_fidelity(
+                source_narration,
+                localized.narration_text,
+                label=f"{localized.scene_id}/narration",
+            )
+        if source_on_screen:
+            _validate_numeric_fidelity(
+                source_on_screen,
+                localized.on_screen_text,
+                label=f"{localized.scene_id}/on_screen",
+            )
+
         expected_refs = [
             (item["source_id"], item["segment_id"])
             for item in source["subtitle_segments"]
@@ -1133,6 +1207,19 @@ def _validate_candidate_against_source(
             raise LocalizationError(
                 f"documentary localization changed subtitle evidence refs: "
                 f"{localized.scene_id}"
+            )
+
+        for source_subtitle, localized_subtitle in zip(
+            source["subtitle_segments"],
+            localized.subtitle_segments,
+        ):
+            _validate_numeric_fidelity(
+                str(source_subtitle.get("text") or ""),
+                localized_subtitle.text,
+                label=(
+                    f"{localized.scene_id}/subtitle/"
+                    f"{source_subtitle.get('segment_id')}"
+                ),
             )
 
 
@@ -1353,7 +1440,9 @@ def _localization_review_units(
 ) -> list[dict]:
     units = []
     unit_index = 0
-    for source_scene, localized_scene in zip(source_scenes, localized_scenes):
+    for scene_index, (source_scene, localized_scene) in enumerate(
+        zip(source_scenes, localized_scenes)
+    ):
         pairs = [
             (
                 str(source_scene.get("narration_text") or "").strip(),
@@ -1371,6 +1460,7 @@ def _localization_review_units(
                 units.append(
                     {
                         "i": unit_index,
+                        "scene_index": scene_index,
                         "kind": kind,
                         "source": source_text,
                         "translation": localized_text,
@@ -1389,6 +1479,7 @@ def _localization_review_units(
             units.append(
                 {
                     "i": unit_index,
+                    "scene_index": scene_index,
                     "kind": "subtitle",
                     "source": source_text,
                     "translation": localized_text,
@@ -1406,7 +1497,7 @@ def _localization_review_units(
             if candidate["kind"] != unit["kind"]:
                 return False
             if unit["kind"] == "subtitle":
-                return True
+                return candidate["scene_index"] == unit["scene_index"]
             return True
 
         for candidate in reversed(units[:position]):
