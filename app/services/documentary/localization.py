@@ -641,6 +641,8 @@ def _likely_consistency_keys(text: str) -> set[str]:
     keys: set[str] = set()
     for word in re.findall(r"[^\W\d_][^\W\d_’'’-]*", str(text or ""), re.UNICODE):
         normalized = word.casefold()
+        if normalized.endswith(("'s", "’s")) and len(normalized) > 4:
+            normalized = normalized[:-2]
         if len(normalized) < 3 or normalized in _CONSISTENCY_STOPWORDS:
             continue
         if word.isupper() or word.istitle():
