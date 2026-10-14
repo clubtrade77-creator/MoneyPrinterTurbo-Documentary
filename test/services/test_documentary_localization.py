@@ -1557,6 +1557,91 @@ def test_localization_resume_reuses_translated_batches_after_review_crash(
     assert not localization_work_path(project.id, "ru", tmp_path).exists()
 
 
+def test_old_review_policy_reuses_translation_cache_but_rechecks_review(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_THRESHOLD_CHARS",
+        1,
+    )
+    first_review_calls = []
+
+    translated = {
+        0: "Офицер подходит к автомобилю.",
+        1: "Записанная встреча",
+        2: "Офицер подошёл.",
+        3: "Всё изменилось.",
+    }
+
+    def first_generate(prompt: str) -> str:
+        items = json.loads(prompt.split("INPUT ITEMS:\n", 1)[1])
+        return json.dumps(
+            {
+                "items": [
+                    {"i": item["i"], "text": translated[item["i"]]}
+                    for item in items
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    def crash_after_review(prompt: str) -> str:
+        first_review_calls.append(prompt)
+        if len(first_review_calls) == 1:
+            return json.dumps({"supported": True, "issues": []})
+        raise RuntimeError("stop after first reviewed batch")
+
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_ITEMS",
+        2,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_CHARS",
+        100000,
+    )
+
+    with pytest.raises(RuntimeError, match="stop after first reviewed batch"):
+        localize_project(
+            project.id,
+            "ru",
+            root=tmp_path,
+            generate_fn=first_generate,
+            review_fn=crash_after_review,
+        )
+
+    work_path = localization_work_path(project.id, "ru", tmp_path)
+    payload = json.loads(work_path.read_text(encoding="utf-8"))
+    assert payload["translations"]
+    assert payload["reviewed"]
+    payload["review_policy_version"] = 0
+    work_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    review_calls = []
+
+    def must_not_translate(prompt: str) -> str:
+        raise AssertionError("old review policy must not discard saved translations")
+
+    def review_again(prompt: str) -> str:
+        review_calls.append(prompt)
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=must_not_translate,
+        review_fn=review_again,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert len(review_calls) == 2
+
+
 def test_localization_resume_skips_reviewed_batches_after_review_crash(
     tmp_path: Path,
     monkeypatch,
