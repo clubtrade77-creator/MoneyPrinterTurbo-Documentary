@@ -2940,21 +2940,15 @@ def localize_project(
         )
 
     llm_config_snapshot = dict(config.app)
-    if generate_fn is None:
-        generator = lambda prompt: llm_service.generate_text_precise(
-            prompt,
-            app_config=llm_config_snapshot,
-        )
-    else:
-        generator = generate_fn
 
-    if review_fn is None:
-        reviewer = lambda prompt: llm_service.generate_text_precise(
+    def default_precise_generation(prompt: str) -> str:
+        return llm_service.generate_text_precise(
             prompt,
             app_config=llm_config_snapshot,
         )
-    else:
-        reviewer = review_fn
+
+    generator = generate_fn or default_precise_generation
+    reviewer = review_fn or default_precise_generation
     _report_localization_progress(progress, 0.0)
 
     current_prompt = prompt
