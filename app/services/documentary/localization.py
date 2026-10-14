@@ -514,6 +514,7 @@ def _localization_text_units(source_scenes: list[dict]) -> list[dict]:
                     "scene_index": scene_index,
                     "kind": "subtitle",
                     "subtitle_index": subtitle_index,
+                    "source_id": str(subtitle.get("source_id") or ""),
                     "text": text,
                 }
             )
@@ -527,7 +528,10 @@ def _localization_text_units(source_scenes: list[dict]) -> list[dict]:
             if candidate["kind"] != unit["kind"]:
                 return False
             if unit["kind"] == "subtitle":
-                return candidate["scene_index"] == unit["scene_index"]
+                return (
+                    candidate.get("source_id")
+                    and candidate.get("source_id") == unit.get("source_id")
+                )
             return True
 
         for candidate in reversed(units[:position]):
@@ -1158,12 +1162,40 @@ def _numeric_fidelity_issue(unit: dict) -> str | None:
     )
 
 
+def _untranslated_copy_issue(unit: dict) -> str | None:
+    source = re.sub(r"\s+", " ", str(unit.get("source") or "")).strip()
+    translation = re.sub(
+        r"\s+",
+        " ",
+        str(unit.get("translation") or ""),
+    ).strip()
+    if not source or source.casefold() != translation.casefold():
+        return None
+
+    word_count = len(
+        re.findall(
+            r"[^\W\d_]+",
+            source,
+            flags=re.UNICODE,
+        )
+    )
+    if word_count < 3:
+        return None
+    return (
+        f"item {unit['i']}: translation appears to be unchanged source-language "
+        "prose rather than a translation"
+    )
+
+
 def _deterministic_review_issues(batch: list[dict]) -> list[str]:
     issues = []
     for unit in batch:
         numeric_issue = _numeric_fidelity_issue(unit)
         if numeric_issue:
             issues.append(numeric_issue)
+        untranslated_issue = _untranslated_copy_issue(unit)
+        if untranslated_issue:
+            issues.append(untranslated_issue)
     return issues
 
 
@@ -1473,6 +1505,7 @@ def _localization_review_units(
                     "i": unit_index,
                     "scene_index": scene_index,
                     "kind": "subtitle",
+                    "source_id": str(source_subtitle.get("source_id") or ""),
                     "source": source_text,
                     "translation": localized_text,
                 }
@@ -1489,7 +1522,10 @@ def _localization_review_units(
             if candidate["kind"] != unit["kind"]:
                 return False
             if unit["kind"] == "subtitle":
-                return candidate["scene_index"] == unit["scene_index"]
+                return (
+                    candidate.get("source_id")
+                    and candidate.get("source_id") == unit.get("source_id")
+                )
             return True
 
         for candidate in reversed(units[:position]):
@@ -1724,7 +1760,10 @@ def _repair_context_for_unit(
         if candidate["kind"] != unit["kind"]:
             return False
         if unit["kind"] == "subtitle":
-            return candidate["scene_index"] == unit["scene_index"]
+            return (
+                candidate.get("source_id")
+                and candidate.get("source_id") == unit.get("source_id")
+            )
         return True
 
     for candidate in reversed(source_units[:position]):
@@ -1847,7 +1886,10 @@ def _build_single_item_repair_prompt(
                 candidate["kind"] == unit["kind"]
                 and (
                     unit["kind"] != "subtitle"
-                    or candidate["scene_index"] == unit["scene_index"]
+                    or (
+                        candidate.get("source_id")
+                        and candidate.get("source_id") == unit.get("source_id")
+                    )
                 )
             ):
                 previous_translation = translations.get(candidate["i"], "")
@@ -1857,7 +1899,10 @@ def _build_single_item_repair_prompt(
                 candidate["kind"] == unit["kind"]
                 and (
                     unit["kind"] != "subtitle"
-                    or candidate["scene_index"] == unit["scene_index"]
+                    or (
+                        candidate.get("source_id")
+                        and candidate.get("source_id") == unit.get("source_id")
+                    )
                 )
             ):
                 next_translation = translations.get(candidate["i"], "")
