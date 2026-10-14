@@ -399,7 +399,7 @@ def test_unresolved_semantic_batch_does_not_retry_whole_language(
         if "Repair ONLY this rejected documentary translation item" in prompt
     ]
     assert len(full_generation_calls) == 1
-    assert len(repair_calls) == 6
+    assert len(repair_calls) == 8
 
 
 def test_compact_review_accepts_minimal_pass_after_unclear_json(
@@ -1013,13 +1013,82 @@ def test_localize_project_repairs_semantically_rejected_translation(
     )
 
     assert plan.target_language == "ru"
-    assert len(review_calls) == 2
+    assert len(review_calls) == 3
     assert len(generate_calls) == 5
     assert all(
         "Repair ONLY this rejected documentary translation item" in prompt
         for prompt in generate_calls[1:]
     )
 
+
+
+def test_closure_review_can_find_and_repair_a_second_item(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_ITEMS",
+        2,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_CHARS",
+        100000,
+    )
+    repaired_ids = []
+    review_round = {"value": 0}
+
+    def generate(prompt: str) -> str:
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+            item_id = int(
+                prompt.split("CURRENT ITEM ID:\n", 1)[1].splitlines()[0]
+            )
+            repaired_ids.append(item_id)
+            translated = {
+                2: "Офицер подошёл.",
+                3: "Всё изменилось.",
+            }
+            return json.dumps(
+                {"items": [{"i": item_id, "text": translated[item_id]}]},
+                ensure_ascii=False,
+            )
+        return _russian_response()
+
+    def review(prompt: str) -> str:
+        items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+        ids = [item["i"] for item in items]
+
+        if ids == [2, 3]:
+            review_round["value"] += 1
+            if review_round["value"] == 1:
+                return json.dumps(
+                    {
+                        "supported": False,
+                        "issues": ["item 2: first material issue"],
+                    }
+                )
+            if review_round["value"] == 2:
+                return json.dumps(
+                    {
+                        "supported": False,
+                        "issues": ["item 3: second issue found on closure review"],
+                    }
+                )
+            return json.dumps({"supported": True, "issues": []})
+
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert repaired_ids == [2, 3]
+    assert review_round["value"] == 3
 
 
 def test_repair_items_use_neighbor_context_without_shifting_content(
@@ -1269,7 +1338,7 @@ def test_final_materiality_check_accepts_style_disagreement(
     )
 
     assert plan.semantic_reviewed is True
-    assert len(repair_calls) == 3
+    assert len(repair_calls) == 4
     assert len(final_checks) == 1
     assert "reasonable viewer" in final_checks[0]
     assert "materially different factual meaning" in final_checks[0]
