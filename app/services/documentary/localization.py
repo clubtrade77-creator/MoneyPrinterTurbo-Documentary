@@ -709,12 +709,12 @@ def _build_compact_localization_prompt(
             "kind": unit["kind"],
             "previous_source": _compact_consistency_text(
                 unit.get("previous_text", ""),
-                max_chars=480,
+                max_chars=240,
             ),
             "text": unit["text"],
             "next_source": _compact_consistency_text(
                 unit.get("next_text", ""),
-                max_chars=480,
+                max_chars=240,
             ),
             "consistency_context": unit.get("consistency_context", []),
         }
@@ -1985,21 +1985,21 @@ def _build_compact_review_prompt(
             "kind": unit["kind"],
             "previous_source": _compact_consistency_text(
                 unit.get("previous_source", ""),
-                max_chars=480,
+                max_chars=240,
             ),
             "source": unit["source"],
             "next_source": _compact_consistency_text(
                 unit.get("next_source", ""),
-                max_chars=480,
+                max_chars=240,
             ),
             "previous_translation": _compact_consistency_text(
                 unit.get("previous_translation", ""),
-                max_chars=480,
+                max_chars=240,
             ),
             "translation": unit["translation"],
             "next_translation": _compact_consistency_text(
                 unit.get("next_translation", ""),
-                max_chars=480,
+                max_chars=240,
             ),
         }
         for unit in batch
