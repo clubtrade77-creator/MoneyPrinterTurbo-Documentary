@@ -2939,7 +2939,10 @@ def localize_project(
             "localization cannot bypass semantic review"
         )
 
-    llm_config_snapshot = dict(config.app)
+    with config.runtime_config_lock():
+        llm_config_snapshot = config.snapshot_config_with_pending(
+            config.app
+        )
 
     def default_precise_generation(prompt: str) -> str:
         return llm_service.generate_text_precise(
