@@ -1226,7 +1226,12 @@ def _canonical_numeric_tokens(text: str) -> Counter[str]:
         "",
         value,
     )
-    return Counter(re.findall(r"\d+", value))
+    return Counter(
+        re.findall(
+            r"(?<!\w)\d+(?!\w)",
+            value,
+        )
+    )
 
 
 def _numeric_fidelity_issue(unit: dict) -> str | None:
@@ -1338,6 +1343,13 @@ def _protected_literal_tokens(text: str) -> set[str]:
             value,
         )
     )
+    compact_code_candidates = re.findall(
+        r"\b(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*\d)"
+        r"[A-Za-z0-9]{2,}\b",
+        value,
+    )
+    tokens.update(compact_code_candidates)
+
     mixed_candidates = re.findall(
         r"\b(?=[A-Za-z0-9-]*[A-Za-z])(?=[A-Za-z0-9-]*\d)"
         r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\b",
