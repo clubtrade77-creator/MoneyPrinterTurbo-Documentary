@@ -714,6 +714,88 @@ def test_compact_localization_reports_real_batch_progress(
     assert any(event[0] == "review_batch" for event in status_events)
 
 
+def test_compact_localization_splits_batch_after_precise_timeout(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_THRESHOLD_CHARS",
+        1,
+    )
+    calls = []
+    translated = {
+        0: "Офицер подходит к автомобилю.",
+        1: "Записанная встреча",
+        2: "Офицер подошёл.",
+        3: "Всё изменилось.",
+    }
+
+    def generate(prompt: str) -> str:
+        calls.append(prompt)
+        items = json.loads(prompt.split("INPUT ITEMS:\n", 1)[1])
+        if len(calls) == 1:
+            return "Error: ollama precise request timed out after 240s"
+        return json.dumps(
+            {
+                "items": [
+                    {"i": item["i"], "text": translated[item["i"]]}
+                    for item in items
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=_approved_review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert len(calls) == 3
+    split_ids = [
+        [item["i"] for item in json.loads(prompt.split("INPUT ITEMS:\n", 1)[1])]
+        for prompt in calls[1:]
+    ]
+    assert split_ids == [[0, 1], [2, 3]]
+
+
+def test_compact_review_splits_batch_after_precise_timeout(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_THRESHOLD_CHARS",
+        1,
+    )
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_REVIEW_BATCH_ITEMS",
+        4,
+    )
+    review_calls = []
+
+    def review(prompt: str) -> str:
+        review_calls.append(prompt)
+        if len(review_calls) == 1:
+            return "Error: ollama precise request timed out after 240s"
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=lambda prompt: _russian_response(),
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert len(review_calls) == 3
+
+
 def test_compact_localization_retries_only_missing_items(
     tmp_path: Path,
     monkeypatch,
