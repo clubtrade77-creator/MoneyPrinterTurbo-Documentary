@@ -2734,14 +2734,15 @@ def _review_and_repair_localization(
                             unit=unit,
                         )
                         if item_issues:
-                            final_issues.extend(
-                                (
+                            for issue in item_issues:
+                                issue_ids = _review_issue_item_ids(issue)
+                                if issue_ids and item_id not in issue_ids:
+                                    continue
+                                final_issues.append(
                                     issue
-                                    if _review_issue_item_ids(issue)
+                                    if issue_ids
                                     else f"item {item_id}: {issue}"
                                 )
-                                for issue in item_issues
-                            )
                         else:
                             reviewed[item_id] = _review_unit_fingerprint(unit)
                 else:
