@@ -389,6 +389,10 @@ FIDELITY RULES — accuracy outranks elegance:
 - Do not omit any material fact, qualification, attribution, uncertainty, negation,
   quantity, or temporal relationship.
 - Preserve entity identity. Transliterate personal/opaque proper names consistently.
+  Keep a stable transliteration stem across grammatical cases; inflect the stable
+  target-language form rather than re-transliterating or shortening the name in a
+  different case. Do not silently drop distinctive letters/syllables from an opaque
+  name when target orthography can represent them.
   Descriptive organization/place names may use an established natural
   target-language rendering, but the entity identity must not change.
 - Preserve every numeral used as a numeral in the source. Preserve years, dates,
@@ -466,6 +470,10 @@ FIDELITY RULES — accuracy outranks elegance:
   event more confidently than the source.
 - Natural synonyms, idioms, inflection, and target-language word order are allowed
   when meaning is unchanged.
+- Before returning each translation, silently back-check the proposition:
+  WHO/WHAT did WHAT to WHOM, WHEN/WHERE, with what NUMBER/DEGREE, CERTAINTY/
+  MODALITY, and LEGAL/PROCEDURAL STATUS. If any answer differs materially from the
+  source, revise the translation before output.
 - For narration_text, keep spoken duration reasonably close, but NEVER shorten by
   deleting material meaning.
 - Empty narration_text or on_screen_text must remain empty.
@@ -788,8 +796,11 @@ FIDELITY RULES — these override elegance and brevity:
 - Produce grammatical, natural target-language text while preserving source meaning.
 - Preserve every material fact and every meaning-changing modifier.
 - Preserve names and entity identity. Transliterate personal/opaque proper names
-  consistently. Descriptive organization/place names may use an established natural
-  target-language rendering, but the entity identity must not change.
+  consistently. Keep one stable transliteration stem across grammatical cases;
+  inflect that target-language stem instead of re-transliterating, shortening, or
+  dropping distinctive letters/syllables. Descriptive organization/place names may
+  use an established natural target-language rendering, but entity identity must
+  not change.
 - Preserve all numbers, years, dates, times, ranges, percentages, currencies,
   measurements, ordinals/cardinals, and quantities.
 - Preserve numbers written as WORDS too: cardinal and ordinal value must remain
@@ -859,6 +870,9 @@ FIDELITY RULES — these override elegance and brevity:
 - Do not omit meaning-bearing content or modifiers merely to sound smoother.
 - Natural synonyms and normal target-language word order are allowed when meaning
   is unchanged.
+- Before output, silently back-check each item: WHO/WHAT did WHAT to WHOM, WHEN/
+  WHERE, NUMBER/DEGREE, CERTAINTY/MODALITY, and LEGAL/PROCEDURAL STATUS. If any
+  material answer changed, fix it before returning JSON.
 
 Return exactly one JSON object:
 {{"items":[{{"i":0,"text":"translated text"}}]}}
