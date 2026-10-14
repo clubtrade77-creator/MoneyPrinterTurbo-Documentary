@@ -19,7 +19,7 @@ from app.services.documentary.project import load_project, project_dir
 from app.services.documentary.transcription import load_source_transcript
 
 MAX_LOCALIZATION_ATTEMPTS = 3
-MAX_LOCALIZATION_REPAIR_PASSES = 2
+MAX_LOCALIZATION_REPAIR_PASSES = 3
 MAX_LOCALIZATION_PROMPT_CHARS = 120_000
 MAX_LOCALIZATION_REVIEW_PROMPT_CHARS = 180_000
 COMPACT_LOCALIZATION_THRESHOLD_CHARS = 4_000
@@ -1364,12 +1364,23 @@ def _build_compact_review_prompt(
 Review this SMALL batch of documentary translations from
 {source_language} to {target_language}.
 
-Check ONLY factual fidelity and translation completeness:
+Check ONLY MATERIAL factual fidelity and translation completeness:
 - reject additions or omissions of material facts;
-- reject changed names, numbers, dates, attribution, uncertainty, or meaning;
+- reject changed names, numbers, dates, tense when it changes meaning, attribution,
+  uncertainty, negation, or meaning;
 - reject untranslated source-language prose that should have been translated;
-- proper names and conventional identical forms may remain unchanged;
+- reject a proper name only if the person's/entity's identity is changed or the form
+  is materially inconsistent;
+- ACCEPT natural synonyms, idioms, inflection, word order, and stylistic differences
+  when they preserve the source meaning;
+- DO NOT reject merely because you prefer a different wording or a more literal
+  translation;
+- temporal expressions must preserve the actual time relationship (for example,
+  an eve/before-event expression must not become the event day itself);
 - do not critique style.
+
+Every issue MUST start with the exact item id, for example:
+"item 17: omitted the word almost".
 
 Return exactly one JSON object and nothing else:
 {{"supported":true,"issues":[]}}
@@ -1518,6 +1529,46 @@ def _repair_context_for_unit(
     return previous, following
 
 
+def _review_issue_item_ids(issue: str) -> set[int]:
+    """Extract explicit localization item ids without treating dates as ids."""
+    text = str(issue or "")
+    ids: set[int] = set()
+    for match in re.finditer(
+        r"\bitems?\s+(\d+)(?:\s*[-–]\s*(\d+))?",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        start = int(match.group(1))
+        end_text = match.group(2)
+        if end_text is None:
+            ids.add(start)
+            continue
+        end = int(end_text)
+        if 0 <= end - start <= 50:
+            ids.update(range(start, end + 1))
+    return ids
+
+
+def _issues_for_item(
+    issues: list[str],
+    item_id: int,
+) -> list[str]:
+    specific = [
+        issue
+        for issue in issues
+        if item_id in _review_issue_item_ids(issue)
+    ]
+    if specific:
+        return specific
+
+    # An issue without any explicit item id may apply to the whole rejected batch.
+    return [
+        issue
+        for issue in issues
+        if not _review_issue_item_ids(issue)
+    ]
+
+
 def _build_single_item_repair_prompt(
     *,
     source_language: str,
@@ -1557,8 +1608,12 @@ Do not move content to or from another item.
 For proper nouns, preserve the canonical name instead of inventing a literal
 translation.
 
-REVIEW ISSUES:
+REVIEW ISSUES FOR THIS ITEM ONLY:
 {issue_text}
+
+The reviewer wording is advisory. Verify it against CURRENT SOURCE.
+If the reviewer suggests a replacement phrase that would be less accurate than the
+source, do not copy it blindly; produce the most faithful natural translation.
 
 PREVIOUS SOURCE:
 {previous}
@@ -1643,7 +1698,7 @@ def _repair_compact_review_batch(
                 unit=unit,
                 source_units=source_units,
                 current_translation=translations.get(unit["i"], ""),
-                issues=issues,
+                issues=_issues_for_item(issues, unit["i"]),
             )
         except (_LocalizationSchemaError, _NonRetryableLocalizationError):
             # Preserve isolation even if the strict repair format drifts: fall back
@@ -1724,9 +1779,17 @@ def _review_and_repair_localization(
                 unit["i"]
                 for unit in review_batch
             }
+            flagged_ids = set().union(
+                *(_review_issue_item_ids(issue) for issue in batch_issues)
+            )
+            repair_ids = (
+                batch_ids & flagged_ids
+                if flagged_ids
+                else batch_ids
+            )
             repair_batch = [
                 source_units_by_id[item_id]
-                for item_id in sorted(batch_ids)
+                for item_id in sorted(repair_ids)
                 if item_id in source_units_by_id
             ]
 
@@ -1775,7 +1838,7 @@ def _review_and_repair_localization(
                 }
                 updated_batch = [
                     updated_review_units[item_id]
-                    for item_id in sorted(batch_ids)
+                    for item_id in sorted(repair_ids)
                     if item_id in updated_review_units
                 ]
                 batch_issues = _run_compact_review_batch(
@@ -1794,6 +1857,19 @@ def _review_and_repair_localization(
                     if checkpoint is not None:
                         checkpoint(translations, reviewed)
                     break
+
+                next_flagged_ids = set().union(
+                    *(_review_issue_item_ids(issue) for issue in batch_issues)
+                )
+                if next_flagged_ids:
+                    repair_ids = repair_ids & next_flagged_ids
+                    repair_batch = [
+                        source_units_by_id[item_id]
+                        for item_id in sorted(repair_ids)
+                        if item_id in source_units_by_id
+                    ]
+                    if not repair_batch:
+                        break
 
             if batch_issues:
                 unresolved_issues.extend(batch_issues)
