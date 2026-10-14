@@ -409,7 +409,9 @@ def test_unresolved_semantic_batch_does_not_retry_whole_language(
         if "Repair ONLY this rejected documentary translation item" in prompt
     ]
     assert len(full_generation_calls) == 1
-    assert len(repair_calls) == 8
+    # Unchanged rejected repairs now stop early instead of burning all four
+    # attempts for both items. Each flagged item is tried once per review cycle.
+    assert len(repair_calls) == 4
 
 
 def test_compact_review_accepts_minimal_pass_after_unclear_json(
@@ -1009,7 +1011,7 @@ def test_localize_project_repairs_semantically_rejected_translation(
             return json.dumps(
                 {
                     "supported": False,
-                    "issues": ["The translation changed a factual claim."],
+                    "issues": ["item 2: the translation changed a factual claim"],
                 }
             )
         return json.dumps({"supported": True, "issues": []})
@@ -1024,11 +1026,9 @@ def test_localize_project_repairs_semantically_rejected_translation(
 
     assert plan.target_language == "ru"
     assert len(review_calls) == 3
-    assert len(generate_calls) == 5
-    assert all(
-        "Repair ONLY this rejected documentary translation item" in prompt
-        for prompt in generate_calls[1:]
-    )
+    assert len(generate_calls) == 2
+    assert "Repair ONLY this rejected documentary translation item" in generate_calls[1]
+    assert "CURRENT ITEM ID:\n2" in generate_calls[1]
 
 
 
@@ -1348,7 +1348,9 @@ def test_final_materiality_check_accepts_style_disagreement(
     )
 
     assert plan.semantic_reviewed is True
-    assert len(repair_calls) == 4
+    # If the repair model returns the same faithful text, stop rewriting it and
+    # let the final materiality gate distinguish style from factual error.
+    assert len(repair_calls) == 1
     assert len(final_checks) == 1
     assert "reasonable viewer" in final_checks[0]
     assert "materially different factual meaning" in final_checks[0]
@@ -2635,7 +2637,7 @@ def test_compact_localization_and_review_prompts_cover_semantic_traps():
 
     assert "stable transliteration stem" in translation_prompt
     assert "first dictionary sense" in translation_prompt
-    assert '"almost anywhere"' in translation_prompt
+    assert "almost anywhere" in translation_prompt
     assert "who did what to whom" in translation_prompt
     assert "silently back-check each item" in translation_prompt
 
@@ -2662,6 +2664,6 @@ def test_compact_localization_and_review_prompts_cover_semantic_traps():
     )
 
     assert "polysemous words" in review_prompt
-    assert '"almost anywhere"' in review_prompt
+    assert "almost anywhere" in review_prompt
     assert "who did what to whom" in review_prompt
     assert "since/until/by" in review_prompt
