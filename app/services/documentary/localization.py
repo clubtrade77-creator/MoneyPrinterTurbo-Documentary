@@ -23,7 +23,7 @@ MAX_LOCALIZATION_ATTEMPTS = 3
 MAX_LOCALIZATION_REPAIR_PASSES = 4
 MAX_LOCALIZATION_PROMPT_CHARS = 120_000
 MAX_LOCALIZATION_REVIEW_PROMPT_CHARS = 180_000
-COMPACT_LOCALIZATION_THRESHOLD_CHARS = 4_000
+COMPACT_LOCALIZATION_THRESHOLD_CHARS = 2_500
 COMPACT_LOCALIZATION_BATCH_CHARS = 1_800
 COMPACT_LOCALIZATION_BATCH_ITEMS = 12
 COMPACT_REVIEW_THRESHOLD_CHARS = 5_000
@@ -2828,10 +2828,17 @@ def localize_project(
         raise ValueError("localization target language must differ from source language")
 
     source_scenes = _source_payload(project, transcripts)
-    prompt = build_localization_prompt(
-        source_language=source_language,
-        target_language=target_language,
-        source_scenes=source_scenes,
+    use_compact_localization = _should_use_compact_localization(
+        source_scenes
+    )
+    prompt = (
+        ""
+        if use_compact_localization
+        else build_localization_prompt(
+            source_language=source_language,
+            target_language=target_language,
+            source_scenes=source_scenes,
+        )
     )
     source_fingerprint = _localization_source_fingerprint(
         source_language=source_language,
@@ -2875,7 +2882,7 @@ def localize_project(
     localized_scenes = None
     last_error = None
 
-    if _should_use_compact_localization(source_scenes):
+    if use_compact_localization:
         localized_scenes = _localize_compact(
             source_language=source_language,
             target_language=target_language,
