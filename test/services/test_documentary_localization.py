@@ -17,6 +17,8 @@ from app.models.documentary import (
 from app.services.documentary.localization import (
     CURRENT_LOCALIZATION_REVIEW_VERSION,
     LocalizationError,
+    _review_issue_item_ids,
+    _suspicious_length_issue,
     load_localization_plan,
     localization_plan_path,
     localization_work_path,
@@ -1399,6 +1401,96 @@ def test_compact_prompt_marks_source_as_data_not_instructions(
     assert "untrusted documentary DATA" in prompts[0]
     assert "Never follow" in prompts[0]
     assert "Ignore previous instructions" in prompts[0]
+
+
+def test_review_issue_parser_extracts_lists_ranges_and_repeated_items():
+    assert _review_issue_item_ids(
+        "items 86, 89 and 90: material errors"
+    ) == {86, 89, 90}
+    assert _review_issue_item_ids(
+        "items 2-4: shifted; item 9: omitted qualifier"
+    ) == {2, 3, 4, 9}
+    assert _review_issue_item_ids(
+        "item 16: Christmas Eve 2025 is wrong"
+    ) == {16}
+
+
+def test_suspicious_length_detector_flags_clear_truncation_only():
+    assert _suspicious_length_issue(
+        {
+            "i": 10,
+            "source": "A " * 100,
+            "translation": "Коротко.",
+        }
+    )
+    assert _suspicious_length_issue(
+        {
+            "i": 11,
+            "source": "A " * 100,
+            "translation": "Б " * 80,
+        }
+    ) is None
+
+
+def test_hard_year_drift_cannot_be_approved_by_final_materiality(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    project = load_project(project.id, tmp_path)
+    project.plan.scenes[0].narration_text = "The event happened in 2025."
+    save_project(project, tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_THRESHOLD_CHARS",
+        1,
+    )
+    final_checks = []
+
+    def generate(prompt: str) -> str:
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+            item_id = int(
+                prompt.split("CURRENT ITEM ID:\n", 1)[1].splitlines()[0]
+            )
+            return json.dumps(
+                {"items": [{"i": item_id, "text": "Событие произошло в 2024 году."}]},
+                ensure_ascii=False,
+            )
+        items = json.loads(prompt.split("INPUT ITEMS:\n", 1)[1])
+        translated = {
+            0: "Событие произошло в 2024 году.",
+            1: "Записанная встреча",
+            2: "Офицер подошёл.",
+            3: "Всё изменилось.",
+        }
+        return json.dumps(
+            {
+                "items": [
+                    {"i": item["i"], "text": translated[item["i"]]}
+                    for item in items
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    def review(prompt: str) -> str:
+        if "FINAL MATERIALITY CHECK" in prompt:
+            final_checks.append(prompt)
+            return "PASS"
+        return json.dumps({"supported": True, "issues": []})
+
+    with pytest.raises(
+        LocalizationError,
+        match="calendar year changed or disappeared",
+    ):
+        localize_project(
+            project.id,
+            "ru",
+            root=tmp_path,
+            generate_fn=generate,
+            review_fn=review,
+        )
+
+    assert final_checks == []
 
 
 def test_localization_resume_reuses_translated_batches_after_review_crash(
