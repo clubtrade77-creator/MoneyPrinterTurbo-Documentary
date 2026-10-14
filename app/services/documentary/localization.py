@@ -2958,7 +2958,43 @@ def localize_project(
     localized_scenes = None
     last_error = None
 
-    if use_compact_localization:
+    source_units = _localization_text_units(source_scenes)
+    if source_units and all(
+        unit["i"] in work_translations
+        for unit in source_units
+    ):
+        localized_scenes = _assemble_compact_localization(
+            source_scenes,
+            source_units,
+            work_translations,
+        )
+        _validate_candidate_against_source(
+            localized_scenes,
+            source_scenes,
+        )
+        _report_localization_progress(progress, 0.70)
+        localized_scenes, review_issues = _review_and_repair_localization(
+            generator=generator,
+            reviewer=reviewer,
+            source_language=source_language,
+            target_language=target_language,
+            source_scenes=source_scenes,
+            localized_scenes=localized_scenes,
+            progress=lambda fraction: _report_localization_progress(
+                progress,
+                0.70 + 0.30 * fraction,
+            ),
+            status=status,
+            reviewed_fingerprints=work_reviewed,
+            checkpoint=save_work,
+        )
+        if review_issues:
+            raise _LocalizationSemanticError(
+                "semantic localization review failed: "
+                + "; ".join(review_issues)
+            )
+
+    if use_compact_localization and localized_scenes is None:
         localized_scenes = _localize_compact(
             source_language=source_language,
             target_language=target_language,
