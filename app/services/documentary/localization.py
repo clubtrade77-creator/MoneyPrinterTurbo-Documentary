@@ -758,7 +758,22 @@ def _translate_compact_batch(
             response,
             batch,
         )
-    except _NonRetryableLocalizationError:
+    except _NonRetryableLocalizationError as exc:
+        if _is_retryable_llm_timeout(exc) and len(batch) > 1:
+            midpoint = max(1, len(batch) // 2)
+            left = _translate_compact_batch(
+                source_language=source_language,
+                target_language=target_language,
+                batch=batch[:midpoint],
+                generator=generator,
+            )
+            right = _translate_compact_batch(
+                source_language=source_language,
+                target_language=target_language,
+                batch=batch[midpoint:],
+                generator=generator,
+            )
+            return {**left, **right}
         raise
     except _LocalizationSchemaError:
         if len(batch) == 1:
