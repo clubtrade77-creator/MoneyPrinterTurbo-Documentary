@@ -30,9 +30,9 @@ COMPACT_LOCALIZATION_BATCH_ITEMS = 12
 COMPACT_REVIEW_THRESHOLD_CHARS = 5_000
 COMPACT_REVIEW_BATCH_CHARS = 1_800
 COMPACT_REVIEW_BATCH_ITEMS = 10
-CURRENT_LOCALIZATION_REVIEW_VERSION = 3
+CURRENT_LOCALIZATION_REVIEW_VERSION = 4
 _LOCALIZATION_WORK_VERSION = 1
-_LOCALIZATION_WORK_REVIEW_POLICY_VERSION = 3
+_LOCALIZATION_WORK_REVIEW_POLICY_VERSION = 4
 
 LocalizationProgressCallback = Callable[[float], None]
 LocalizationStatusCallback = Callable[[str, int, int, int, int], None]
@@ -394,6 +394,11 @@ FIDELITY RULES — accuracy outranks elegance:
   times, ranges, percentages, currencies, measurements, ordinals/cardinals, and
   quantities. Formatting may adapt to the target language, but numeric value must
   not change.
+- Preserve numbers WRITTEN AS WORDS too. "four" must remain the value four; "fourth"
+  must remain ordinal fourth, never cardinal four or another ordinal. Do not turn
+  spelled-out numbers into a different value merely because there are no digits.
+- Preserve scope words that materially limit a claim: only/except/unless/without/
+  still/already/yet/even/just/also. Do not silently broaden or narrow the claim.
 - Preserve past/present/future tense and aspect when they carry time meaning.
   Preserve ordinal versus cardinal meaning.
 - Preserve negation and its scope.
@@ -597,6 +602,80 @@ def _compact_localization_batches(units: list[dict]) -> list[list[dict]]:
     return batches
 
 
+_CONSISTENCY_STOPWORDS = {
+    "a", "an", "and", "as", "at", "but", "by", "for", "from", "he", "her",
+    "his", "i", "in", "it", "its", "of", "on", "or", "she", "that", "the",
+    "their", "they", "this", "to", "we", "with", "you",
+    "de", "del", "el", "en", "la", "las", "los", "un", "una", "y",
+}
+
+
+def _likely_consistency_keys(text: str) -> set[str]:
+    keys: set[str] = set()
+    for word in re.findall(r"[^\W\d_][^\W\d_’'’-]*", str(text or ""), re.UNICODE):
+        normalized = word.casefold()
+        if len(normalized) < 3 or normalized in _CONSISTENCY_STOPWORDS:
+            continue
+        if word.isupper() or word.istitle():
+            keys.add(normalized)
+    return keys
+
+
+def _repeated_consistency_keys(units: list[dict]) -> set[str]:
+    counts: Counter[str] = Counter()
+    for unit in units:
+        counts.update(_likely_consistency_keys(unit.get("text", "")))
+    return {
+        key
+        for key, count in counts.items()
+        if count >= 2
+    }
+
+
+def _with_consistency_context(
+    batch: list[dict],
+    *,
+    all_units: list[dict],
+    translations: dict[int, str],
+    repeated_keys: set[str],
+) -> list[dict]:
+    if not repeated_keys or not translations:
+        return [dict(unit) for unit in batch]
+
+    enriched = []
+    for unit in batch:
+        current_keys = (
+            _likely_consistency_keys(unit.get("text", ""))
+            & repeated_keys
+        )
+        context = []
+        if current_keys:
+            for candidate in reversed(all_units):
+                candidate_id = candidate["i"]
+                if candidate_id >= unit["i"] or candidate_id not in translations:
+                    continue
+                shared = (
+                    _likely_consistency_keys(candidate.get("text", ""))
+                    & current_keys
+                )
+                if not shared:
+                    continue
+                context.append(
+                    {
+                        "source": candidate["text"],
+                        "translation": translations[candidate_id],
+                        "shared_terms": sorted(shared),
+                    }
+                )
+                if len(context) >= 3:
+                    break
+
+        item = dict(unit)
+        item["consistency_context"] = list(reversed(context))
+        enriched.append(item)
+    return enriched
+
+
 def _build_compact_localization_prompt(
     *,
     source_language: str,
@@ -610,6 +689,7 @@ def _build_compact_localization_prompt(
             "previous_source": unit.get("previous_text", ""),
             "text": unit["text"],
             "next_source": unit.get("next_text", ""),
+            "consistency_context": unit.get("consistency_context", []),
         }
         for unit in batch
     ]
@@ -624,6 +704,9 @@ For each item, translate ONLY the field "text".
 "previous_source" and "next_source" are CONTEXT ONLY. Use them to resolve pronouns,
 gender, tense, referents, and sentence fragments, but NEVER copy facts or words from
 context into the current translation unless they are literally present in "text".
+"consistency_context" contains earlier SOURCE→TRANSLATION examples only when the
+current item shares a repeated likely name/term with them. Use it ONLY to keep the
+same entity/name/term spelling consistent. Never import facts from those examples.
 
 FIDELITY RULES — these override elegance and brevity:
 - Produce grammatical, natural target-language text while preserving source meaning.
@@ -633,6 +716,10 @@ FIDELITY RULES — these override elegance and brevity:
   target-language rendering, but the entity identity must not change.
 - Preserve all numbers, years, dates, times, ranges, percentages, currencies,
   measurements, ordinals/cardinals, and quantities.
+- Preserve numbers written as WORDS too: cardinal and ordinal value must remain
+  exact ("four" != "fourth", "third" != "three").
+- Preserve material scope words such as only/except/unless/without/still/already/
+  yet/even/just/also; do not broaden or narrow the claim.
 - Preserve tense and aspect when they carry time meaning: past, present, and future
   must not be swapped. Preserve ordinal versus cardinal meaning.
 - Preserve negation and scope: "not", "never", "only", "no longer", etc.
@@ -948,6 +1035,7 @@ def _localize_compact(
     checkpoint: Callable[[dict[int, str]], None] | None = None,
 ) -> list[LocalizedSceneText]:
     units = _localization_text_units(source_scenes)
+    repeated_consistency_keys = _repeated_consistency_keys(units)
     if not units:
         return [
             LocalizedSceneText.model_validate(
@@ -1001,11 +1089,17 @@ def _localize_compact(
             if checkpoint is not None:
                 checkpoint(translations)
 
+        enriched_missing = _with_consistency_context(
+            missing,
+            all_units=units,
+            translations=translations,
+            repeated_keys=repeated_consistency_keys,
+        )
         translations.update(
             _translate_compact_batch(
                 source_language=source_language,
                 target_language=target_language,
-                batch=missing,
+                batch=enriched_missing,
                 generator=generator,
                 on_partial=on_partial,
             )
@@ -2263,8 +2357,9 @@ words are literally present in CURRENT SOURCE.
 Preserve:
 - exact factual meaning and every meaning-bearing modifier;
 - entity identity and consistent personal/opaque proper-name transliteration;
-- numbers, dates, times, quantities, tense/aspect when meaningful, ordinal versus
-  cardinal meaning, grammatical gender, negation, attribution, and uncertainty;
+- numbers in digits OR words, dates, times, quantities, tense/aspect when
+  meaningful, ordinal versus cardinal meaning, grammatical gender, negation,
+  attribution, uncertainty, and material scope words such as only/except/unless;
 - quantifiers such as almost/nearly/about/at least/up to;
 - chronology and time-of-day/eve distinctions;
 - ambiguity when the source itself is ambiguous;
@@ -2426,8 +2521,9 @@ TRANSLATION than from the SOURCE?
 FAIL only for a real semantic difference such as:
 - added/omitted fact;
 - wrong person/entity identity;
-- changed number/date/time/quantity;
+- changed number/date/time/quantity, including numbers written as words;
 - changed meaningful past/present/future tense or ordinal/cardinal meaning;
+- omitted/added only/except/unless/without or another material scope limiter;
 - changed negation, attribution, uncertainty, chronology, ambiguity, or material
   qualifier;
 - changed protected identifier or entity identity;
@@ -2466,6 +2562,30 @@ FAIL: one short material semantic reason
             target_language=target_language,
             batch=[unit],
         )
+
+
+def _identify_review_issue_items(
+    *,
+    reviewer: Callable[[str], str],
+    source_language: str,
+    target_language: str,
+    batch: list[dict],
+) -> set[int]:
+    """Localize a generic batch complaint to concrete item ids."""
+    flagged: set[int] = set()
+    for unit in batch:
+        issues = _filter_review_issues_for_batch(
+            _run_compact_review_batch(
+                reviewer=reviewer,
+                source_language=source_language,
+                target_language=target_language,
+                batch=[unit],
+            ),
+            [unit],
+        )
+        if issues:
+            flagged.add(unit["i"])
+    return flagged
 
 
 def _review_and_repair_localization(
@@ -2546,11 +2666,20 @@ def _review_and_repair_localization(
             flagged_ids = set().union(
                 *(_review_issue_item_ids(issue) for issue in batch_issues)
             )
-            repair_ids = (
-                batch_ids & flagged_ids
-                if flagged_ids
-                else batch_ids
-            )
+            if flagged_ids:
+                repair_ids = batch_ids & flagged_ids
+            else:
+                repair_ids = _identify_review_issue_items(
+                    reviewer=reviewer,
+                    source_language=source_language,
+                    target_language=target_language,
+                    batch=review_batch,
+                )
+                if not repair_ids:
+                    # The generic batch complaint could not be reproduced on any
+                    # individual item. Avoid destructively rewriting the whole
+                    # batch; let final materiality checks decide instead.
+                    repair_ids = set()
             if flagged_ids:
                 accepted_ids = batch_ids - repair_ids
                 reviewed.update(
@@ -2568,8 +2697,15 @@ def _review_and_repair_localization(
                 for item_id in sorted(repair_ids)
                 if item_id in source_units_by_id
             ]
+            generic_materiality_ids = (
+                batch_ids
+                if not repair_ids and batch_issues
+                else set()
+            )
 
             for repair_attempt in range(1, MAX_LOCALIZATION_REPAIR_PASSES + 1):
+                if not repair_batch:
+                    break
                 _report_localization_status(
                     status,
                     "repair_batch",
@@ -2578,6 +2714,10 @@ def _review_and_repair_localization(
                     repair_attempt,
                     MAX_LOCALIZATION_REPAIR_PASSES,
                 )
+                before_repair = {
+                    item_id: translations.get(item_id, "")
+                    for item_id in repair_ids
+                }
                 repaired = _repair_compact_review_batch(
                     generator=generator,
                     source_language=source_language,
@@ -2700,6 +2840,17 @@ def _review_and_repair_localization(
                         continue
                     break
 
+                if repaired and all(
+                    str(repaired.get(item_id, "")).strip()
+                    == str(before_repair.get(item_id, "")).strip()
+                    for item_id in repaired
+                ):
+                    # The repair model independently chose the same translation.
+                    # Do not burn all repair attempts rewriting identical text;
+                    # defer the persistent complaint to the stricter final
+                    # materiality check below.
+                    break
+
                 next_flagged_ids = set().union(
                     *(_review_issue_item_ids(issue) for issue in batch_issues)
                 )
@@ -2727,6 +2878,8 @@ def _review_and_repair_localization(
                     )
                     & batch_ids
                 )
+                if not remaining_ids and generic_materiality_ids:
+                    remaining_ids = set(generic_materiality_ids)
                 final_issues: list[str] = []
                 if remaining_ids:
                     for item_id in sorted(remaining_ids):
