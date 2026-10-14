@@ -426,6 +426,9 @@ FIDELITY RULES — accuracy outranks elegance:
   and the target language would force an unsupported gender, rephrase naturally
   rather than inventing one.
 - Translate idioms by meaning, not word-for-word. Avoid nonsensical calques.
+- Beware false friends and sound-alike words across languages. Never choose a target
+  word merely because it resembles the source spelling/sound; choose the word that
+  preserves the source meaning in context.
 - If a source field is a sentence fragment, translate it as a fragment. Do not
   finish it using words from another field or neighboring scene.
 - Preserve quotations and speaker/claim attribution.
@@ -774,6 +777,8 @@ FIDELITY RULES — these override elegance and brevity:
   genuinely unknown and the target language would force an unsupported gender,
   rephrase naturally rather than inventing one.
 - Translate idioms by MEANING, not word-for-word. Do not create nonsensical calques.
+- Beware false friends and sound-alike words. Similar spelling/sound is NOT evidence
+  of meaning; choose the natural target word that preserves the source meaning.
 - If "text" is a sentence fragment, translate it as that fragment. Do not complete
   it with words from previous_source or next_source.
 - Preserve quotations and attribution. Do not move a quote or claim to another
@@ -1413,6 +1418,36 @@ def _untranslated_copy_issue(unit: dict) -> str | None:
     )
 
 
+def _copied_source_span_issue(unit: dict) -> str | None:
+    """Flag a long verbatim source-language clause left inside the translation."""
+    source = re.sub(r"\s+", " ", str(unit.get("source") or "")).strip()
+    translation = re.sub(
+        r"\s+",
+        " ",
+        str(unit.get("translation") or ""),
+    ).strip()
+    if not source or not translation:
+        return None
+
+    source_words = re.findall(
+        r"[A-Za-zÀ-ÖØ-öø-ÿ]+(?:['’][A-Za-zÀ-ÖØ-öø-ÿ]+)?",
+        source,
+    )
+    if len(source_words) < 8:
+        return None
+
+    translation_folded = translation.casefold()
+    window = 8
+    for start in range(0, len(source_words) - window + 1):
+        phrase = " ".join(source_words[start : start + window])
+        if phrase.casefold() in translation_folded:
+            return (
+                f"item {unit['i']}: translation contains a long verbatim "
+                "source-language span and may be partially untranslated"
+            )
+    return None
+
+
 def _suspicious_length_issue(unit: dict) -> str | None:
     source = re.sub(
         r"\s+",
@@ -1593,6 +1628,9 @@ def _deterministic_review_issues(batch: list[dict]) -> list[str]:
         untranslated_issue = _untranslated_copy_issue(unit)
         if untranslated_issue:
             issues.append(untranslated_issue)
+        copied_span_issue = _copied_source_span_issue(unit)
+        if copied_span_issue:
+            issues.append(copied_span_issue)
         length_issue = _suspicious_length_issue(unit)
         if length_issue:
             issues.append(length_issue)
@@ -2116,12 +2154,24 @@ def _run_compact_review_batch(
             [
                 {
                     "i": unit["i"],
-                    "previous_source": unit.get("previous_source", ""),
+                    "previous_source": _compact_consistency_text(
+                        unit.get("previous_source", ""),
+                        max_chars=240,
+                    ),
                     "source": unit["source"],
-                    "next_source": unit.get("next_source", ""),
-                    "previous_translation": unit.get("previous_translation", ""),
+                    "next_source": _compact_consistency_text(
+                        unit.get("next_source", ""),
+                        max_chars=240,
+                    ),
+                    "previous_translation": _compact_consistency_text(
+                        unit.get("previous_translation", ""),
+                        max_chars=240,
+                    ),
                     "translation": unit["translation"],
-                    "next_translation": unit.get("next_translation", ""),
+                    "next_translation": _compact_consistency_text(
+                        unit.get("next_translation", ""),
+                        max_chars=240,
+                    ),
                 }
                 for unit in batch
             ],
@@ -2473,7 +2523,8 @@ Preserve:
 - URLs, email addresses, handles, hashtags, form/model/case identifiers.
 
 Produce grammatical, natural target-language text. Translate idioms by meaning,
-not word-for-word. Descriptive organization/place names may use an established
+not word-for-word. Do not use a sound-alike/false-friend target word merely because
+it resembles the source spelling. Descriptive organization/place names may use an established
 target-language rendering as long as entity identity does not change.
 
 Do not add missing facts from neighboring items.
@@ -2651,12 +2702,12 @@ PASS for:
 CONTEXT is only for resolving referents and fragments. Do not require context-only
 words in the current translation.
 
-PREVIOUS SOURCE: {unit.get("previous_source", "")}
+PREVIOUS SOURCE: {_compact_consistency_text(unit.get("previous_source", ""), max_chars=480)}
 SOURCE: {unit["source"]}
-NEXT SOURCE: {unit.get("next_source", "")}
-PREVIOUS TRANSLATION: {unit.get("previous_translation", "")}
+NEXT SOURCE: {_compact_consistency_text(unit.get("next_source", ""), max_chars=480)}
+PREVIOUS TRANSLATION: {_compact_consistency_text(unit.get("previous_translation", ""), max_chars=480)}
 TRANSLATION: {unit["translation"]}
-NEXT TRANSLATION: {unit.get("next_translation", "")}
+NEXT TRANSLATION: {_compact_consistency_text(unit.get("next_translation", ""), max_chars=480)}
 
 Return exactly PASS or:
 FAIL: one short material semantic reason
