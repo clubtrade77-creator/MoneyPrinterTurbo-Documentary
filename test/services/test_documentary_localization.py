@@ -18,6 +18,7 @@ from app.services.documentary.localization import (
     CURRENT_LOCALIZATION_REVIEW_VERSION,
     LocalizationError,
     _build_reviewer_config_snapshot,
+    _copied_source_span_issue,
     _review_issue_item_ids,
     _suspicious_length_issue,
     load_localization_plan,
@@ -1825,6 +1826,89 @@ def test_review_issue_parser_extracts_lists_ranges_and_repeated_items():
     assert _review_issue_item_ids(
         "пункты 209–213: сдвиг перевода"
     ) == {209, 210, 211, 212, 213}
+
+
+def test_copied_source_span_detector_flags_partial_untranslated_clause():
+    assert _copied_source_span_issue(
+        {
+            "i": 7,
+            "source": (
+                "The desperate family pleaded with police for immediate help "
+                "throughout the long night."
+            ),
+            "translation": (
+                "Семья просила о помощи, но The desperate family pleaded with "
+                "police for immediate help."
+            ),
+        }
+    )
+
+
+def test_copied_source_span_detector_ignores_short_name_like_overlap():
+    assert _copied_source_span_issue(
+        {
+            "i": 8,
+            "source": "Bayharr spoke with police.",
+            "translation": "Бейхарр поговорил с полицией.",
+        }
+    ) is None
+
+
+def test_prompts_cover_false_friends_legal_status_roles_and_causality(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project, _ = _project_with_localizable_scene(tmp_path)
+    monkeypatch.setattr(
+        "app.services.documentary.localization.COMPACT_LOCALIZATION_THRESHOLD_CHARS",
+        1,
+    )
+    generation_prompts = []
+    review_prompts = []
+
+    def generate(prompt: str) -> str:
+        generation_prompts.append(prompt)
+        items = json.loads(prompt.split("INPUT ITEMS:\n", 1)[1])
+        translated = {
+            0: "Офицер подходит к автомобилю.",
+            1: "Записанная встреча",
+            2: "Офицер подошёл.",
+            3: "Всё изменилось.",
+        }
+        return json.dumps(
+            {
+                "items": [
+                    {"i": item["i"], "text": translated[item["i"]]}
+                    for item in items
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    def review(prompt: str) -> str:
+        review_prompts.append(prompt)
+        return json.dumps({"supported": True, "issues": []})
+
+    plan = localize_project(
+        project.id,
+        "ru",
+        root=tmp_path,
+        generate_fn=generate,
+        review_fn=review,
+    )
+
+    assert plan.semantic_reviewed is True
+    assert any("false friends" in prompt for prompt in generation_prompts)
+    assert any(
+        "arrested/detained/questioned/charged" in prompt
+        and "died/killed/murdered" in prompt
+        for prompt in generation_prompts
+    )
+    assert any(
+        "legal/procedural status" in prompt
+        and "causality" in prompt
+        for prompt in review_prompts
+    )
 
 
 def test_suspicious_length_detector_flags_clear_truncation_only():
