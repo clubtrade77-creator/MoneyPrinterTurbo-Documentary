@@ -2118,7 +2118,8 @@ def _review_issue_item_ids(issue: str) -> set[int]:
     matches = re.finditer(
         r"\bitems?\s+"
         r"((?:\d+(?:\s*[-–]\s*\d+)?)"
-        r"(?:\s*(?:,|&|and)\s*\d+(?:\s*[-–]\s*\d+)?)*)",
+        r"(?:\s*(?:,\s*(?:and|&)|,|&|and)\s*"
+        r"\d+(?:\s*[-–]\s*\d+)?)*)",
         text,
         flags=re.IGNORECASE,
     )
@@ -2126,7 +2127,7 @@ def _review_issue_item_ids(issue: str) -> set[int]:
     for match in matches:
         sequence = match.group(1)
         for token in re.split(
-            r"\s*(?:,|&|and)\s*",
+            r"\s*(?:,\s*(?:and|&)|,|&|and)\s*",
             sequence,
             flags=re.IGNORECASE,
         ):
