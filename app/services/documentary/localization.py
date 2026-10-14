@@ -20,7 +20,7 @@ from app.services.documentary.project import load_project, project_dir
 from app.services.documentary.transcription import load_source_transcript
 
 MAX_LOCALIZATION_ATTEMPTS = 3
-MAX_LOCALIZATION_REPAIR_PASSES = 3
+MAX_LOCALIZATION_REPAIR_PASSES = 4
 MAX_LOCALIZATION_PROMPT_CHARS = 120_000
 MAX_LOCALIZATION_REVIEW_PROMPT_CHARS = 180_000
 COMPACT_LOCALIZATION_THRESHOLD_CHARS = 4_000
@@ -2491,8 +2491,68 @@ def _review_and_repair_localization(
                             for unit in updated_batch
                         }
                     )
+
+                    # Closure review: after a repair succeeds, re-check the whole
+                    # original batch once. This can catch a second issue that the
+                    # first reviewer pass missed while keeping repair item-scoped.
+                    latest_review_units = {
+                        unit["i"]: unit
+                        for unit in _localization_review_units(
+                            source_scenes,
+                            localized_scenes,
+                        )
+                    }
+                    closure_batch = [
+                        latest_review_units[item_id]
+                        for item_id in sorted(batch_ids)
+                        if item_id in latest_review_units
+                    ]
+                    closure_issues = _filter_review_issues_for_batch(
+                        [
+                            *_deterministic_review_issues(closure_batch),
+                            *_run_compact_review_batch(
+                                reviewer=reviewer,
+                                source_language=source_language,
+                                target_language=target_language,
+                                batch=closure_batch,
+                            ),
+                        ],
+                        closure_batch,
+                    )
+                    if not closure_issues:
+                        reviewed.update(
+                            {
+                                unit["i"]: _review_unit_fingerprint(unit)
+                                for unit in closure_batch
+                            }
+                        )
+                        if checkpoint is not None:
+                            checkpoint(translations, reviewed)
+                        break
+
+                    batch_issues = closure_issues
+                    closure_flagged_ids = set().union(
+                        *(
+                            _review_issue_item_ids(issue)
+                            for issue in closure_issues
+                        )
+                    )
+                    repair_ids = (
+                        batch_ids & closure_flagged_ids
+                        if closure_flagged_ids
+                        else batch_ids
+                    )
+                    for item_id in repair_ids:
+                        reviewed.pop(item_id, None)
+                    repair_batch = [
+                        source_units_by_id[item_id]
+                        for item_id in sorted(repair_ids)
+                        if item_id in source_units_by_id
+                    ]
                     if checkpoint is not None:
                         checkpoint(translations, reviewed)
+                    if repair_batch:
+                        continue
                     break
 
                 next_flagged_ids = set().union(
