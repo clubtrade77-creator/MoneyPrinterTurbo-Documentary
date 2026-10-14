@@ -1395,6 +1395,36 @@ def _localization_review_units(
                 }
             )
             unit_index += 1
+
+    for position, unit in enumerate(units):
+        previous_source = ""
+        next_source = ""
+        previous_translation = ""
+        next_translation = ""
+
+        def related(candidate: dict) -> bool:
+            if candidate["kind"] != unit["kind"]:
+                return False
+            if unit["kind"] == "subtitle":
+                return True
+            return True
+
+        for candidate in reversed(units[:position]):
+            if related(candidate):
+                previous_source = candidate["source"]
+                previous_translation = candidate["translation"]
+                break
+        for candidate in units[position + 1 :]:
+            if related(candidate):
+                next_source = candidate["source"]
+                next_translation = candidate["translation"]
+                break
+
+        unit["previous_source"] = previous_source
+        unit["next_source"] = next_source
+        unit["previous_translation"] = previous_translation
+        unit["next_translation"] = next_translation
+
     return units
 
 
@@ -1427,8 +1457,13 @@ def _build_compact_review_prompt(
     payload = [
         {
             "i": unit["i"],
+            "kind": unit["kind"],
+            "previous_source": unit.get("previous_source", ""),
             "source": unit["source"],
+            "next_source": unit.get("next_source", ""),
+            "previous_translation": unit.get("previous_translation", ""),
             "translation": unit["translation"],
+            "next_translation": unit.get("next_translation", ""),
         }
         for unit in batch
     ]
@@ -1436,32 +1471,46 @@ def _build_compact_review_prompt(
 Review this SMALL batch of documentary translations from
 {source_language} to {target_language}.
 
+For each item, judge ONLY whether "translation" faithfully represents that item's
+"source". Neighbor fields are CONTEXT ONLY. Use them to understand referents,
+gender, chronology, fragments, repeated names, and terminology. NEVER require the
+current translation to contain facts that appear only in a neighbor.
+
 Check ONLY MATERIAL factual fidelity and translation completeness:
 - reject additions or omissions of material facts;
-- reject changed names, numbers, dates, tense when it changes meaning, attribution,
-  uncertainty, negation, or meaning;
+- reject changed identity, numbers, dates, times, quantities, negation, attribution,
+  uncertainty, temporal relationships, or meaning;
 - reject untranslated source-language prose that should have been translated;
-- reject a proper name only if the person's/entity's identity is changed or the form
-  is materially inconsistent;
-- ACCEPT natural synonyms, idioms, inflection, word order, and stylistic differences
-  when they preserve the source meaning;
-- DO NOT reject merely because you prefer a different wording or a more literal
-  translation;
-- temporal expressions must preserve the actual time relationship (for example,
-  an eve/before-event expression must not become the event day itself);
-- do not critique style.
+- reject a proper-name form only when it changes identity or creates a materially
+  inconsistent identity across nearby translations;
+- ACCEPT reasonable transliteration variants, grammatical inflection, natural
+  synonyms, idioms, word order, and stylistic differences when meaning is intact;
+- ACCEPT a sentence fragment as a fragment when the source itself is a fragment;
+- DO NOT demand words from previous_source or next_source in the current item;
+- DO NOT reject merely because you prefer a more literal or elegant wording;
+- temporal distinctions are material: eve/day-before versus event day, morning
+  versus night, before versus after, previous versus next;
+- qualifiers are material: almost/nearly/about/at least/up to/reportedly/allegedly/
+  may/might/could/according to must not disappear or become stronger facts;
+- do not critique style, punctuation, or harmless grammar unless it changes meaning.
 
-Every issue MUST start with the exact item id, for example:
+Before rejecting an item, ask: "Would a viewer learn a materially different fact
+from this translation?" If NO, accept it.
+
+Every issue MUST start with the exact item id and mention only an item present in
+this batch, for example:
 "item 17: omitted the word almost".
+Return at most one concise issue per failing item.
 
 Return exactly one JSON object and nothing else:
 {{"supported":true,"issues":[]}}
 or
-{{"supported":false,"issues":["specific issue with item i"]}}
+{{"supported":false,"issues":["item 17: specific material error"]}}
 
 ITEMS:
 {json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}
 """.strip()
+
 
 
 def _run_compact_review_batch(
@@ -1493,8 +1542,12 @@ def _run_compact_review_batch(
             [
                 {
                     "i": unit["i"],
+                    "previous_source": unit.get("previous_source", ""),
                     "source": unit["source"],
+                    "next_source": unit.get("next_source", ""),
+                    "previous_translation": unit.get("previous_translation", ""),
                     "translation": unit["translation"],
+                    "next_translation": unit.get("next_translation", ""),
                 }
                 for unit in batch
             ],
@@ -1647,6 +1700,7 @@ def _build_single_item_repair_prompt(
     target_language: str,
     unit: dict,
     source_units: list[dict],
+    translations: dict[int, str],
     current_translation: str,
     issues: list[str],
 ) -> str:
@@ -1658,6 +1712,37 @@ def _build_single_item_repair_prompt(
         source_units,
         unit,
     )
+    position = next(
+        (
+            index
+            for index, candidate in enumerate(source_units)
+            if candidate["i"] == unit["i"]
+        ),
+        -1,
+    )
+    previous_translation = ""
+    next_translation = ""
+    if position >= 0:
+        for candidate in reversed(source_units[:position]):
+            if (
+                candidate["kind"] == unit["kind"]
+                and (
+                    unit["kind"] != "subtitle"
+                    or candidate["scene_index"] == unit["scene_index"]
+                )
+            ):
+                previous_translation = translations.get(candidate["i"], "")
+                break
+        for candidate in source_units[position + 1 :]:
+            if (
+                candidate["kind"] == unit["kind"]
+                and (
+                    unit["kind"] != "subtitle"
+                    or candidate["scene_index"] == unit["scene_index"]
+                )
+            ):
+                next_translation = translations.get(candidate["i"], "")
+                break
 
     return f"""
 Repair ONLY this rejected documentary translation item from
@@ -1690,6 +1775,9 @@ source, do not copy it blindly; produce the most faithful natural translation.
 PREVIOUS SOURCE:
 {previous}
 
+PREVIOUS TRANSLATION:
+{previous_translation}
+
 CURRENT ITEM ID:
 {unit["i"]}
 
@@ -1701,6 +1789,12 @@ CURRENT BAD TRANSLATION:
 
 NEXT SOURCE:
 {following}
+
+NEXT TRANSLATION:
+{next_translation}
+
+Neighbor translations are context only. Use them for consistent names, gender, and
+terminology; never copy their facts into CURRENT ITEM.
 
 Return exactly one JSON object and nothing else:
 {{"items":[{{"i":{unit["i"]},"text":"corrected translation of CURRENT SOURCE only"}}]}}
@@ -1714,6 +1808,7 @@ def _repair_single_localization_item(
     target_language: str,
     unit: dict,
     source_units: list[dict],
+    translations: dict[int, str],
     current_translation: str,
     issues: list[str],
 ) -> str:
@@ -1723,6 +1818,7 @@ def _repair_single_localization_item(
             target_language=target_language,
             unit=unit,
             source_units=source_units,
+            translations=translations,
             current_translation=current_translation,
             issues=issues,
         )
@@ -1769,6 +1865,7 @@ def _repair_compact_review_batch(
                 target_language=target_language,
                 unit=unit,
                 source_units=source_units,
+                translations=translations,
                 current_translation=translations.get(unit["i"], ""),
                 issues=_issues_for_item(issues, unit["i"]),
             )
