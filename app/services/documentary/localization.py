@@ -632,6 +632,15 @@ def _repeated_consistency_keys(units: list[dict]) -> set[str]:
     }
 
 
+def _compact_consistency_text(text: str, max_chars: int = 320) -> str:
+    value = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(value) <= max_chars:
+        return value
+    head = max_chars // 2
+    tail = max_chars - head - 1
+    return value[:head].rstrip() + "…" + value[-tail:].lstrip()
+
+
 def _with_consistency_context(
     batch: list[dict],
     *,
@@ -662,12 +671,14 @@ def _with_consistency_context(
                     continue
                 context.append(
                     {
-                        "source": candidate["text"],
-                        "translation": translations[candidate_id],
+                        "source": _compact_consistency_text(candidate["text"]),
+                        "translation": _compact_consistency_text(
+                            translations[candidate_id]
+                        ),
                         "shared_terms": sorted(shared),
                     }
                 )
-                if len(context) >= 3:
+                if len(context) >= 1:
                     break
 
         item = dict(unit)
