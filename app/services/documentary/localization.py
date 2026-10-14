@@ -855,12 +855,14 @@ def _translate_compact_batch(
         target_language=target_language,
         batch=batch[:midpoint],
         generator=generator,
+        on_partial=on_partial,
     )
     right = _translate_compact_batch(
         source_language=source_language,
         target_language=target_language,
         batch=batch[midpoint:],
         generator=generator,
+        on_partial=on_partial,
     )
     return {**left, **right}
 
@@ -968,6 +970,7 @@ def _localize_compact(
             index,
             len(batches),
         )
+
         def on_partial(partial: dict[int, str]) -> None:
             translations.update(partial)
             if checkpoint is not None:
