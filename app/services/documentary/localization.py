@@ -391,13 +391,16 @@ FIDELITY RULES — accuracy outranks elegance:
   times, ranges, percentages, currencies, measurements, ordinals/cardinals, and
   quantities. Formatting may adapt to the target language, but numeric value must
   not change.
+- Preserve past/present/future tense and aspect when they carry time meaning.
+  Preserve ordinal versus cardinal meaning.
 - Preserve negation and its scope.
 - Preserve evidentiary strength: allegedly/reportedly/apparently/may/might/could/
   likely/according to/police said must not become an asserted fact.
 - Preserve quantifiers and limits: almost/nearly/about/approximately/at least/
   at most/more than/less than/up to/as many as.
 - Preserve chronology precisely: before/after, earlier/later, previous/next,
-  ago/from now, morning/evening/night, eve/day distinctions. An eve/day-before
+  ago/from now, morning/evening/night, eve/day distinctions. Keep relative dates
+  relative and never invent an absolute date. An eve/day-before
   expression must not become the event day itself; a morning on that eve must
   remain a morning, not a night.
 - Preserve grammatical gender when the source establishes it. If gender is unknown
@@ -407,6 +410,13 @@ FIDELITY RULES — accuracy outranks elegance:
 - If a source field is a sentence fragment, translate it as a fragment. Do not
   finish it using words from another field or neighboring scene.
 - Preserve quotations and speaker/claim attribution.
+- Preserve URLs, email addresses, @handles, hashtags, document/form codes, model
+  numbers, case identifiers, and mixed letter-digit identifiers exactly unless the
+  source itself provides an established localized form.
+- If the source is awkward, incomplete, or possibly mistranscribed, translate what
+  it actually says; do not silently correct it by inventing facts.
+- Preserve ambiguity instead of resolving an unclear referent, motive, identity, or
+  event more confidently than the source.
 - Natural synonyms, idioms, inflection, and target-language word order are allowed
   when meaning is unchanged.
 - For narration_text, keep spoken duration reasonably close, but NEVER shorten by
@@ -618,6 +628,8 @@ FIDELITY RULES — these override elegance and brevity:
   meaning.
 - Preserve all numbers, years, dates, times, ranges, percentages, currencies,
   measurements, ordinals/cardinals, and quantities.
+- Preserve tense and aspect when they carry time meaning: past, present, and future
+  must not be swapped. Preserve ordinal versus cardinal meaning.
 - Preserve negation and scope: "not", "never", "only", "no longer", etc.
 - Preserve uncertainty and evidentiary strength: "allegedly", "reportedly",
   "apparently", "may", "might", "could", "likely", "according to", "police said".
@@ -626,6 +638,8 @@ FIDELITY RULES — these override elegance and brevity:
   "at least", "at most", "more than", "less than", "up to", "as many as".
 - Preserve temporal relationships exactly: before/after, earlier/later,
   previous/next, ago/from now, morning/evening/night, and eve/day distinctions.
+  Keep relative dates relative; never invent an absolute calendar date that the
+  source does not state.
   An expression meaning "the eve/day before an event" must NOT become the event
   day itself. A morning on that eve must remain a morning, not a night.
 - Preserve grammatical gender when source or context establishes it. If gender is
@@ -636,6 +650,13 @@ FIDELITY RULES — these override elegance and brevity:
   it with words from previous_source or next_source.
 - Preserve quotations and attribution. Do not move a quote or claim to another
   speaker.
+- Preserve URLs, email addresses, @handles, hashtags, document/form codes, model
+  numbers, case identifiers, and mixed letter-digit identifiers exactly unless the
+  source itself provides an established localized form.
+- If the source looks awkward, incomplete, or possibly mistranscribed, translate
+  what it actually says. Do not silently "correct" the source by inventing facts.
+- Preserve ambiguity. Do not resolve an unclear referent, motive, identity, or event
+  more confidently than the source does.
 - Keep terminology consistent across repeated names/events when context shows they
   refer to the same thing.
 - Do not add explanations, background, connective facts, or emotional language.
@@ -1231,6 +1252,64 @@ def _untranslated_copy_issue(unit: dict) -> str | None:
     )
 
 
+def _protected_literal_tokens(text: str) -> set[str]:
+    value = str(text or "")
+    tokens: set[str] = set()
+
+    tokens.update(
+        re.findall(
+            r"https?://[^\s<>\"']+",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+    tokens.update(
+        re.findall(
+            r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+    tokens.update(
+        re.findall(
+            r"(?<!\w)@[A-Za-z0-9_]{2,}\b",
+            value,
+        )
+    )
+    tokens.update(
+        re.findall(
+            r"(?<!\w)#[A-Za-z0-9_]{2,}\b",
+            value,
+        )
+    )
+    tokens.update(
+        re.findall(
+            r"\b(?=[A-Za-z0-9-]*[A-Za-z])(?=[A-Za-z0-9-]*\d)"
+            r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\b",
+            value,
+        )
+    )
+    return tokens
+
+
+def _protected_literal_issue(unit: dict) -> str | None:
+    source_tokens = _protected_literal_tokens(unit.get("source", ""))
+    if not source_tokens:
+        return None
+    translation = str(unit.get("translation") or "")
+    missing = sorted(
+        token
+        for token in source_tokens
+        if token not in translation
+    )
+    if not missing:
+        return None
+    return (
+        f"item {unit['i']}: protected identifier changed or disappeared: "
+        + ", ".join(missing)
+    )
+
+
 def _deterministic_review_issues(batch: list[dict]) -> list[str]:
     issues = []
     for unit in batch:
@@ -1240,6 +1319,9 @@ def _deterministic_review_issues(batch: list[dict]) -> list[str]:
         untranslated_issue = _untranslated_copy_issue(unit)
         if untranslated_issue:
             issues.append(untranslated_issue)
+        protected_issue = _protected_literal_issue(unit)
+        if protected_issue:
+            issues.append(protected_issue)
     return issues
 
 
@@ -1644,8 +1726,9 @@ current translation to contain facts that appear only in a neighbor.
 
 Check ONLY MATERIAL factual fidelity and translation completeness:
 - reject additions or omissions of material facts;
-- reject changed identity, numbers, dates, times, quantities, negation, attribution,
-  uncertainty, temporal relationships, or meaning;
+- reject changed identity, numbers, dates, times, quantities, tense when meaningful,
+  ordinal/cardinal meaning, negation, attribution, uncertainty, temporal
+  relationships, protected identifiers, or meaning;
 - reject untranslated source-language prose that should have been translated;
 - reject a proper-name form only when it changes identity or creates a materially
   inconsistent identity across nearby translations;
@@ -1654,8 +1737,8 @@ Check ONLY MATERIAL factual fidelity and translation completeness:
 - ACCEPT a sentence fragment as a fragment when the source itself is a fragment;
 - DO NOT demand words from previous_source or next_source in the current item;
 - DO NOT reject merely because you prefer a more literal or elegant wording;
-- temporal distinctions are material: eve/day-before versus event day, morning
-  versus night, before versus after, previous versus next;
+- temporal distinctions are material: past/present/future, eve/day-before versus
+  event day, morning versus night, before versus after, previous versus next;
 - qualifiers are material: almost/nearly/about/at least/up to/reportedly/allegedly/
   may/might/could/according to must not disappear or become stronger facts;
 - do not critique style, punctuation, or harmless grammar unless it changes meaning.
