@@ -2246,15 +2246,25 @@ def _repair_context_for_unit(
     return previous, following
 
 
+_REVIEW_ITEM_LABEL_PATTERN = (
+    r"(?:items?|пункт(?:ы|а|ов)?|элемент(?:ы|а|ов)?|ítems?|elementos?)"
+)
+_REVIEW_ITEM_CONNECTOR_PATTERN = r"(?:,\s*(?:and|&|и|y)|,|&|and|и|y)"
+
+
 def _split_review_issue_clauses(issues: list[str]) -> list[str]:
     clauses: list[str] = []
     for issue in issues:
         text = str(issue or "").strip()
         if not text:
             continue
+        item_start = (
+            _REVIEW_ITEM_LABEL_PATTERN
+            + r"\s+#?\d+"
+        )
         parts = re.split(
-            r"(?:;|,)\s*(?=items?\s+\d+\s*:)"
-            r"|\n+(?=items?\s+\d+\b)",
+            rf"(?:;|,)\s*(?={item_start}\s*:)"
+            rf"|\n+(?={item_start}\b)",
             text,
             flags=re.IGNORECASE,
         )
@@ -2269,11 +2279,13 @@ def _split_review_issue_clauses(issues: list[str]) -> list[str]:
 def _review_issue_item_ids(issue: str) -> set[int]:
     """Extract explicit localization item ids without treating dates as ids."""
     text = str(issue or "")
+    label = _REVIEW_ITEM_LABEL_PATTERN
+    connector = _REVIEW_ITEM_CONNECTOR_PATTERN
     matches = re.finditer(
-        r"\bitems?\s+"
-        r"((?:\d+(?:\s*[-–]\s*\d+)?)"
-        r"(?:\s*(?:,\s*(?:and|&)|,|&|and)\s*"
-        r"\d+(?:\s*[-–]\s*\d+)?)*)",
+        rf"\b{label}\s+#?"
+        rf"((?:\d+(?:\s*[-–]\s*\d+)?)"
+        rf"(?:\s*{connector}\s*#?"
+        rf"\d+(?:\s*[-–]\s*\d+)?)*)",
         text,
         flags=re.IGNORECASE,
     )
@@ -2281,12 +2293,12 @@ def _review_issue_item_ids(issue: str) -> set[int]:
     for match in matches:
         sequence = match.group(1)
         for token in re.split(
-            r"\s*(?:,\s*(?:and|&)|,|&|and)\s*",
+            rf"\s*{connector}\s*#?",
             sequence,
             flags=re.IGNORECASE,
         ):
             range_match = re.fullmatch(
-                r"(\d+)(?:\s*[-–]\s*(\d+))?",
+                r"#?(\d+)(?:\s*[-–]\s*(\d+))?",
                 token.strip(),
             )
             if not range_match:
@@ -2303,7 +2315,7 @@ def _review_issue_item_ids(issue: str) -> set[int]:
     parsed.update(
         int(match.group(1))
         for match in re.finditer(
-            r"\bitems?\s+(\d+)\b",
+            rf"\b{label}\s+#?(\d+)\b",
             text,
             flags=re.IGNORECASE,
         )
