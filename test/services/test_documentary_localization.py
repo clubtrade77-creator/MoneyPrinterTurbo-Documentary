@@ -2667,3 +2667,36 @@ def test_compact_localization_and_review_prompts_cover_semantic_traps():
     assert "almost anywhere" in review_prompt
     assert "who did what to whom" in review_prompt
     assert "since/until/by" in review_prompt
+
+
+def test_repair_prompt_exposes_hard_factual_constraints():
+    source_units = [
+        {
+            "i": 196,
+            "scene_index": 0,
+            "kind": "narration",
+            "text": (
+                "A 19-year-old from San Antonio walked 110 miles and called 911."
+            ),
+            "previous_text": "",
+            "next_text": "",
+        }
+    ]
+    prompt = _build_single_item_repair_prompt(
+        source_language="en",
+        target_language="ru",
+        unit=source_units[0],
+        source_units=source_units,
+        translations={196: "19-летняя девушка прошла 155 километров."},
+        current_translation="19-летняя девушка прошла 155 километров.",
+        issues=[
+            "item 196: numeric information changed and subject identity changed"
+        ],
+    )
+
+    assert '"required_digit_tokens_verbatim":["110","19","911"]' in prompt
+    assert "This is a REPAIR, not a rewrite or summary" in prompt
+    assert "every explicitly stated age, location" in prompt
+    assert "do NOT invent male/female gender" in prompt
+    assert "Do not invent motives, secrets, desperation" in prompt
+    assert "Preserve causal wording exactly" in prompt
