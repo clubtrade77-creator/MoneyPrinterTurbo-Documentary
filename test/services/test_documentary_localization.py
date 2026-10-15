@@ -22,6 +22,7 @@ from app.services.documentary.localization import (
     _build_compact_localization_prompt,
     _build_compact_review_prompt,
     _build_single_item_repair_prompt,
+    _repair_single_localization_item,
     _build_global_consistency_payload,
     _copied_source_span_issue,
     _global_consistency_batches,
@@ -2701,3 +2702,68 @@ def test_repair_prompt_exposes_hard_factual_constraints():
     assert "do NOT invent male/female gender" in prompt
     assert "Do not invent motives, secrets, desperation" in prompt
     assert "Preserve causal wording exactly" in prompt
+
+
+def test_single_item_repair_retries_until_numeric_gate_passes():
+    unit = {
+        "i": 196,
+        "scene_index": 0,
+        "kind": "narration",
+        "text": "A 19-year-old from San Antonio walked 110 miles.",
+        "previous_text": "",
+        "next_text": "",
+    }
+    calls = []
+
+    def generate(prompt: str) -> str:
+        calls.append(prompt)
+        text = (
+            "19-летний человек из Сан-Антонио прошёл 152 километра."
+            if len(calls) == 1
+            else "19-летний человек из Сан-Антонио прошёл 110 миль."
+        )
+        return json.dumps(
+            {"items": [{"i": 196, "text": text}]},
+            ensure_ascii=False,
+        )
+
+    repaired = _repair_single_localization_item(
+        generator=generate,
+        source_language="en",
+        target_language="ru",
+        unit=unit,
+        source_units=[unit],
+        translations={196: "19-летний человек прошёл 152 километра."},
+        current_translation="19-летний человек прошёл 152 километра.",
+        issues=["item 196: numeric information changed"],
+    )
+
+    assert len(calls) == 2
+    assert "source numbers={'19': 1, '110': 1}" in calls[1]
+    assert "110" in repaired
+    assert "152" not in repaired
+
+
+def test_compact_reviewer_does_not_receive_neighbor_translations():
+    prompt = _build_compact_review_prompt(
+        source_language="en",
+        target_language="ru",
+        batch=[
+            {
+                "i": 112,
+                "kind": "narration",
+                "previous_source": "Previous source sentence.",
+                "source": "Current source sentence.",
+                "next_source": "Next source sentence.",
+                "previous_translation": "Чужой предыдущий перевод.",
+                "translation": "Текущий перевод.",
+                "next_translation": "Совершенно другой соседний перевод.",
+            }
+        ],
+    )
+
+    assert "Previous source sentence." in prompt
+    assert "Next source sentence." in prompt
+    assert "Текущий перевод." in prompt
+    assert "Чужой предыдущий перевод." not in prompt
+    assert "Совершенно другой соседний перевод." not in prompt
