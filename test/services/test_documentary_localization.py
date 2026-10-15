@@ -21,6 +21,7 @@ from app.services.documentary.localization import (
     _build_reviewer_config_snapshot,
     _build_compact_localization_prompt,
     _build_compact_review_prompt,
+    _build_single_item_repair_prompt,
     _build_global_consistency_payload,
     _copied_source_span_issue,
     _global_consistency_batches,
