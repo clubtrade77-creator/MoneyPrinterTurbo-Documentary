@@ -3673,15 +3673,7 @@ def localize_project(
         root=root,
     )
 
-    # A caller-supplied generator means "generate this localization now".
-    # Do not silently replace that explicit request with text from a previously
-    # finalized localization plan. This is also required for intentional
-    # re-localization: downstream narration fingerprints must see changed text
-    # and correctly invalidate stale synthesized audio.
-    #
-    # The resumable .work.json cache above is still honored so interrupted jobs
-    # can continue safely; this guard applies only to reuse of a completed plan.
-    if not work_translations and generate_fn is None:
+    if not work_translations:
         existing_path = localization_plan_path(
             project_id,
             target_language,
@@ -3700,7 +3692,7 @@ def localize_project(
                     source_id: _transcript_fingerprint(transcript)
                     for source_id, transcript in transcripts.items()
                 }
-                if (
+                existing_plan_matches_source = (
                     existing_plan.semantic_reviewed
                     and existing_plan.reviewed_content_fingerprint
                     == _localized_scenes_fingerprint(existing_plan.scenes)
@@ -3710,6 +3702,23 @@ def localize_project(
                     == current_master_fingerprint
                     and existing_plan.transcript_fingerprints
                     == current_transcript_fingerprints
+                )
+                review_policy_changed = (
+                    existing_plan.semantic_review_version
+                    != CURRENT_LOCALIZATION_REVIEW_VERSION
+                )
+                # Reuse a completed translation in two cases:
+                # 1) ordinary production reuse with no explicit custom generator;
+                # 2) review-policy upgrade, where translation text must stay stable
+                #    and only semantic review is rerun under the new policy.
+                #
+                # If the existing plan is already on the CURRENT review policy and
+                # a custom generator is explicitly supplied, treat that as an
+                # intentional re-localization request and regenerate the text. That
+                # lets downstream narration fingerprints invalidate stale audio.
+                if (
+                    existing_plan_matches_source
+                    and (generate_fn is None or review_policy_changed)
                 ):
                     _validate_candidate_against_source(
                         existing_plan.scenes,
@@ -3719,9 +3728,6 @@ def localize_project(
                         source_scenes,
                         existing_plan.scenes,
                     )
-                    # A prior final plan may be reused as translation text even
-                    # when the review policy changed. Re-review it under the
-                    # current policy instead of regenerating the language.
                     work_reviewed = {}
             except (OSError, json.JSONDecodeError, ValueError, LocalizationError):
                 pass
