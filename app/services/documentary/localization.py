@@ -3673,7 +3673,15 @@ def localize_project(
         root=root,
     )
 
-    if not work_translations:
+    # A caller-supplied generator means "generate this localization now".
+    # Do not silently replace that explicit request with text from a previously
+    # finalized localization plan. This is also required for intentional
+    # re-localization: downstream narration fingerprints must see changed text
+    # and correctly invalidate stale synthesized audio.
+    #
+    # The resumable .work.json cache above is still honored so interrupted jobs
+    # can continue safely; this guard applies only to reuse of a completed plan.
+    if not work_translations and generate_fn is None:
         existing_path = localization_plan_path(
             project_id,
             target_language,
