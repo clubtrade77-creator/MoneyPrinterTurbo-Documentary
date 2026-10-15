@@ -1171,21 +1171,33 @@ def _render_autopilot(tr: Tr) -> None:
         can_resume = bool(resume_project_id) and (
             resume_topic == topic.strip()
         )
+        should_resume = False
         if can_resume:
             st.info(tr("Documentary Autopilot Resume Available"))
-
-        button_label = (
-            tr("Documentary Autopilot Resume")
-            if can_resume
-            else tr("Documentary Autopilot Start")
-        )
-        if not st.button(
-            button_label,
-            type="primary",
-            width="stretch",
-            key="documentary_autopilot_start",
-        ):
-            return
+            resume_col, new_col = st.columns(2)
+            resume_clicked = resume_col.button(
+                tr("Documentary Autopilot Resume"),
+                type="primary",
+                width="stretch",
+                key="documentary_autopilot_resume",
+            )
+            new_clicked = new_col.button(
+                f"➕ {tr('Documentary Create')}",
+                type="secondary",
+                width="stretch",
+                key="documentary_autopilot_new",
+            )
+            if not resume_clicked and not new_clicked:
+                return
+            should_resume = resume_clicked
+        else:
+            if not st.button(
+                tr("Documentary Autopilot Start"),
+                type="primary",
+                width="stretch",
+                key="documentary_autopilot_start",
+            ):
+                return
 
         progress_text = st.empty()
         progress_text.markdown(
@@ -1279,7 +1291,7 @@ def _render_autopilot(tr: Tr) -> None:
             result = run_autopilot(
                 AutopilotProfile(topic=topic.strip()),
                 progress=on_progress,
-                resume_project_id=resume_project_id if can_resume else "",
+                resume_project_id=resume_project_id if should_resume else "",
             )
         except AutopilotError as exc:
             failed_stage = _autopilot_progress_label(exc.stage, tr)
