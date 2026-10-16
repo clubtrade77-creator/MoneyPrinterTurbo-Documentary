@@ -28,7 +28,9 @@ jobs:
           fetch-depth: 1
 
       - name: Apply audit fixes
-        run: python .github/run_localization_audit_round2.py
+        run: |
+          python .github/run_localization_audit_round2.py
+          python .github/localization_audit_round2_postfix.py
 
       - name: Set up Python
         uses: actions/setup-python@v5
