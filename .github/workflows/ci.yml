@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: documentary-dev
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Apply iterative localization hardening
         run: python .github/run_localization_hardening.py
@@ -58,17 +58,11 @@ jobs:
           test/services/test_source_hunter.py
           test/services/test_story_discovery.py
 
-      - name: Commit hardened implementation and clean one-time files
+      - name: Commit hardened implementation
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout HEAD^ -- .github/workflows/ci.yml
-          git rm -f .github/workflows/localization-hardening-once.yml
-          git rm -f .github/workflows/localization-hardening-final.yml
-          git rm -f .github/workflows/localization-hardening-run.yml
-          git rm -f .github/localization_hardening_once.py
-          git rm -f .github/run_localization_hardening.py
-          git add .github/workflows/ci.yml app/services/documentary/localization.py test/services/test_documentary_localization.py
+          git add app/services/documentary/localization.py test/services/test_documentary_localization.py
           git commit -m "Harden localization generation and repair pipeline"
           git push origin HEAD:documentary-dev
 
