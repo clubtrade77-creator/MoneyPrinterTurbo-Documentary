@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 1
 
       - name: Apply audit fixes
-        run: python .github/localization_audit_round2.py
+        run: python .github/run_localization_audit_round2.py
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -118,7 +118,7 @@ jobs:
 
       - name: Run unit tests with coverage
         # pytest 兼容现有 unittest.TestCase，同时会收集仓库中的 pytest 风格
-        # 测试，避免测试文件已存在但 CI 没有真正执行。
+        # тесты, чтобы существующие тестовые файлы действительно запускались в CI.
         run: uv run --no-sync python -X utf8 -m coverage run -m pytest -q test
 
       - name: Report test coverage
