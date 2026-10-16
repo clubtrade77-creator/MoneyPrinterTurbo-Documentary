@@ -1,0 +1,449 @@
+name: Final localization hardening
+
+on:
+  push:
+    branches:
+      - documentary-dev
+    paths:
+      - .github/workflows/localization-hardening-final.yml
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out documentary-dev
+        uses: actions/checkout@v4
+        with:
+          ref: documentary-dev
+          fetch-depth: 0
+
+      - name: Repair patch-runner anchors
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/localization_hardening_once.py')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_label_block(
+              label: str,
+              start_marker: str,
+              end_marker: str,
+              replacement: str,
+          ) -> None:
+              global text
+              label_pos = text.index(label)
+              start = text.rfind(start_marker, 0, label_pos)
+              if start < 0:
+                  raise RuntimeError(f'start marker not found for {label}')
+              end = text.index(end_marker, label_pos)
+              text = text[:start] + replacement + text[end:]
+
+          replace_label_block(
+              '    "compact payload constraints",\n)',
+              'source = replace_once(',
+              '\nsource = replace_once(',
+              '''old_payload = (
+              '            "text": unit["text"],\\n'
+              '            "next_source": _compact_consistency_text('
+          )
+          new_payload = (
+              '            "text": unit["text"],\\n'
+              '            "required_digit_tokens": sorted(\\n'
+              '                _canonical_numeric_tokens(unit["text"]).elements()\\n'
+              '            ),\\n'
+              '            "required_number_word_spans": _source_number_word_spans(\\n'
+              '                unit["text"],\\n'
+              '                source_language,\\n'
+              '            ),\\n'
+              '            "required_protected_literals": sorted(\\n'
+              '                _protected_literal_tokens(unit["text"])\\n'
+              '            ),\\n'
+              '            "next_source": _compact_consistency_text('
+          )
+          source = replace_once(
+              source,
+              old_payload,
+              new_payload,
+              "compact payload constraints",
+          )
+          ''',
+          )
+
+          replace_label_block(
+              '    "compact prompt constraint explanation",\n)',
+              'source = replace_once(',
+              '\n\n# Cycle 3:',
+              '''old_prompt_context = (
+              '"consistency_context" contains earlier SOURCE→TRANSLATION examples only when the\\n'
+              'current item shares a repeated likely name/term with them. Use it ONLY to keep the\\n'
+              'same entity/name/term spelling consistent. Never import facts from those examples.\\n\\n'
+              'FIDELITY RULES — these override elegance and brevity:'
+          )
+          new_prompt_context = (
+              '"consistency_context" contains earlier SOURCE→TRANSLATION examples only when the\\n'
+              'current item shares a repeated likely name/term with them. Use it ONLY to keep the\\n'
+              'same entity/name/term spelling consistent. Never import facts from those examples.\\n'
+              '"required_digit_tokens" are hard constraints: copy every listed digit token\\n'
+              'verbatim with identical multiplicity; never spell it out, convert units, round it,\\n'
+              'or replace it with an equivalent value. "required_number_word_spans" must preserve\\n'
+              'the exact cardinal/ordinal value and scope. "required_protected_literals" must be\\n'
+              'copied exactly.\\n\\n'
+              'FIDELITY RULES — these override elegance and brevity:'
+          )
+          source = replace_once(
+              source,
+              old_prompt_context,
+              new_prompt_context,
+              "compact prompt constraint explanation",
+          )
+          ''',
+          )
+
+          replace_label_block(
+              '    "validated compact checkpoint block",\n)',
+              'old_batch_block = dedent(',
+              '\n\n# Cycle 4:',
+              '''batch_start = source.index(
+              "        def on_partial(partial: dict[int, str]) -> None:\\n"
+          )
+          batch_end = source.index("        completed_weight +=", batch_start)
+          new_batch_block = dedent(
+              """
+                      # Cross-item translation examples can leak facts and modifiers into the
+                      # current item. Initial translation therefore uses source context only;
+                      # global name consistency is checked after semantic review.
+                      enriched_missing = [
+                          {**unit, "consistency_context": []}
+                          for unit in missing
+                      ]
+                      batch_translations = _translate_compact_batch(
+                          source_language=source_language,
+                          target_language=target_language,
+                          batch=enriched_missing,
+                          generator=generator,
+                          on_partial=None,
+                      )
+
+                      # Never persist poisoned partial work. Repair hard factual violations
+                      # source-only before they enter the resumable checkpoint.
+                      for unit in enriched_missing:
+                          item_id = unit["i"]
+                          hard_issues = _hard_deterministic_review_issues(
+                              [
+                                  {
+                                      "i": item_id,
+                                      "source": unit["text"],
+                                      "translation": batch_translations[item_id],
+                                  }
+                              ]
+                          )
+                          if hard_issues:
+                              batch_translations[item_id] = _literal_fidelity_repair(
+                                  generator=generator,
+                                  source_language=source_language,
+                                  target_language=target_language,
+                                  unit=unit,
+                                  issues=hard_issues,
+                              )
+
+                      translations.update(batch_translations)
+                      if checkpoint is not None:
+                          checkpoint(translations)
+              """
+          )
+          new_batch_block = "\\n".join(
+              f"        {line}" if line else ""
+              for line in new_batch_block.splitlines()
+          ) + "\\n"
+          source = source[:batch_start] + new_batch_block + source[batch_end:]
+          ''',
+          )
+
+          replace_label_block(
+              '    "repair context isolation",\n)',
+              'old_constraint_block = dedent(',
+              '\nsource = replace_once(',
+              '''repair_function_start = source.index(
+              "def _build_single_item_repair_prompt("
+          )
+          constraint_start = source.index(
+              "    required_literal_tokens = sorted(_protected_literal_tokens(source_text))\\n",
+              repair_function_start,
+          )
+          constraint_end = source.index('    return f"""', constraint_start)
+          new_constraint_block = dedent(
+              """
+                  required_literal_tokens = sorted(_protected_literal_tokens(source_text))
+                  required_number_word_spans = _source_number_word_spans(
+                      source_text,
+                      source_language,
+                  )
+                  required_reviewer_source_spans = _review_source_span_hints(
+                      source_text,
+                      issues,
+                  )
+                  hard_constraints = {
+                      "required_digit_tokens_verbatim": required_digit_tokens,
+                      "required_number_word_spans": required_number_word_spans,
+                      "required_protected_literals_verbatim": required_literal_tokens,
+                      "required_reviewer_source_spans": required_reviewer_source_spans,
+                  }
+
+                  issue_blob = " ".join(str(issue) for issue in issues).casefold()
+                  context_is_risky = bool(
+                      re.search(
+                          r"added|not present|identity|wrong person|"
+                          r"next translation|previous translation|invented|hallucinat",
+                          issue_blob,
+                      )
+                  )
+                  if context_is_risky:
+                      previous, following = "", ""
+                      translation_under_review = ""
+                  else:
+                      previous, following = _repair_context_for_unit(
+                          source_units,
+                          unit,
+                      )
+                      previous = _compact_consistency_text(previous, max_chars=480)
+                      following = _compact_consistency_text(following, max_chars=480)
+                      translation_under_review = current_translation
+
+                  consistency_only = bool(issues) and all(
+                      re.search(
+                          r"consisten|anchor item|transliteration",
+                          str(issue),
+                          re.I,
+                      )
+                      for issue in issues
+                  )
+                  consistency_context = []
+                  if consistency_only:
+                      repeated_keys = _repeated_consistency_keys(source_units)
+                      consistency_context = _with_consistency_context(
+                          [unit],
+                          all_units=source_units,
+                          translations=translations,
+                          repeated_keys=repeated_keys,
+                      )[0].get("consistency_context", [])
+              """
+          )
+          new_constraint_block = "\\n".join(
+              f"    {line}" if line else ""
+              for line in new_constraint_block.splitlines()
+          ) + "\\n"
+          source = (
+              source[:constraint_start]
+              + new_constraint_block
+              + source[constraint_end:]
+          )
+          ''',
+          )
+
+          wiring_start = text.index(
+              '# Pass the independent reviewer into both production repair paths.'
+          )
+          wiring_end = text.index('# Tests:', wiring_start)
+          wiring_replacement = '''# Pass the independent reviewer into both production repair paths.
+          source, main_repair_wires = re.subn(
+              r'(?m)^(?P<indent>[ \\t]*)issues=batch_issues,\\n'
+              r'(?P=indent)status=status,',
+              lambda match: (
+                  f'{match.group("indent")}issues=batch_issues,\\n'
+                  f'{match.group("indent")}reviewer=reviewer,\\n'
+                  f'{match.group("indent")}status=status,'
+              ),
+              source,
+              count=1,
+          )
+          if main_repair_wires != 1:
+              raise RuntimeError(
+                  f'main repair reviewer wiring: expected one match, found '
+                  f'{main_repair_wires}'
+              )
+
+          source, consistency_repair_wires = re.subn(
+              r'(?m)^(?P<indent>[ \\t]*)issues=consistency_issues,\\n'
+              r'(?P=indent)status=status,',
+              lambda match: (
+                  f'{match.group("indent")}issues=consistency_issues,\\n'
+                  f'{match.group("indent")}reviewer=reviewer,\\n'
+                  f'{match.group("indent")}status=status,'
+              ),
+              source,
+              count=1,
+          )
+          if consistency_repair_wires != 1:
+              raise RuntimeError(
+                  f'consistency repair reviewer wiring: expected one match, found '
+                  f'{consistency_repair_wires}'
+              )
+
+          '''
+          text = text[:wiring_start] + wiring_replacement + text[wiring_end:]
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Apply iterative localization hardening
+        run: python .github/localization_hardening_once.py
+
+      - name: Align legacy tests with pre-review hard gates
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source_path = Path('app/services/documentary/localization.py')
+          tests_path = Path('test/services/test_documentary_localization.py')
+          source = source_path.read_text(encoding='utf-8')
+          tests = tests_path.read_text(encoding='utf-8')
+
+          def replace_in_function(name: str, old: str, new: str) -> None:
+              global tests
+              start = tests.index(f'def {name}(')
+              end = tests.find('\ndef ', start + 1)
+              if end < 0:
+                  end = len(tests)
+              block = tests[start:end]
+              count = block.count(old)
+              if count != 1:
+                  raise RuntimeError(
+                      f'{name}: expected one test anchor, found {count}'
+                  )
+              block = block.replace(old, new, 1)
+              tests = tests[:start] + block + tests[end:]
+
+          # Source context remains useful for fragment and boundary repair. Only
+          # translation/identity hallucination complaints suppress it.
+          risky_old = (
+              'r"added|not present|identity|wrong person|neighbor|"\n'
+              '                r"next translation|previous translation|invented|hallucinat",'
+          )
+          risky_new = (
+              'r"added|not present|identity|wrong person|"\n'
+              '                r"next translation|previous translation|invented|hallucinat",'
+          )
+          if source.count(risky_old) != 1:
+              raise RuntimeError('risky context regex anchor mismatch')
+          source = source.replace(risky_old, risky_new, 1)
+
+          targeted_old = '''    def generate(prompt: str) -> str:
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+'''
+          targeted_new = '''    def generate(prompt: str) -> str:
+        if "EMERGENCY LITERAL FIDELITY REPAIR" in prompt:
+            repair_prompts.append(prompt)
+            assert "2025" in prompt
+            return json.dumps(
+                {
+                    "items": [
+                        {"i": 0, "text": "Офицер подошёл в 2025 году."}
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+'''
+          replace_in_function(
+              'test_numeric_drift_is_targeted_for_repair_instead_of_failing_language',
+              targeted_old,
+              targeted_new,
+          )
+
+          numeric_fail_new = '''    def generate(prompt: str) -> str:
+        if "EMERGENCY LITERAL FIDELITY REPAIR" in prompt:
+            return json.dumps(
+                {"items": [{"i": 0, "text": "Поиски длились 11 часов."}]},
+                ensure_ascii=False,
+            )
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+'''
+          replace_in_function(
+              'test_numeric_drift_cannot_be_approved_by_final_materiality',
+              targeted_old,
+              numeric_fail_new,
+          )
+
+          year_fail_new = '''    def generate(prompt: str) -> str:
+        if "EMERGENCY LITERAL FIDELITY REPAIR" in prompt:
+            return json.dumps(
+                {
+                    "items": [
+                        {"i": 0, "text": "Событие произошло в 2024 году."}
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        if "Repair ONLY this rejected documentary translation item" in prompt:
+'''
+          replace_in_function(
+              'test_hard_year_drift_cannot_be_approved_by_final_materiality',
+              targeted_old,
+              year_fail_new,
+          )
+
+          consistency_old = '''    assert plan.semantic_reviewed is True
+    assert seen_consistency
+    assert any(
+        context["source"] == "Bayharr arrived at the station."
+        and "Бейхарр" in context["translation"]
+        for context in seen_consistency
+    )
+'''
+          consistency_new = '''    assert plan.semantic_reviewed is True
+    # Initial batches are source-isolated; global consistency review handles
+    # repeated names after semantic fidelity has been established.
+    assert seen_consistency == []
+'''
+          replace_in_function(
+              'test_compact_translation_reuses_distant_name_consistency_context',
+              consistency_old,
+              consistency_new,
+          )
+          tests = tests.replace(
+              'def test_compact_translation_reuses_distant_name_consistency_context(',
+              'def test_compact_translation_isolates_distant_name_context(',
+              1,
+          )
+
+          source_path.write_text(source, encoding='utf-8')
+          tests_path.write_text(tests, encoding='utf-8')
+          PY
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --python 3.11
+
+      - name: Compile and lint changed code
+        run: |
+          uv run --no-sync python -m compileall -q app/services/documentary/localization.py test/services/test_documentary_localization.py
+          uv run --no-sync ruff check app/services/documentary/localization.py test/services/test_documentary_localization.py
+
+      - name: Run localization and full documentary tests
+        run: |
+          uv run --no-sync pytest test/services/test_documentary_localization.py -q
+          uv run --no-sync pytest test/services/test_documentary_*.py test/services/test_source_hunter.py test/services/test_story_discovery.py -q
+
+      - name: Commit hardened implementation and remove one-time files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/localization-hardening-once.yml
+          git rm .github/workflows/localization-hardening-final.yml
+          git rm .github/localization_hardening_once.py
+          git add app/services/documentary/localization.py test/services/test_documentary_localization.py
+          git commit -m "Harden localization generation and repair pipeline"
+          git push origin HEAD:documentary-dev
