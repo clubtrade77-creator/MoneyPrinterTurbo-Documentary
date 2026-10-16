@@ -2767,3 +2767,67 @@ def test_compact_reviewer_does_not_receive_neighbor_translations():
     assert "Текущий перевод." in prompt
     assert "Чужой предыдущий перевод." not in prompt
     assert "Совершенно другой соседний перевод." not in prompt
+
+
+def test_stubborn_repair_falls_back_to_literal_mode_with_7_and_christmas_eve():
+    unit = {
+        "i": 2,
+        "scene_index": 0,
+        "kind": "narration",
+        "text": "At 7 on Christmas Eve, the family realized she was missing.",
+        "previous_text": "",
+        "next_text": "",
+    }
+    calls = []
+
+    def generate(prompt: str) -> str:
+        calls.append(prompt)
+        if "EMERGENCY LITERAL FIDELITY REPAIR" in prompt:
+            assert '"7"' in prompt
+            assert "Christmas Eve" in prompt
+            return json.dumps(
+                {
+                    "items": [
+                        {
+                            "i": 2,
+                            "text": (
+                                "В 7 часов в канун Рождества семья поняла, "
+                                "что она пропала."
+                            ),
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "i": 2,
+                        "text": "В канун Рождества семья поняла, что она пропала.",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    repaired = _repair_single_localization_item(
+        generator=generate,
+        source_language="en",
+        target_language="ru",
+        unit=unit,
+        source_units=[unit],
+        translations={2: "Семья поняла, что она пропала."},
+        current_translation="Семья поняла, что она пропала.",
+        issues=[
+            "item 2: numeric information changed; source numbers={'7': 1}, "
+            "translation numbers={}",
+            "item 2: omitted the word Christmas Eve",
+        ],
+    )
+
+    assert len(calls) == 4
+    assert "EMERGENCY LITERAL FIDELITY REPAIR" in calls[-1]
+    assert '"Christmas Eve"' in calls[-1]
+    assert "7" in repaired
+    assert "канун Рождества" in repaired
