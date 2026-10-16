@@ -7,77 +7,9 @@ on:
       - main
       - documentary-dev
 
-permissions:
-  contents: write
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  localization-audit-2:
-    name: Second localization hardening audit
-    if: >-
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/documentary-dev' &&
-      contains(github.event.head_commit.message, '[localization-audit-2]')
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Check out documentary-dev
-        uses: actions/checkout@v4
-        with:
-          ref: documentary-dev
-          fetch-depth: 1
-
-      - name: Apply audit fixes
-        run: |
-          python .github/run_localization_audit_round2.py
-          python .github/localization_audit_round2_postfix.py
-          python .github/localization_audit_round2_postfix2.py
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-
-      - name: Install dependencies
-        run: uv sync --frozen --python 3.11
-
-      - name: Compile and lint localization code
-        run: |
-          uv run --no-sync python -m compileall -q app/services/documentary/localization.py test/services/test_documentary_localization.py
-          uv run --no-sync ruff check app/services/documentary/localization.py test/services/test_documentary_localization.py
-
-      - name: Run localization tests
-        run: uv run --no-sync pytest test/services/test_documentary_localization.py -q
-
-      - name: Run full documentary tests
-        run: >-
-          uv run --no-sync pytest -q
-          test/services/test_documentary_*.py
-          test/services/test_source_hunter.py
-          test/services/test_story_discovery.py
-
-      - name: Commit hardened implementation
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/services/documentary/localization.py test/services/test_documentary_localization.py
-          git commit -m "Complete second localization hardening audit"
-          git push origin HEAD:documentary-dev
-
   tests:
     name: Python ${{ matrix.python-version }} tests
-    if: >-
-      github.event_name != 'push' ||
-      !contains(github.event.head_commit.message, '[localization-audit-2]')
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -127,6 +59,8 @@ jobs:
         run: uv run --no-sync ruff check app cli.py main.py webui test docs/skill
 
       - name: Run unit tests with coverage
+        # pytest 兼容现有 unittest.TestCase，同时会收集仓库中的 pytest 风格
+        # 测试，避免测试文件已存在但 CI 没有真正执行。
         run: uv run --no-sync python -X utf8 -m coverage run -m pytest -q test
 
       - name: Report test coverage
@@ -144,9 +78,6 @@ jobs:
 
   windows-smoke:
     name: Windows smoke tests
-    if: >-
-      github.event_name != 'push' ||
-      !contains(github.event.head_commit.message, '[localization-audit-2]')
     runs-on: windows-latest
     timeout-minutes: 30
 
