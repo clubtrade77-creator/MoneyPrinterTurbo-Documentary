@@ -7,7 +7,71 @@ on:
       - main
       - documentary-dev
 
+permissions:
+  contents: write
+
 jobs:
+  localization-hardening:
+    name: One-time localization hardening
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/documentary-dev' &&
+      contains(github.event.head_commit.message, '[localization-hardening]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out documentary-dev
+        uses: actions/checkout@v4
+        with:
+          ref: documentary-dev
+          fetch-depth: 0
+
+      - name: Apply iterative localization hardening
+        run: python .github/run_localization_hardening.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --python 3.11
+
+      - name: Compile and lint changed code
+        run: |
+          uv run --no-sync python -m compileall -q app/services/documentary/localization.py test/services/test_documentary_localization.py
+          uv run --no-sync ruff check app/services/documentary/localization.py test/services/test_documentary_localization.py
+
+      - name: Run localization tests
+        run: uv run --no-sync pytest test/services/test_documentary_localization.py -q
+
+      - name: Run full documentary tests
+        run: >-
+          uv run --no-sync pytest -q
+          test/services/test_documentary_*.py
+          test/services/test_source_hunter.py
+          test/services/test_story_discovery.py
+
+      - name: Commit hardened implementation and clean one-time files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout HEAD^ -- .github/workflows/ci.yml
+          git rm -f .github/workflows/localization-hardening-once.yml
+          git rm -f .github/workflows/localization-hardening-final.yml
+          git rm -f .github/workflows/localization-hardening-run.yml
+          git rm -f .github/localization_hardening_once.py
+          git rm -f .github/run_localization_hardening.py
+          git add .github/workflows/ci.yml app/services/documentary/localization.py test/services/test_documentary_localization.py
+          git commit -m "Harden localization generation and repair pipeline"
+          git push origin HEAD:documentary-dev
+
   tests:
     name: Python ${{ matrix.python-version }} tests
     runs-on: ubuntu-latest
