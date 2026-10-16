@@ -22,6 +22,46 @@ jobs:
           ref: documentary-dev
           fetch-depth: 0
 
+      - name: Repair patch-runner payload anchor
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/localization_hardening_once.py')
+          text = path.read_text(encoding='utf-8')
+          label = '    "compact payload constraints",\n)'
+          label_pos = text.index(label)
+          start = text.rfind('source = replace_once(', 0, label_pos)
+          end = text.index('\nsource = replace_once(', label_pos + len(label))
+          replacement = '''old_payload = (
+              '            "text": unit["text"],\\n'
+              '            "next_source": _compact_consistency_text('
+          )
+          new_payload = (
+              '            "text": unit["text"],\\n'
+              '            "required_digit_tokens": sorted(\\n'
+              '                _canonical_numeric_tokens(unit["text"]).elements()\\n'
+              '            ),\\n'
+              '            "required_number_word_spans": _source_number_word_spans(\\n'
+              '                unit["text"],\\n'
+              '                source_language,\\n'
+              '            ),\\n'
+              '            "required_protected_literals": sorted(\\n'
+              '                _protected_literal_tokens(unit["text"])\\n'
+              '            ),\\n'
+              '            "next_source": _compact_consistency_text('
+          )
+          source = replace_once(
+              source,
+              old_payload,
+              new_payload,
+              "compact payload constraints",
+          )
+          '''
+          text = text[:start] + replacement + text[end:]
+          path.write_text(text, encoding='utf-8')
+          PY
+
       - name: Apply iterative localization hardening
         run: python .github/localization_hardening_once.py
 
