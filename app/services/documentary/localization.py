@@ -31,9 +31,12 @@ COMPACT_LOCALIZATION_BATCH_ITEMS = 12
 COMPACT_REVIEW_THRESHOLD_CHARS = 5_000
 COMPACT_REVIEW_BATCH_CHARS = 1_800
 COMPACT_REVIEW_BATCH_ITEMS = 10
-CURRENT_LOCALIZATION_REVIEW_VERSION = 5
-_LOCALIZATION_WORK_VERSION = 1
-_LOCALIZATION_WORK_REVIEW_POLICY_VERSION = 5
+CURRENT_LOCALIZATION_REVIEW_VERSION = 6
+# Bump when translation/checkpoint semantics change so an interrupted
+# run cannot silently reuse text produced by an older prompt policy.
+_LOCALIZATION_WORK_VERSION = 2
+# Bump whenever deterministic or semantic review policy changes.
+_LOCALIZATION_WORK_REVIEW_POLICY_VERSION = 6
 
 LocalizationProgressCallback = Callable[[float], None]
 LocalizationStatusCallback = Callable[[str, int, int, int, int], None]
@@ -708,6 +711,84 @@ def _compact_consistency_text(text: str, max_chars: int = 320) -> str:
     return value[:head].rstrip() + "…" + value[-tail:].lstrip()
 
 
+
+_EN_NUMBER_WORDS = {
+    "zero", "one", "two", "three", "four", "five", "six", "seven",
+    "eight", "nine", "ten", "eleven", "twelve", "thirteen",
+    "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+    "nineteen", "twenty", "thirty", "forty", "fifty", "sixty",
+    "seventy", "eighty", "ninety", "hundred", "thousand", "million",
+    "billion", "first", "second", "third", "fourth", "fifth",
+    "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh",
+    "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth",
+    "seventeenth", "eighteenth", "nineteenth", "twentieth",
+    "thirtieth", "fortieth", "fiftieth", "sixtieth", "seventieth",
+    "eightieth", "ninetieth", "hundredth", "thousandth", "millionth",
+    "billionth", "half", "quarter", "dozen", "score", "once", "twice",
+}
+
+
+def _source_number_word_spans(text: str, source_language: str) -> list[str]:
+    """Return contiguous English number/ordinal phrases for prompt constraints."""
+    if _normalize_language(source_language).split("-", 1)[0] != "en":
+        return []
+
+    value = str(text or "")
+    matches = list(re.finditer(r"[A-Za-z]+(?:-[A-Za-z]+)*", value))
+    spans: list[str] = []
+    seen: set[str] = set()
+    index = 0
+    while index < len(matches):
+        token = matches[index].group(0).casefold()
+        parts = token.split("-")
+        if not all(part in _EN_NUMBER_WORDS for part in parts):
+            index += 1
+            continue
+
+        start = matches[index].start()
+        end = matches[index].end()
+        cursor = index + 1
+        while cursor < len(matches):
+            separator = value[end : matches[cursor].start()]
+            if not re.fullmatch(r"[\s,-]*", separator):
+                break
+            next_token = matches[cursor].group(0).casefold()
+            next_parts = next_token.split("-")
+            if all(part in _EN_NUMBER_WORDS for part in next_parts):
+                end = matches[cursor].end()
+                cursor += 1
+                continue
+            if (
+                next_token == "and"
+                and cursor + 1 < len(matches)
+                and re.fullmatch(
+                    r"[\s,-]*",
+                    value[
+                        matches[cursor].end() : matches[cursor + 1].start()
+                    ],
+                )
+                and all(
+                    part in _EN_NUMBER_WORDS
+                    for part in matches[cursor + 1]
+                    .group(0)
+                    .casefold()
+                    .split("-")
+                )
+            ):
+                end = matches[cursor + 1].end()
+                cursor += 2
+                continue
+            break
+
+        span = value[start:end].strip()
+        key = span.casefold()
+        if span and key not in seen:
+            seen.add(key)
+            spans.append(span)
+        index = cursor
+    return spans
+
+
 def _with_consistency_context(
     batch: list[dict],
     *,
@@ -769,6 +850,16 @@ def _build_compact_localization_prompt(
                 max_chars=240,
             ),
             "text": unit["text"],
+            "required_digit_tokens": sorted(
+                _canonical_numeric_tokens(unit["text"]).elements()
+            ),
+            "required_number_word_spans": _source_number_word_spans(
+                unit["text"],
+                source_language,
+            ),
+            "required_protected_literals": sorted(
+                _protected_literal_tokens(unit["text"])
+            ),
             "next_source": _compact_consistency_text(
                 unit.get("next_text", ""),
                 max_chars=240,
@@ -791,6 +882,11 @@ context into the current translation unless they are literally present in "text"
 "consistency_context" contains earlier SOURCE→TRANSLATION examples only when the
 current item shares a repeated likely name/term with them. Use it ONLY to keep the
 same entity/name/term spelling consistent. Never import facts from those examples.
+"required_digit_tokens" are hard constraints: copy every listed digit token
+verbatim with identical multiplicity; never spell it out, convert units, round it,
+or replace it with an equivalent value. "required_number_word_spans" must preserve
+the exact cardinal/ordinal value and scope. "required_protected_literals" must be
+copied exactly.
 
 FIDELITY RULES — these override elegance and brevity:
 - Produce grammatical, natural target-language text while preserving source meaning.
@@ -1151,7 +1247,6 @@ def _localize_compact(
     checkpoint: Callable[[dict[int, str]], None] | None = None,
 ) -> list[LocalizedSceneText]:
     units = _localization_text_units(source_scenes)
-    repeated_consistency_keys = _repeated_consistency_keys(units)
     if not units:
         return [
             LocalizedSceneText.model_validate(
@@ -1200,26 +1295,45 @@ def _localize_compact(
             len(batches),
         )
 
-        def on_partial(partial: dict[int, str]) -> None:
-            translations.update(partial)
-            if checkpoint is not None:
-                checkpoint(translations)
 
-        enriched_missing = _with_consistency_context(
-            missing,
-            all_units=units,
-            translations=translations,
-            repeated_keys=repeated_consistency_keys,
+        # Cross-item translation examples can leak facts and modifiers into the
+        # current item. Initial translation therefore uses source context only;
+        # global name consistency is checked after semantic review.
+        enriched_missing = [
+            {**unit, "consistency_context": []}
+            for unit in missing
+        ]
+        batch_translations = _translate_compact_batch(
+            source_language=source_language,
+            target_language=target_language,
+            batch=enriched_missing,
+            generator=generator,
+            on_partial=None,
         )
-        translations.update(
-            _translate_compact_batch(
-                source_language=source_language,
-                target_language=target_language,
-                batch=enriched_missing,
-                generator=generator,
-                on_partial=on_partial,
+
+        # Never persist poisoned partial work. Repair hard factual violations
+        # source-only before they enter the resumable checkpoint.
+        for unit in enriched_missing:
+            item_id = unit["i"]
+            hard_issues = _hard_deterministic_review_issues(
+                [
+                    {
+                        "i": item_id,
+                        "source": unit["text"],
+                        "translation": batch_translations[item_id],
+                    }
+                ]
             )
-        )
+            if hard_issues:
+                batch_translations[item_id] = _literal_fidelity_repair(
+                    generator=generator,
+                    source_language=source_language,
+                    target_language=target_language,
+                    unit=unit,
+                    issues=hard_issues,
+                )
+
+        translations.update(batch_translations)
         if checkpoint is not None:
             checkpoint(translations)
         completed_weight += sum(
@@ -1687,9 +1801,16 @@ def _hard_deterministic_review_issues(batch: list[dict]) -> list[str]:
         untranslated_issue = _untranslated_copy_issue(unit)
         if untranslated_issue:
             issues.append(untranslated_issue)
+        copied_span_issue = _copied_source_span_issue(unit)
+        if copied_span_issue:
+            issues.append(copied_span_issue)
         truncation_issue = _hard_truncation_issue(unit)
         if truncation_issue:
             issues.append(truncation_issue)
+        else:
+            length_issue = _suspicious_length_issue(unit)
+            if length_issue:
+                issues.append(length_issue)
     return issues
 
 
@@ -2540,33 +2661,60 @@ def _build_single_item_repair_prompt(
     required_digit_tokens = sorted(
         _canonical_numeric_tokens(source_text).elements()
     )
+
     required_literal_tokens = sorted(_protected_literal_tokens(source_text))
+    required_number_word_spans = _source_number_word_spans(
+        source_text,
+        source_language,
+    )
+    required_reviewer_source_spans = _review_source_span_hints(
+        source_text,
+        issues,
+    )
     hard_constraints = {
         "required_digit_tokens_verbatim": required_digit_tokens,
+        "required_number_word_spans": required_number_word_spans,
         "required_protected_literals_verbatim": required_literal_tokens,
+        "required_reviewer_source_spans": required_reviewer_source_spans,
     }
 
-    previous, following = _repair_context_for_unit(
-        source_units,
-        unit,
+    issue_blob = " ".join(str(issue) for issue in issues).casefold()
+    context_is_risky = bool(
+        re.search(
+            r"added|not present|identity|wrong person|"
+            r"next translation|previous translation|invented|hallucinat",
+            issue_blob,
+        )
     )
-    previous = _compact_consistency_text(previous, max_chars=480)
-    following = _compact_consistency_text(following, max_chars=480)
-    repeated_keys = _repeated_consistency_keys(source_units)
-    consistency_context = _with_consistency_context(
-        [unit],
-        all_units=source_units,
-        translations=translations,
-        repeated_keys=repeated_keys,
-    )[0].get("consistency_context", [])
-    position = next(
-        (
-            index
-            for index, candidate in enumerate(source_units)
-            if candidate["i"] == unit["i"]
-        ),
-        -1,
+    if context_is_risky:
+        previous, following = "", ""
+        translation_under_review = ""
+    else:
+        previous, following = _repair_context_for_unit(
+            source_units,
+            unit,
+        )
+        previous = _compact_consistency_text(previous, max_chars=480)
+        following = _compact_consistency_text(following, max_chars=480)
+        translation_under_review = current_translation
+
+    consistency_only = bool(issues) and all(
+        re.search(
+            r"consisten|anchor item|transliteration",
+            str(issue),
+            re.I,
+        )
+        for issue in issues
     )
+    consistency_context = []
+    if consistency_only:
+        repeated_keys = _repeated_consistency_keys(source_units)
+        consistency_context = _with_consistency_context(
+            [unit],
+            all_units=source_units,
+            translations=translations,
+            repeated_keys=repeated_keys,
+        )[0].get("consistency_context", [])
     return f"""
 Repair ONLY this rejected documentary translation item from
 {source_language} to {target_language}.
@@ -2589,7 +2737,10 @@ HARD MACHINE-CHECKED CONSTRAINTS:
 If required_digit_tokens_verbatim is non-empty, EVERY listed digit token must appear
 verbatim in the corrected translation with the same value and multiplicity. Do not
 spell those digits out, round them, convert units, or substitute a nearby number.
-If required_protected_literals_verbatim is non-empty, preserve each listed literal
+Preserve the exact cardinal/ordinal value and scope of every
+required_number_word_spans entry. Explicitly represent every
+required_reviewer_source_spans entry in the corrected translation. If
+required_protected_literals_verbatim is non-empty, preserve each listed literal
 exactly.
 
 Preserve:
@@ -2666,7 +2817,7 @@ CURRENT SOURCE:
 {unit["text"]}
 
 CURRENT TRANSLATION UNDER REVIEW:
-{current_translation}
+{translation_under_review}
 
 NEXT SOURCE:
 {following}
@@ -2737,6 +2888,11 @@ def _build_literal_fidelity_repair_prompt(
         _canonical_numeric_tokens(source_text).elements()
     )
     required_spans = _review_source_span_hints(source_text, issues)
+    seen_spans = {span.casefold() for span in required_spans}
+    for span in _source_number_word_spans(source_text, source_language):
+        if span.casefold() not in seen_spans:
+            seen_spans.add(span.casefold())
+            required_spans.append(span)
     return f"""
 EMERGENCY LITERAL FIDELITY REPAIR from {source_language} to {target_language}.
 
@@ -2786,21 +2942,33 @@ def _literal_fidelity_repair(
     target_language: str,
     unit: dict,
     issues: list[str],
+    reviewer: Callable[[str], str] | None = None,
 ) -> str:
     last_issues = list(issues)
+    last_hard_valid_text = ""
     for _ in range(3):
-        response = generator(
-            _build_literal_fidelity_repair_prompt(
-                source_language=source_language,
-                target_language=target_language,
-                unit=unit,
-                issues=last_issues,
+        try:
+            response = generator(
+                _build_literal_fidelity_repair_prompt(
+                    source_language=source_language,
+                    target_language=target_language,
+                    unit=unit,
+                    issues=last_issues,
+                )
             )
-        )
-        repaired = _parse_compact_localization_response(response, [unit])
+            repaired = _parse_compact_localization_response(response, [unit])
+        except _LocalizationSchemaError as exc:
+            last_issues = [*issues, f"item {unit['i']}: {exc}"]
+            continue
+
         text = str(repaired.get(unit["i"]) or "").strip()
         if not text:
+            last_issues = [
+                *issues,
+                f"item {unit['i']}: literal repair returned empty text",
+            ]
             continue
+
         hard_issues = _hard_deterministic_review_issues(
             [
                 {
@@ -2810,9 +2978,34 @@ def _literal_fidelity_repair(
                 }
             ]
         )
-        if not hard_issues:
+        if hard_issues:
+            last_issues = [*issues, *hard_issues]
+            continue
+
+        last_hard_valid_text = text
+        if reviewer is None:
             return text
-        last_issues = [*issues, *hard_issues]
+
+        semantic_issues = _run_final_materiality_review_item(
+            reviewer=reviewer,
+            source_language=source_language,
+            target_language=target_language,
+            unit={
+                "i": unit["i"],
+                "source": unit["text"],
+                "translation": text,
+                "previous_source": "",
+                "next_source": "",
+            },
+        )
+        if not semantic_issues:
+            return text
+        last_issues = [*issues, *semantic_issues]
+
+    # Keep a hard-valid candidate if the semantic reviewer remained noisy.
+    # The outer materiality gate independently checks it before final approval.
+    if last_hard_valid_text:
+        return last_hard_valid_text
 
     raise _LocalizationSemanticError(
         "literal repair could not satisfy deterministic factual constraints for "
@@ -2831,67 +3024,52 @@ def _repair_single_localization_item(
     translations: dict[int, str],
     current_translation: str,
     issues: list[str],
+    reviewer: Callable[[str], str] | None = None,
 ) -> str:
-    repair_issues = list(issues)
-    candidate_translation = current_translation
-
-    # A repaired item must pass deterministic factual gates BEFORE it is accepted
-    # into the localization. This prevents cycles where the model "repairs" 110
-    # miles into 152.50 km, drops a digit, leaves source prose untranslated, etc.,
-    # only for the next reviewer pass to rediscover the same hard error.
-    for _ in range(3):
-        response = generator(
-            _build_single_item_repair_prompt(
-                source_language=source_language,
-                target_language=target_language,
-                unit=unit,
-                source_units=source_units,
-                translations=translations,
-                current_translation=candidate_translation,
-                issues=repair_issues,
-            )
+    response = generator(
+        _build_single_item_repair_prompt(
+            source_language=source_language,
+            target_language=target_language,
+            unit=unit,
+            source_units=source_units,
+            translations=translations,
+            current_translation=current_translation,
+            issues=issues,
         )
-        repaired = _parse_compact_localization_response(
-            response,
-            [unit],
+    )
+    repaired = _parse_compact_localization_response(response, [unit])
+    text = str(repaired.get(unit["i"]) or "").strip()
+    if not text:
+        raise _LocalizationSchemaError(
+            f"localization repair returned no text for item {unit['i']}"
         )
-        text = str(repaired.get(unit["i"]) or "").strip()
-        if not text:
-            raise _LocalizationSchemaError(
-                f"localization repair returned no text for item {unit['i']}"
-            )
 
-        hard_issues = _hard_deterministic_review_issues(
-            [
-                {
-                    "i": unit["i"],
-                    "source": unit["text"],
-                    "translation": text,
-                }
-            ]
-        )
-        if not hard_issues:
-            return text
-
-        candidate_translation = text
-        repair_issues = [
-            *issues,
-            *hard_issues,
-            (
-                f"item {unit['i']}: previous repair failed mandatory machine "
-                "checks; correct every listed hard constraint before returning"
-            ),
+    hard_issues = _hard_deterministic_review_issues(
+        [
+            {
+                "i": unit["i"],
+                "source": unit["text"],
+                "translation": text,
+            }
         ]
+    )
+    if not hard_issues:
+        return text
 
-    # The ordinary repair prompt is intentionally comprehensive, but some models
-    # still get stuck repeating the same omission/conversion. Switch this one item
-    # to a minimal source-only literal mode instead of aborting the whole film.
     return _literal_fidelity_repair(
         generator=generator,
         source_language=source_language,
         target_language=target_language,
         unit=unit,
-        issues=repair_issues,
+        issues=[
+            *issues,
+            *hard_issues,
+            (
+                f"item {unit['i']}: context-aware repair failed mandatory "
+                "machine checks; use source-only literal repair"
+            ),
+        ],
+        reviewer=reviewer,
     )
 
 
@@ -2904,6 +3082,7 @@ def _repair_compact_review_batch(
     source_units: list[dict],
     translations: dict[int, str],
     issues: list[str],
+    reviewer: Callable[[str], str] | None = None,
     status: LocalizationStatusCallback | None = None,
     repair_attempt: int = 1,
     repair_attempts: int = 1,
@@ -2918,6 +3097,7 @@ def _repair_compact_review_batch(
             repair_attempt,
             repair_attempts,
         )
+        item_issues = _issues_for_item(issues, unit["i"])
         try:
             repaired[unit["i"]] = _repair_single_localization_item(
                 generator=generator,
@@ -2927,20 +3107,21 @@ def _repair_compact_review_batch(
                 source_units=source_units,
                 translations=translations,
                 current_translation=translations.get(unit["i"], ""),
-                issues=_issues_for_item(issues, unit["i"]),
+                issues=item_issues,
+                reviewer=reviewer,
             )
-        except (_LocalizationSchemaError, _NonRetryableLocalizationError):
-            # Preserve isolation even if the strict repair format drifts: fall back
-            # to the ordinary translator for this one item only, never the batch.
-            translated = _translate_compact_batch(
+        except _LocalizationSchemaError as exc:
+            repaired[unit["i"]] = _literal_fidelity_repair(
+                generator=generator,
                 source_language=source_language,
                 target_language=target_language,
-                batch=[unit],
-                generator=generator,
+                unit=unit,
+                issues=[*item_issues, f"item {unit['i']}: {exc}"],
+                reviewer=reviewer,
             )
-            repaired[unit["i"]] = translated[unit["i"]]
+        except _NonRetryableLocalizationError:
+            raise
     return repaired
-
 
 
 def _run_final_materiality_review_item(
@@ -3337,6 +3518,7 @@ def _review_and_repair_localization(
                     source_units=source_units,
                     translations=translations,
                     issues=batch_issues,
+                    reviewer=reviewer,
                     status=status,
                     repair_attempt=repair_attempt,
                     repair_attempts=MAX_LOCALIZATION_REPAIR_PASSES,
@@ -3586,6 +3768,7 @@ def _review_and_repair_localization(
                 source_units=source_units,
                 translations=translations,
                 issues=consistency_issues,
+                reviewer=reviewer,
                 status=status,
                 repair_attempt=consistency_attempts,
                 repair_attempts=2,

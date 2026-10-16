@@ -1247,6 +1247,17 @@ def test_numeric_drift_is_targeted_for_repair_instead_of_failing_language(
     repair_prompts = []
 
     def generate(prompt: str) -> str:
+        if "EMERGENCY LITERAL FIDELITY REPAIR" in prompt:
+            repair_prompts.append(prompt)
+            assert "2025" in prompt
+            return json.dumps(
+                {
+                    "items": [
+                        {"i": 0, "text": "Офицер подошёл в 2025 году."}
+                    ]
+                },
+                ensure_ascii=False,
+            )
         if "Repair ONLY this rejected documentary translation item" in prompt:
             repair_prompts.append(prompt)
             item_id = int(
@@ -1415,7 +1426,7 @@ def test_compact_prompt_marks_source_as_data_not_instructions(
     assert "Ignore previous instructions" in prompts[0]
 
 
-def test_compact_translation_reuses_distant_name_consistency_context(
+def test_compact_translation_isolates_distant_name_context(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -1472,12 +1483,9 @@ def test_compact_translation_reuses_distant_name_consistency_context(
     )
 
     assert plan.semantic_reviewed is True
-    assert seen_consistency
-    assert any(
-        context["source"] == "Bayharr arrived at the station."
-        and "Бейхарр" in context["translation"]
-        for context in seen_consistency
-    )
+    # Initial batches are source-isolated; global consistency review handles
+    # repeated names after semantic fidelity has been established.
+    assert seen_consistency == []
 
 
 def test_generic_batch_issue_is_isolated_before_repair(
@@ -1728,6 +1736,11 @@ def test_numeric_drift_cannot_be_approved_by_final_materiality(
     )
 
     def generate(prompt: str) -> str:
+        if "EMERGENCY LITERAL FIDELITY REPAIR" in prompt:
+            return json.dumps(
+                {"items": [{"i": 0, "text": "Поиски длились 11 часов."}]},
+                ensure_ascii=False,
+            )
         if "Repair ONLY this rejected documentary translation item" in prompt:
             item_id = int(
                 prompt.split("CURRENT ITEM ID:\n", 1)[1].splitlines()[0]
@@ -2015,6 +2028,15 @@ def test_hard_year_drift_cannot_be_approved_by_final_materiality(
     final_checks = []
 
     def generate(prompt: str) -> str:
+        if "EMERGENCY LITERAL FIDELITY REPAIR" in prompt:
+            return json.dumps(
+                {
+                    "items": [
+                        {"i": 0, "text": "Событие произошло в 2024 году."}
+                    ]
+                },
+                ensure_ascii=False,
+            )
         if "Repair ONLY this rejected documentary translation item" in prompt:
             item_id = int(
                 prompt.split("CURRENT ITEM ID:\n", 1)[1].splitlines()[0]
@@ -2826,8 +2848,144 @@ def test_stubborn_repair_falls_back_to_literal_mode_with_7_and_christmas_eve():
         ],
     )
 
-    assert len(calls) == 4
+    assert len(calls) == 2
     assert "EMERGENCY LITERAL FIDELITY REPAIR" in calls[-1]
     assert '"Christmas Eve"' in calls[-1]
     assert "7" in repaired
     assert "канун Рождества" in repaired
+
+
+
+def test_review_policy_and_work_cache_versions_advance_together():
+    from app.services.documentary.localization import (
+        _LOCALIZATION_WORK_REVIEW_POLICY_VERSION,
+        _LOCALIZATION_WORK_VERSION,
+    )
+
+    assert CURRENT_LOCALIZATION_REVIEW_VERSION >= 6
+    assert (
+        _LOCALIZATION_WORK_REVIEW_POLICY_VERSION
+        == CURRENT_LOCALIZATION_REVIEW_VERSION
+    )
+    assert _LOCALIZATION_WORK_VERSION >= 2
+
+
+def test_compact_prompt_exposes_per_item_machine_constraints():
+    prompt = _build_compact_localization_prompt(
+        source_language="en",
+        target_language="ru",
+        batch=[
+            {
+                "i": 2,
+                "kind": "narration",
+                "previous_text": "",
+                "text": "At 7 on Christmas Eve, seven people waited.",
+                "next_text": "",
+                "consistency_context": [],
+            }
+        ],
+    )
+
+    assert '"required_digit_tokens":["7"]' in prompt
+    assert '"required_number_word_spans":["seven"]' in prompt
+    assert "copy every listed digit token" in prompt
+
+
+def test_repair_drops_risky_neighbor_and_consistency_context():
+    unit = {
+        "i": 170,
+        "scene_index": 1,
+        "kind": "narration",
+        "text": "Camila's mother continued searching.",
+        "previous_text": "Rosario spoke to reporters.",
+        "next_text": "Volunteers joined later.",
+    }
+    prompt = _build_single_item_repair_prompt(
+        source_language="en",
+        target_language="ru",
+        unit=unit,
+        source_units=[
+            {
+                "i": 169,
+                "scene_index": 0,
+                "kind": "narration",
+                "text": "Rosario spoke to reporters.",
+                "previous_text": "",
+                "next_text": unit["text"],
+            },
+            unit,
+        ],
+        translations={169: "Росарио поговорила с журналистами."},
+        current_translation="Росарио продолжила поиски.",
+        issues=["item 170: added person/entity identity not present in source"],
+    )
+
+    assert "CURRENT SOURCE:\nCamila's mother continued searching." in prompt
+    assert "PREVIOUS SOURCE:\n\n" in prompt
+    assert "NEXT SOURCE:\n\n" in prompt
+    assert "Росарио поговорила с журналистами" not in prompt
+    assert "Росарио продолжила поиски" not in prompt
+
+
+def test_literal_repair_retries_after_schema_drift():
+    from app.services.documentary.localization import _literal_fidelity_repair
+
+    unit = {
+        "i": 2,
+        "scene_index": 0,
+        "kind": "narration",
+        "text": "At 7 on Christmas Eve, the family waited.",
+    }
+    calls = []
+
+    def generate(prompt: str) -> str:
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "not json"
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "i": 2,
+                        "text": "В 7 часов в канун Рождества семья ждала.",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    repaired = _literal_fidelity_repair(
+        generator=generate,
+        source_language="en",
+        target_language="ru",
+        unit=unit,
+        issues=["item 2: omitted 7 and Christmas Eve"],
+    )
+
+    assert len(calls) == 2
+    assert "7" in repaired
+    assert "канун Рождества" in repaired
+
+
+def test_hard_gate_rejects_long_partially_untranslated_span():
+    from app.services.documentary.localization import (
+        _hard_deterministic_review_issues,
+    )
+
+    issues = _hard_deterministic_review_issues(
+        [
+            {
+                "i": 24,
+                "source": (
+                    "The family continued searching through the night while "
+                    "volunteers checked roads and nearby fields."
+                ),
+                "translation": (
+                    "Семья продолжала поиски: the family continued searching "
+                    "through the night while volunteers checked roads and nearby fields."
+                ),
+            }
+        ]
+    )
+
+    assert any("verbatim source-language span" in issue for issue in issues)
