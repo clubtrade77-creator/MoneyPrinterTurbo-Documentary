@@ -404,6 +404,7 @@ def test_unresolved_semantic_batch_does_not_retry_whole_language(
         prompt
         for prompt in generate_calls
         if "Repair ONLY this rejected documentary translation item" not in prompt
+        and "EMERGENCY LITERAL FIDELITY REPAIR" not in prompt
     ]
     repair_calls = [
         prompt
@@ -698,7 +699,7 @@ def test_compact_localization_reports_real_batch_progress(
                 "items": [
                     {
                         "i": item["i"],
-                        "text": f"Перевод {item['i']}",
+                        "text": "Тестовый перевод текста",
                     }
                     for item in items
                 ]
@@ -1027,7 +1028,7 @@ def test_localize_project_repairs_semantically_rejected_translation(
     )
 
     assert plan.target_language == "ru"
-    assert len(review_calls) == 3
+    assert len(review_calls) == 4
     assert len(generate_calls) == 2
     assert "Repair ONLY this rejected documentary translation item" in generate_calls[1]
     assert "CURRENT ITEM ID:\n2" in generate_calls[1]
@@ -2989,3 +2990,210 @@ def test_hard_gate_rejects_long_partially_untranslated_span():
     )
 
     assert any("verbatim source-language span" in issue for issue in issues)
+
+
+
+def test_numeric_gate_allows_english_word_number_rendered_as_digit():
+    from app.services.documentary.localization import _numeric_fidelity_issue
+
+    issue = _numeric_fidelity_issue(
+        {
+            "i": 6,
+            "source_language": "en",
+            "source": "The nineteen-year-old was reported missing on May 29, 2025.",
+            "translation": (
+                "19-летний человек был объявлен пропавшим 29 мая 2025 года."
+            ),
+        }
+    )
+
+    assert issue is None
+
+
+def test_numeric_gate_rejects_digit_added_without_source_number():
+    from app.services.documentary.localization import _numeric_fidelity_issue
+
+    issue = _numeric_fidelity_issue(
+        {
+            "i": 8,
+            "source_language": "en",
+            "source": "The family continued searching.",
+            "translation": "Семья продолжила поиски вместе с 19 добровольцами.",
+        }
+    )
+
+    assert issue is not None
+    assert "translation numbers={'19': 1}" in issue
+
+
+def test_number_word_spans_are_multilingual_and_skip_referential_one():
+    from app.services.documentary.localization import _source_number_word_spans
+
+    assert _source_number_word_spans("the one who called", "en") == []
+    assert _source_number_word_spans("seven people waited", "en") == ["seven"]
+    assert _source_number_word_spans("семь человек ждали", "ru") == ["семь"]
+    assert _source_number_word_spans("siete personas esperaron", "es") == ["siete"]
+
+
+def test_generic_semantic_repair_is_source_only_by_default():
+    unit = {
+        "i": 25,
+        "scene_index": 1,
+        "kind": "narration",
+        "text": "The volunteers searched while the family waited.",
+        "previous_text": "Rosario spoke to reporters.",
+        "next_text": "Police issued a statement.",
+    }
+    prompt = _build_single_item_repair_prompt(
+        source_language="en",
+        target_language="ru",
+        unit=unit,
+        source_units=[unit],
+        translations={25: "Семья отчаянно просила о помощи."},
+        current_translation="Семья отчаянно просила о помощи.",
+        issues=["item 25: changed factual meaning and attribution"],
+    )
+
+    assert "CURRENT SOURCE:\nThe volunteers searched while the family waited." in prompt
+    assert "PREVIOUS SOURCE:\n\n" in prompt
+    assert "NEXT SOURCE:\n\n" in prompt
+    assert "Семья отчаянно просила" not in prompt
+
+
+def test_hard_valid_but_semantically_wrong_repair_uses_literal_fallback():
+    unit = {
+        "i": 2,
+        "scene_index": 0,
+        "kind": "narration",
+        "text": "At 7 on Christmas Eve, the family realized she was missing.",
+        "previous_text": "",
+        "next_text": "",
+    }
+    generation_prompts = []
+    review_prompts = []
+
+    def generate(prompt: str) -> str:
+        generation_prompts.append(prompt)
+        if "EMERGENCY LITERAL FIDELITY REPAIR" in prompt:
+            text = "В 7 часов в канун Рождества семья поняла, что она пропала."
+        else:
+            # Digit is correct, but the material Christmas Eve fact is omitted.
+            text = "В 7 часов семья поняла, что она пропала."
+        return json.dumps({"items": [{"i": 2, "text": text}]}, ensure_ascii=False)
+
+    def review(prompt: str) -> str:
+        review_prompts.append(prompt)
+        if "ITEMS:\n" in prompt:
+            items = json.loads(prompt.split("ITEMS:\n", 1)[1])
+            if "в канун Рождества" in items[0]["translation"]:
+                return json.dumps({"supported": True, "issues": []})
+            return json.dumps(
+                {
+                    "supported": False,
+                    "issues": ["item 2: omitted Christmas Eve"],
+                }
+            )
+        if "в канун Рождества" in prompt:
+            return "PASS"
+        return "FAIL: omitted Christmas Eve"
+
+    repaired = _repair_single_localization_item(
+        generator=generate,
+        reviewer=review,
+        source_language="en",
+        target_language="ru",
+        unit=unit,
+        source_units=[unit],
+        translations={2: "В 7 часов семья поняла, что она пропала."},
+        current_translation="В 7 часов семья поняла, что она пропала.",
+        issues=["item 2: omitted Christmas Eve"],
+    )
+
+    assert len(generation_prompts) == 2
+    assert "EMERGENCY LITERAL FIDELITY REPAIR" in generation_prompts[-1]
+    assert review_prompts
+    assert "канун Рождества" in repaired
+
+
+def test_literal_repair_retries_retryable_timeout():
+    from app.services.documentary.localization import _literal_fidelity_repair
+
+    unit = {
+        "i": 2,
+        "scene_index": 0,
+        "kind": "narration",
+        "text": "At 7 on Christmas Eve, the family waited.",
+    }
+    calls = []
+
+    def generate(_prompt: str) -> str:
+        calls.append(1)
+        if len(calls) == 1:
+            return "Error: request timed out"
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "i": 2,
+                        "text": "В 7 часов в канун Рождества семья ждала.",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    repaired = _literal_fidelity_repair(
+        generator=generate,
+        source_language="en",
+        target_language="ru",
+        unit=unit,
+        issues=["item 2: omitted 7 and Christmas Eve"],
+    )
+
+    assert len(calls) == 2
+    assert "7" in repaired
+
+
+def test_copied_source_span_detector_supports_cyrillic():
+    from app.services.documentary.localization import _copied_source_span_issue
+
+    issue = _copied_source_span_issue(
+        {
+            "i": 24,
+            "source": (
+                "Семья продолжала поиски всю ночь, пока добровольцы проверяли "
+                "дороги и близлежащие поля."
+            ),
+            "translation": (
+                "The family continued searching: семья продолжала поиски всю ночь "
+                "пока добровольцы проверяли дороги и близлежащие поля."
+            ),
+        }
+    )
+
+    assert issue is not None
+    assert "verbatim source-language span" in issue
+
+
+def test_global_consistency_timeout_is_supplemental():
+    from app.services.documentary.localization import _run_global_consistency_review
+
+    calls = []
+
+    def reviewer(_prompt: str) -> str:
+        calls.append(1)
+        return "Error: request timed out"
+
+    issues = _run_global_consistency_review(
+        reviewer=reviewer,
+        source_language="en",
+        target_language="ru",
+        source_units=[
+            {"i": 0, "text": "Bayharr arrived."},
+            {"i": 1, "text": "Bayharr spoke."},
+        ],
+        translations={0: "Бейхарр прибыл.", 1: "Бейхарр выступил."},
+    )
+
+    assert issues == []
+    assert len(calls) == 2
