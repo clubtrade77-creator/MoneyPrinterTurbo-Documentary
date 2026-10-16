@@ -30,7 +30,12 @@ jobs:
           path = Path('.github/localization_hardening_once.py')
           text = path.read_text(encoding='utf-8')
 
-          def replace_label_block(label: str, start_marker: str, end_marker: str, replacement: str) -> None:
+          def replace_label_block(
+              label: str,
+              start_marker: str,
+              end_marker: str,
+              replacement: str,
+          ) -> None:
               global text
               label_pos = text.index(label)
               start = text.rfind(start_marker, 0, label_pos)
@@ -152,6 +157,10 @@ jobs:
                           checkpoint(translations)
               """
           )
+          new_batch_block = "\\n".join(
+              f"        {line}" if line else ""
+              for line in new_batch_block.splitlines()
+          ) + "\\n"
           source = source[:batch_start] + new_batch_block + source[batch_end:]
           ''',
           )
@@ -223,9 +232,12 @@ jobs:
                           translations=translations,
                           repeated_keys=repeated_keys,
                       )[0].get("consistency_context", [])
-
               """
           )
+          new_constraint_block = "\\n".join(
+              f"    {line}" if line else ""
+              for line in new_constraint_block.splitlines()
+          ) + "\\n"
           source = (
               source[:constraint_start]
               + new_constraint_block
@@ -233,6 +245,48 @@ jobs:
           )
           ''',
           )
+
+          wiring_start = text.index(
+              '# Pass the independent reviewer into both production repair paths.'
+          )
+          wiring_end = text.index('# Tests:', wiring_start)
+          wiring_replacement = '''# Pass the independent reviewer into both production repair paths.
+          source, main_repair_wires = re.subn(
+              r'(?m)^(?P<indent>[ \\t]*)issues=batch_issues,\\n'
+              r'(?P=indent)status=status,',
+              lambda match: (
+                  f'{match.group("indent")}issues=batch_issues,\\n'
+                  f'{match.group("indent")}reviewer=reviewer,\\n'
+                  f'{match.group("indent")}status=status,'
+              ),
+              source,
+              count=1,
+          )
+          if main_repair_wires != 1:
+              raise RuntimeError(
+                  f'main repair reviewer wiring: expected one match, found '
+                  f'{main_repair_wires}'
+              )
+
+          source, consistency_repair_wires = re.subn(
+              r'(?m)^(?P<indent>[ \\t]*)issues=consistency_issues,\\n'
+              r'(?P=indent)status=status,',
+              lambda match: (
+                  f'{match.group("indent")}issues=consistency_issues,\\n'
+                  f'{match.group("indent")}reviewer=reviewer,\\n'
+                  f'{match.group("indent")}status=status,'
+              ),
+              source,
+              count=1,
+          )
+          if consistency_repair_wires != 1:
+              raise RuntimeError(
+                  f'consistency repair reviewer wiring: expected one match, found '
+                  f'{consistency_repair_wires}'
+              )
+
+          '''
+          text = text[:wiring_start] + wiring_replacement + text[wiring_end:]
 
           path.write_text(text, encoding='utf-8')
           PY
