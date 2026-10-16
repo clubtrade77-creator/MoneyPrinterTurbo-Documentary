@@ -1,0 +1,61 @@
+name: Execute localization hardening
+
+on:
+  push:
+    branches:
+      - documentary-dev
+    paths:
+      - .github/workflows/localization-hardening-run.yml
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out documentary-dev
+        uses: actions/checkout@v4
+        with:
+          ref: documentary-dev
+          fetch-depth: 0
+
+      - name: Apply iterative hardening
+        run: python .github/run_localization_hardening.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --python 3.11
+
+      - name: Compile and lint changed code
+        run: |
+          uv run --no-sync python -m compileall -q app/services/documentary/localization.py test/services/test_documentary_localization.py
+          uv run --no-sync ruff check app/services/documentary/localization.py test/services/test_documentary_localization.py
+
+      - name: Run localization and full documentary tests
+        run: |
+          uv run --no-sync pytest test/services/test_documentary_localization.py -q
+          uv run --no-sync pytest test/services/test_documentary_*.py test/services/test_source_hunter.py test/services/test_story_discovery.py -q
+
+      - name: Commit hardened implementation and remove one-time files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/localization-hardening-once.yml
+          git rm .github/workflows/localization-hardening-final.yml
+          git rm .github/workflows/localization-hardening-run.yml
+          git rm .github/localization_hardening_once.py
+          git rm .github/run_localization_hardening.py
+          git add app/services/documentary/localization.py test/services/test_documentary_localization.py
+          git commit -m "Harden localization generation and repair pipeline"
+          git push origin HEAD:documentary-dev
