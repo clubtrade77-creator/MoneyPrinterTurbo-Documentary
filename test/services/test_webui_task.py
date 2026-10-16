@@ -346,7 +346,7 @@ def test_completed_task_renders_subject_named_video_download(
                 "key": "download_generated_video_download-test_0",
                 "icon": ":material/download:",
                 "on_click": "ignore",
-                "use_container_width": True,
+                "width": "stretch",
             },
         )
     ]

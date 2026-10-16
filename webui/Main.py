@@ -8369,18 +8369,43 @@ def _render_application():
     if _apply_pending_settings_preset():
         st.success(tr("Settings Preset Imported"))
 
-    workspace_mode = st.radio(
+    # Streamlit AppTest serializes the formatted radio label, while the normal
+    # runtime stores the raw option. Keeping raw values together with format_func
+    # therefore makes the widget state invalid on a rerun (notably on Windows).
+    # Store a translated label in the widget and keep the stable internal mode in
+    # a separate session key. This also migrates existing sessions safely.
+    workspace_mode_labels = {
+        "short_video": tr("Short Video Mode"),
+        "documentary": tr("Documentary Mode"),
+    }
+    workspace_mode_by_label = {
+        label: mode
+        for mode, label in workspace_mode_labels.items()
+    }
+    stored_workspace_mode = st.session_state.get(
+        "workspace_mode_internal",
+        st.session_state.get("workspace_mode", "short_video"),
+    )
+    if stored_workspace_mode not in workspace_mode_labels:
+        stored_workspace_mode = "short_video"
+
+    workspace_label_key = "workspace_mode_label"
+    if st.session_state.get(workspace_label_key) not in workspace_mode_by_label:
+        st.session_state[workspace_label_key] = workspace_mode_labels[
+            stored_workspace_mode
+        ]
+
+    workspace_mode_label = st.radio(
         tr("Workspace Mode"),
-        options=("short_video", "documentary"),
-        format_func=lambda value: (
-            tr("Short Video Mode")
-            if value == "short_video"
-            else tr("Documentary Mode")
-        ),
-        key="workspace_mode",
+        options=tuple(workspace_mode_by_label),
+        key=workspace_label_key,
         horizontal=True,
         label_visibility="collapsed",
     )
+    workspace_mode = workspace_mode_by_label[workspace_mode_label]
+    st.session_state["workspace_mode_internal"] = workspace_mode
+    # Preserve the legacy non-widget key for integrations that inspect it.
+    st.session_state["workspace_mode"] = workspace_mode
 
     if workspace_mode == "documentary":
         documentary_ui.render_documentary_application(tr)
