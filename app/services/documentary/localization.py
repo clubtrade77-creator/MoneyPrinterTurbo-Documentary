@@ -2684,6 +2684,128 @@ Return exactly one JSON object and nothing else:
 """.strip()
 
 
+def _review_source_span_hints(
+    source_text: str,
+    issues: list[str],
+) -> list[str]:
+    """Extract reviewer-quoted spans that literally occur in the current source."""
+    source = str(source_text or "")
+    source_folded = source.casefold()
+    hints: list[str] = []
+    seen: set[str] = set()
+    for issue in issues:
+        for match in re.finditer(
+            r'["“”]([^"“”]{2,120})["“”]',
+            str(issue or ""),
+        ):
+            candidate = match.group(1).strip()
+            key = candidate.casefold()
+            if (
+                candidate
+                and key not in seen
+                and key in source_folded
+            ):
+                seen.add(key)
+                hints.append(candidate)
+    return hints[:12]
+
+
+def _build_literal_fidelity_repair_prompt(
+    *,
+    source_language: str,
+    target_language: str,
+    unit: dict,
+    issues: list[str],
+) -> str:
+    source_text = str(unit.get("text") or "")
+    required_digits = sorted(
+        _canonical_numeric_tokens(source_text).elements()
+    )
+    required_spans = _review_source_span_hints(source_text, issues)
+    return f"""
+EMERGENCY LITERAL FIDELITY REPAIR from {source_language} to {target_language}.
+
+Translate ONLY the SOURCE below. Ignore all neighboring text and all previous
+translations. Do NOT summarize, rewrite, convert units, infer, embellish, or omit.
+
+SOURCE:
+{source_text}
+
+MANDATORY DIGIT TOKENS — COPY EACH TOKEN VERBATIM INTO THE TRANSLATION:
+{json.dumps(required_digits, ensure_ascii=False)}
+
+MANDATORY SOURCE SPANS — EACH MUST BE REPRESENTED EXPLICITLY IN THE TRANSLATION:
+{json.dumps(required_spans, ensure_ascii=False)}
+
+REVIEW FAILURES TO FIX:
+{json.dumps([str(issue) for issue in issues], ensure_ascii=False)}
+
+Rules:
+- Preserve every factual clause and modifier from SOURCE.
+- Preserve every mandatory digit token exactly as digits. Never convert 7 to a word,
+  never convert 110 miles to kilometers, and never replace a number with an
+  equivalent or approximate value.
+- Translate every mandatory source span by its exact contextual meaning. Do not omit
+  it. A phrase such as "Christmas Eve" must remain the eve/day before Christmas,
+  not Christmas Day and not a generic holiday reference.
+- Preserve negation, tense, uncertainty, attribution, actor/subject/object, legal
+  status, causality, quantities, dates, and time-of-day.
+- If SOURCE does not establish gender, do not invent it.
+- Prefer literal factual completeness over elegance.
+
+Before answering, verify silently:
+1. every mandatory digit appears verbatim;
+2. every mandatory source span is explicitly represented;
+3. no source fact is missing;
+4. no new fact was added.
+
+Return exactly one JSON object:
+{{"items":[{{"i":{unit["i"]},"text":"faithful complete translation"}}]}}
+""".strip()
+
+
+def _literal_fidelity_repair(
+    *,
+    generator: Callable[[str], str],
+    source_language: str,
+    target_language: str,
+    unit: dict,
+    issues: list[str],
+) -> str:
+    last_issues = list(issues)
+    for _ in range(3):
+        response = generator(
+            _build_literal_fidelity_repair_prompt(
+                source_language=source_language,
+                target_language=target_language,
+                unit=unit,
+                issues=last_issues,
+            )
+        )
+        repaired = _parse_compact_localization_response(response, [unit])
+        text = str(repaired.get(unit["i"]) or "").strip()
+        if not text:
+            continue
+        hard_issues = _hard_deterministic_review_issues(
+            [
+                {
+                    "i": unit["i"],
+                    "source": unit["text"],
+                    "translation": text,
+                }
+            ]
+        )
+        if not hard_issues:
+            return text
+        last_issues = [*issues, *hard_issues]
+
+    raise _LocalizationSemanticError(
+        "literal repair could not satisfy deterministic factual constraints for "
+        f"item {unit['i']}: "
+        + "; ".join(last_issues[-4:])
+    )
+
+
 def _repair_single_localization_item(
     *,
     generator: Callable[[str], str],
@@ -2746,10 +2868,15 @@ def _repair_single_localization_item(
             ),
         ]
 
-    raise _LocalizationSemanticError(
-        "repair could not satisfy deterministic factual constraints for "
-        f"item {unit['i']}: "
-        + "; ".join(repair_issues[-4:])
+    # The ordinary repair prompt is intentionally comprehensive, but some models
+    # still get stuck repeating the same omission/conversion. Switch this one item
+    # to a minimal source-only literal mode instead of aborting the whole film.
+    return _literal_fidelity_repair(
+        generator=generator,
+        source_language=source_language,
+        target_language=target_language,
+        unit=unit,
+        issues=repair_issues,
     )
 
 
