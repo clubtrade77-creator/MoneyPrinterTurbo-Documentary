@@ -2693,20 +2693,35 @@ def _review_source_span_hints(
     source_folded = source.casefold()
     hints: list[str] = []
     seen: set[str] = set()
+    def add_hint(candidate: str) -> None:
+        candidate = str(candidate or "").strip().strip('"“”')
+        key = candidate.casefold()
+        if (
+            candidate
+            and key not in seen
+            and key in source_folded
+        ):
+            seen.add(key)
+            hints.append(candidate)
+
     for issue in issues:
+        issue_text = str(issue or "")
         for match in re.finditer(
             r'["“”]([^"“”]{2,120})["“”]',
-            str(issue or ""),
+            issue_text,
         ):
-            candidate = match.group(1).strip()
-            key = candidate.casefold()
-            if (
-                candidate
-                and key not in seen
-                and key in source_folded
-            ):
-                seen.add(key)
-                hints.append(candidate)
+            add_hint(match.group(1))
+
+        # Reviewers often say e.g. "omitted the word Christmas Eve" without
+        # quotation marks. Recover that literal source span too.
+        for match in re.finditer(
+            r"\bomitted\s+(?:the\s+(?:word|phrase)\s+)?"
+            r"([^;,.]+?)(?=\s+(?:and|which|that)\b|[;,.]|$)",
+            issue_text,
+            flags=re.IGNORECASE,
+        ):
+            add_hint(match.group(1))
+
     return hints[:12]
 
 
