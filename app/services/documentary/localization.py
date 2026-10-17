@@ -2639,7 +2639,7 @@ def _review_issue_item_ids(issue: str) -> set[int]:
 
 def _review_issue_source_span(issue: str) -> str:
     match = re.search(
-        r'source_span\\s*=\\s*["“”«»]([^"“”«»]{1,240})["“”«»]',
+        r'source_span\s*=\s*["“”«»]([^"“”«»]{1,240})["“”«»]',
         str(issue or ""),
         flags=re.IGNORECASE,
     )
@@ -2649,8 +2649,8 @@ def _review_issue_source_span(issue: str) -> str:
 def _normalized_span_present(source: str, span: str) -> bool:
     if not span:
         return True
-    source_norm = re.sub(r"\\s+", " ", str(source or "").casefold()).strip()
-    span_norm = re.sub(r"\\s+", " ", str(span or "").casefold()).strip()
+    source_norm = re.sub(r"\s+", " ", str(source or "").casefold()).strip()
+    span_norm = re.sub(r"\s+", " ", str(span or "").casefold()).strip()
     return span_norm in source_norm
 
 
