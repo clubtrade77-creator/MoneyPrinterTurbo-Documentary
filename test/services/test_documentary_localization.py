@@ -564,7 +564,7 @@ def test_large_localization_review_uses_compact_batches(
 
     def review(prompt: str) -> str:
         review_calls.append(prompt)
-        assert "SMALL batch of documentary translations" in prompt
+        assert "Review this FACTUAL documentary batch" in prompt
         return json.dumps({"supported": True, "issues": []})
 
     plan = localize_project(
