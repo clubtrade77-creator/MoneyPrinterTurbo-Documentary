@@ -2851,6 +2851,10 @@ def _build_single_item_repair_prompt(
         "required_number_word_spans": required_number_word_spans,
         "required_protected_literals_verbatim": required_literal_tokens,
         "required_reviewer_source_spans": required_reviewer_source_spans,
+        "semantic_obligations": _semantic_obligations(
+            source_text,
+            source_language,
+        ),
     }
 
 
@@ -2917,6 +2921,14 @@ This is a REPAIR, not a rewrite or summary. Translate clause-by-clause. Every
 material proposition present in CURRENT SOURCE must still be recoverable from the
 translation. Do not compress several facts into a looser paraphrase.
 
+MINIMAL-CHANGE POLICY:
+- CURRENT SOURCE is always authoritative.
+- If CURRENT TRANSLATION UNDER REVIEW is shown, preserve every part that is already
+  faithful and natural; change only what is necessary to fix a source-proven error.
+- Do not introduce a new synonym, name spelling, tense, or sentence restructuring
+  merely because another wording is possible.
+- Never make a second unrelated edit while repairing one localized defect.
+
 HARD MACHINE-CHECKED CONSTRAINTS:
 {json.dumps(hard_constraints, ensure_ascii=False, separators=(",", ":"))}
 
@@ -2927,7 +2939,9 @@ Preserve the exact cardinal/ordinal value and scope of every
 required_number_word_spans entry. Explicitly represent every
 required_reviewer_source_spans entry in the corrected translation. If
 required_protected_literals_verbatim is non-empty, preserve each listed literal
-exactly.
+exactly. For every semantic_obligations entry, preserve the source relation or
+modifier in meaning and scope; do not copy the English span literally unless that is
+natural in the target language.
 
 Preserve:
 - exact factual meaning and every meaning-bearing modifier;
@@ -3110,19 +3124,22 @@ Rules:
 - Preserve every mandatory digit token exactly as digits. Never convert 7 to a word,
   never convert 110 miles to kilometers, and never replace a number with an
   equivalent or approximate value.
-- Translate every mandatory source span by its exact contextual meaning. Do not omit
-  it. A phrase such as "Christmas Eve" must remain the eve/day before Christmas,
-  not Christmas Day and not a generic holiday reference.
+- Translate every mandatory source span by its exact contextual meaning. Do not
+  omit it or replace a precise temporal/scope/legal relation with a broader one.
 - Preserve negation, tense, uncertainty, attribution, actor/subject/object, legal
   status, causality, quantities, dates, and time-of-day.
 - If SOURCE does not establish gender, do not invent it.
 - Prefer literal factual completeness over elegance.
 
-Before answering, verify silently:
-1. every mandatory digit appears verbatim;
-2. every mandatory source span is explicitly represented;
-3. no source fact is missing;
-4. no new fact was added.
+Before answering, perform this semantic checksum silently:
+1. ACTORS — same people/entities and same subject/object roles;
+2. ACTION/STATUS — same action, legal/procedural status, causality and negation;
+3. TIME — same tense, chronology, relative-time relation and time-of-day;
+4. QUANTITY/SCOPE — same numbers, ordinals, limits, approximation, frequency and
+   distribution;
+5. EVIDENCE — same attribution, uncertainty and modality;
+6. COMPLETENESS — every mandatory digit/span and every material clause is present;
+7. NO ADDITIONS — no new fact, motive, emotion, identity or causal link was added.
 
 Return exactly one JSON object:
 {{"items":[{{"i":{unit["i"]},"text":"faithful complete translation"}}]}}
