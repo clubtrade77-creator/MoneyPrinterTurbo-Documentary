@@ -2678,12 +2678,12 @@ def _filter_review_issues_for_batch(
 
         source_span = _review_issue_source_span(issue)
         if source_span and matching_ids:
-            if not any(
-                _normalized_span_present(
-                    units_by_id[item_id].get("source", ""),
-                    source_span,
-                )
-                for item_id in matching_ids
+            if len(matching_ids) != 1:
+                continue
+            item_id = next(iter(matching_ids))
+            if not _normalized_span_present(
+                units_by_id[item_id].get("source", ""),
+                source_span,
             ):
                 continue
 
