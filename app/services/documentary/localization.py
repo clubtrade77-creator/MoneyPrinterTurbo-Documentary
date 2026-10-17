@@ -2429,7 +2429,8 @@ Check ONLY MATERIAL factual fidelity and translation completeness:
   cardinal "three");
 - reject untranslated source-language prose that should have been translated;
 - reject a proper-name form only when it changes identity or creates a materially
-  inconsistent identity across nearby translations;
+  inconsistent identity. NEVER reject solely because you prefer another plausible
+  transliteration spelling or grammatical case ending;
 - ACCEPT reasonable transliteration variants, grammatical inflection, natural
   synonyms, idioms, word order, and stylistic differences when meaning is intact;
 - ACCEPT a sentence fragment as a fragment when the source itself is a fragment;
@@ -2442,9 +2443,9 @@ Check ONLY MATERIAL factual fidelity and translation completeness:
 - lexical sense is material when a fluent synonym/collocation changes the actual
   concept. Check phrasal verbs, idioms, collocations, and polysemous words in
   context; do not accept a literal calque merely because every source word appears;
-- scope combinations are material: "almost anywhere" must preserve both
-  approximation and broad distribution; any/every/some/no and frequency words must
-  keep their scope rather than collapsing into a stronger or weaker claim;
+- combined scope is material: preserve every approximation, distribution,
+  frequency, exclusivity, and limit marker attached to the proposition rather than
+  collapsing several modifiers into a stronger or weaker claim;
 - logical relations and semantic roles are material: and/or, if/unless,
   cause/result versus sequence, comparisons, possession, pronoun antecedents,
   active/passive agency, and who did what to whom must remain the same;
@@ -2460,15 +2461,18 @@ Check ONLY MATERIAL factual fidelity and translation completeness:
 Before rejecting an item, ask: "Would a viewer learn a materially different fact
 from this translation?" If NO, accept it.
 
-Every issue MUST start with the exact item id and mention only an item present in
-this batch, for example:
-"item 17: omitted the word almost".
-Return at most one concise issue per failing item.
+Every issue MUST identify one item present in this batch and quote the shortest
+exact SOURCE span that proves the material problem. Use this exact format:
+"item <id> | source_span=\"<verbatim source text>\" | problem=<material difference>".
+The source_span MUST be copied from that item's source, never invented from the
+translation or neighboring context. If you cannot point to a source span proving a
+material difference, do not reject the item. Return at most one concise issue per
+failing item.
 
 Return exactly one JSON object and nothing else:
 {{"supported":true,"issues":[]}}
 or
-{{"supported":false,"issues":["item 17: specific material error"]}}
+{{"supported":false,"issues":["item 17 | source_span=\"exact source span\" | problem=material error"]}}
 
 ITEMS:
 {json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}
