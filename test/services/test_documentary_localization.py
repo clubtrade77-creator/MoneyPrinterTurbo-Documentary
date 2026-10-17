@@ -28,6 +28,8 @@ from app.services.documentary.localization import (
     _global_consistency_batches,
     _likely_consistency_keys,
     _review_issue_item_ids,
+    _filter_review_issues_for_batch,
+    _semantic_obligations,
     _suspicious_length_issue,
     load_localization_plan,
     localization_plan_path,
@@ -2614,7 +2616,7 @@ def test_localize_project_rejects_master_language_as_target(tmp_path: Path):
         )
 
 
-def test_localization_prompt_covers_semantic_traps_and_review_policy_v5():
+def test_localization_prompt_uses_generic_semantic_checksum():
     prompt = build_localization_prompt(
         source_language="en",
         target_language="ru",
@@ -2622,35 +2624,39 @@ def test_localization_prompt_covers_semantic_traps_and_review_policy_v5():
             {
                 "scene_id": "scene_semantic_traps",
                 "narration_text": (
-                    "They had to grapple with the reality that it could happen "
-                    "almost anywhere in the country."
+                    "They could arrive before morning and almost everyone "
+                    "might still be waiting."
                 ),
-                "on_screen_text": "Christmas Eve morning",
+                "on_screen_text": "Previous evening",
                 "subtitle_segments": [],
             }
         ],
     )
 
-    assert CURRENT_LOCALIZATION_REVIEW_VERSION >= 5
-    assert "phrasal verbs, collocations" in prompt
+    assert CURRENT_LOCALIZATION_REVIEW_VERSION >= 8
+    assert "SEMANTIC CHECKSUM" in prompt
+    assert "ACTORS" in prompt
+    assert "ACTION/STATUS" in prompt
+    assert "TIME" in prompt
+    assert "QUANTITY/SCOPE" in prompt
+    assert "EVIDENCE" in prompt
+    assert "LOGIC" in prompt
+    assert "COMPLETENESS" in prompt
+    assert "phrasal verbs" in prompt
     assert "first dictionary sense" in prompt
-    assert '"almost anywhere"' in prompt
-    assert "who did what to whom" in prompt
-    assert "since/until/by" in prompt
-    assert "Christmas Eve morning" in prompt
 
 
-def test_compact_localization_and_review_prompts_cover_semantic_traps():
+def test_compact_localization_and_review_prompts_use_semantic_checksum():
     source_batch = [
         {
             "i": 86,
             "kind": "narration",
-            "previous_text": "Bayharr spoke earlier.",
+            "previous_text": "A witness spoke earlier.",
             "text": (
-                "Bayharr had to grapple with the reality that this could happen "
-                "almost anywhere in the country."
+                "The family could arrive before morning and almost everyone "
+                "might still be waiting."
             ),
-            "next_text": "It happened on Christmas Eve morning.",
+            "next_text": "Police arrived later.",
             "consistency_context": [],
         }
     ]
@@ -2660,11 +2666,13 @@ def test_compact_localization_and_review_prompts_cover_semantic_traps():
         batch=source_batch,
     )
 
-    assert "stable transliteration stem" in translation_prompt
-    assert "first dictionary sense" in translation_prompt
-    assert "almost anywhere" in translation_prompt
-    assert "who did what to whom" in translation_prompt
-    assert "silently back-check each item" in translation_prompt
+    assert "SEMANTIC CHECKSUM" in translation_prompt
+    assert '"semantic_obligations":' in translation_prompt
+    assert '"source_span":"could"' in translation_prompt
+    assert '"source_span":"before"' in translation_prompt
+    assert '"source_span":"almost"' in translation_prompt
+    assert "stable transliteration" in translation_prompt
+    assert "no merging, splitting, reordering" in translation_prompt
 
     review_prompt = _build_compact_review_prompt(
         source_language="en",
@@ -2673,25 +2681,22 @@ def test_compact_localization_and_review_prompts_cover_semantic_traps():
             {
                 "i": 86,
                 "kind": "narration",
-                "previous_source": "Bayharr spoke earlier.",
+                "previous_source": "A witness spoke earlier.",
                 "source": source_batch[0]["text"],
-                "next_source": "It happened on Christmas Eve morning.",
-                "previous_translation": "Ранее выступил Бейхарр.",
+                "next_source": "Police arrived later.",
                 "translation": (
-                    "Бейхарр должен был бороться с реальностью, что это могло "
-                    "произойти в любой точке страны."
-                ),
-                "next_translation": (
-                    "Это произошло утром в канун Рождества."
+                    "Семья могла приехать до утра, и почти все, возможно, "
+                    "всё ещё ждали."
                 ),
             }
         ],
     )
 
-    assert "polysemous words" in review_prompt
-    assert "almost anywhere" in review_prompt
-    assert "who did what to whom" in review_prompt
-    assert "since/until/by" in review_prompt
+    assert "ACTORS" in review_prompt
+    assert "ACTION/STATUS" in review_prompt
+    assert "QUANTITY/SCOPE" in review_prompt
+    assert "source_span=" in review_prompt
+    assert "materially different fact" in review_prompt
 
 
 def test_repair_prompt_exposes_hard_factual_constraints():
@@ -2715,16 +2720,114 @@ def test_repair_prompt_exposes_hard_factual_constraints():
         translations={196: "19-летняя девушка прошла 155 километров."},
         current_translation="19-летняя девушка прошла 155 километров.",
         issues=[
-            "item 196: numeric information changed and subject identity changed"
+            "item 196 | source_span=\"110 miles\" | problem=numeric value changed"
         ],
     )
 
     assert '"required_digit_tokens_verbatim":["110","19","911"]' in prompt
-    assert "This is a REPAIR, not a rewrite or summary" in prompt
-    assert "every explicitly stated age, location" in prompt
-    assert "do NOT invent male/female gender" in prompt
-    assert "Do not invent motives, secrets, desperation" in prompt
-    assert "Preserve causal wording exactly" in prompt
+    assert '"required_reviewer_source_spans":["110 miles"]' in prompt
+    assert "SEMANTIC CHECKSUM" in prompt
+    assert "CURRENT SOURCE is the only text to translate" in prompt
+    assert "no material omission/addition" in prompt
+
+
+def test_semantic_obligations_cover_en_ru_es_sources():
+    en = _semantic_obligations(
+        "She might arrive before morning with almost everyone.",
+        "en",
+    )
+    ru = _semantic_obligations(
+        "Она, возможно, приедет до утра почти со всеми.",
+        "ru",
+    )
+    es = _semantic_obligations(
+        "Ella podría llegar antes de la mañana con casi todos.",
+        "es",
+    )
+
+    assert {"uncertainty", "temporal_relation", "quantity_scope"} <= {
+        item["kind"] for item in en
+    }
+    assert {"uncertainty", "temporal_relation", "quantity_scope"} <= {
+        item["kind"] for item in ru
+    }
+    assert {"uncertainty", "temporal_relation", "quantity_scope"} <= {
+        item["kind"] for item in es
+    }
+
+
+def test_reviewer_evidence_span_must_exist_in_source():
+    batch = [
+        {
+            "i": 95,
+            "source": "The family arrived before morning.",
+            "translation": "Семья приехала до утра.",
+        }
+    ]
+
+    invalid = _filter_review_issues_for_batch(
+        [
+            (
+                'item 95 | source_span="Christmas Eve" | '
+                "problem=temporal relation changed"
+            )
+        ],
+        batch,
+    )
+    valid = _filter_review_issues_for_batch(
+        [
+            (
+                'item 95 | source_span="before morning" | '
+                "problem=temporal relation changed"
+            )
+        ],
+        batch,
+    )
+
+    assert invalid == []
+    assert len(valid) == 1
+
+
+def test_compact_prompts_stay_small_for_qwen_context():
+    source = (
+        "A witness said the family might still arrive before morning, "
+        "with almost everyone waiting nearby."
+    )
+    translation_prompt = _build_compact_localization_prompt(
+        source_language="en",
+        target_language="ru",
+        batch=[
+            {
+                "i": 1,
+                "kind": "narration",
+                "previous_text": "Previous sentence.",
+                "text": source,
+                "next_text": "Next sentence.",
+                "consistency_context": [],
+            }
+        ],
+    )
+    review_prompt = _build_compact_review_prompt(
+        source_language="en",
+        target_language="ru",
+        batch=[
+            {
+                "i": 1,
+                "kind": "narration",
+                "previous_source": "Previous sentence.",
+                "source": source,
+                "next_source": "Next sentence.",
+                "translation": (
+                    "Свидетель сказал, что семья, возможно, всё ещё приедет "
+                    "до утра, пока почти все ждут поблизости."
+                ),
+            }
+        ],
+    )
+
+    assert len(translation_prompt) < 6500
+    assert len(review_prompt) < 6000
+
 
 
 def test_single_item_repair_retries_until_numeric_gate_passes():
@@ -2889,7 +2992,8 @@ def test_compact_prompt_exposes_per_item_machine_constraints():
 
     assert '"required_digit_tokens":["7"]' in prompt
     assert '"required_number_word_spans":["seven"]' in prompt
-    assert "copy every listed digit token" in prompt
+    assert '"semantic_obligations":' in prompt
+    assert "copy every digit token verbatim" in prompt
 
 
 def test_repair_drops_risky_neighbor_and_consistency_context():
