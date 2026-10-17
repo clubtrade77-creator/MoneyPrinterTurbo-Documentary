@@ -956,29 +956,49 @@ def _with_consistency_context(
     return enriched
 
 
-_SEMANTIC_OBLIGATION_PATTERNS = (
-    ("negation", r"\b(?:not|never|no\s+longer|without|neither|nor)\b"),
-    ("uncertainty", r"\b(?:allegedly|reportedly|apparently|possibly|probably|likely|may|might|could)\b"),
-    ("modality", r"\b(?:must|should|would|can(?:not)?|required|permitted|expected)\b"),
-    ("quantity_scope", r"\b(?:almost|nearly|about|approximately|at\s+least|at\s+most|more\s+than|less\s+than|up\s+to|only|except|unless)\b"),
-    ("distribution_frequency", r"\b(?:anywhere|everywhere|nowhere|always|often|sometimes|rarely|never|any|every|some|none)\b"),
-    ("temporal_relation", r"\b(?:before|after|since|until|during|while|as\s+of|already|still|yet|earlier|later|previous|next|eve|morning|evening|night)\b"),
-    ("status_role", r"\b(?:former|current|acting|interim|suspect|defendant|victim|witness|officer|prosecutor|attorney|judge)\b"),
-    ("legal_procedure", r"\b(?:arrested|detained|questioned|charged|accused|suspected|convicted|sentenced|acquitted|released)\b"),
-    ("causality", r"\b(?:because|due\s+to|caused|led\s+to|resulted\s+in|therefore)\b"),
-)
+_SEMANTIC_OBLIGATION_PATTERNS_BY_LANGUAGE = {
+    "en": (
+        ("negation", r"\b(?:not|never|no\s+longer|without|neither|nor)\b"),
+        ("uncertainty", r"\b(?:allegedly|reportedly|apparently|possibly|probably|likely|may|might|could)\b"),
+        ("modality", r"\b(?:must|should|would|can(?:not)?|required|permitted|expected)\b"),
+        ("quantity_scope", r"\b(?:almost|nearly|about|approximately|at\s+least|at\s+most|more\s+than|less\s+than|up\s+to|only|except|unless)\b"),
+        ("distribution_frequency", r"\b(?:anywhere|everywhere|nowhere|always|often|sometimes|rarely|any|every|some|none)\b"),
+        ("temporal_relation", r"\b(?:before|after|since|until|during|while|as\s+of|already|still|yet|earlier|later|previous|next|eve|morning|evening|night)\b"),
+        ("status_role", r"\b(?:former|current|acting|interim|suspect|defendant|victim|witness|officer|prosecutor|attorney|judge)\b"),
+        ("legal_procedure", r"\b(?:arrested|detained|questioned|charged|accused|suspected|convicted|sentenced|acquitted|released)\b"),
+        ("causality", r"\b(?:because|due\s+to|caused|led\s+to|resulted\s+in|therefore)\b"),
+    ),
+    "ru": (
+        ("negation", r"\b(?:не|никогда|без|ни|больше\s+не)\b"),
+        ("uncertainty", r"\b(?:якобы|сообщается|предположительно|возможно|вероятно|может|мог(?:ла|ло|ли)?)\b"),
+        ("modality", r"\b(?:должен|должна|должно|должны|следует|можно|нельзя|обязан|обязана|обязаны)\b"),
+        ("quantity_scope", r"\b(?:почти|около|примерно|приблизительно|не\s+менее|не\s+более|более|менее|до|только|кроме)\b"),
+        ("distribution_frequency", r"\b(?:везде|нигде|всегда|часто|иногда|редко|любой|каждый|некоторые)\b"),
+        ("temporal_relation", r"\b(?:до|после|с\s+тех\s+пор|до\s+тех\s+пор|во\s+время|пока|уже|всё\s+ещё|ранее|позже|предыдущий|следующий|канун|утром|вечером|ночью)\b"),
+        ("legal_procedure", r"\b(?:арестован|задержан|допрошен|обвинён|обвинен|осуждён|осужден|приговорён|приговорен|оправдан|освобождён|освобожден)\b"),
+        ("causality", r"\b(?:потому\s+что|из-за|привело\s+к|вызвало|вследствие|поэтому)\b"),
+    ),
+    "es": (
+        ("negation", r"\b(?:no|nunca|sin|ni|ya\s+no)\b"),
+        ("uncertainty", r"\b(?:supuestamente|presuntamente|aparentemente|posiblemente|probablemente|puede|podría|podria)\b"),
+        ("modality", r"\b(?:debe|debería|deberia|puede|no\s+puede|obligado|obligada|permitido|permitida)\b"),
+        ("quantity_scope", r"\b(?:casi|aproximadamente|alrededor\s+de|al\s+menos|como\s+máximo|como\s+maximo|más\s+de|mas\s+de|menos\s+de|hasta|solo|sólo|excepto)\b"),
+        ("distribution_frequency", r"\b(?:cualquier\s+lugar|en\s+todas\s+partes|en\s+ninguna\s+parte|siempre|a\s+menudo|a\s+veces|raramente|cada|algún|algun)\b"),
+        ("temporal_relation", r"\b(?:antes|después|despues|desde|hasta|durante|mientras|ya|todavía|todavia|aún|aun|anterior|siguiente|víspera|vispera|mañana|manana|tarde|noche)\b"),
+        ("legal_procedure", r"\b(?:arrestado|detenido|interrogado|acusado|condenado|sentenciado|absuelto|liberado)\b"),
+        ("causality", r"\b(?:porque|debido\s+a|causó|causo|provocó|provoco|dio\s+lugar\s+a|por\s+lo\s+tanto)\b"),
+    ),
+}
 
 
 def _semantic_obligations(text: str, source_language: str) -> list[dict]:
-    """Extract high-risk source spans as an attention checklist for the LLM."""
+    """Extract high-risk source spans as a compact attention checklist."""
     language = _normalize_language(source_language).split("-", 1)[0]
-    if language != "en":
-        return []
-
+    patterns = _SEMANTIC_OBLIGATION_PATTERNS_BY_LANGUAGE.get(language, ())
     source = str(text or "")
     obligations: list[dict] = []
     seen: set[tuple[str, str]] = set()
-    for category, pattern in _SEMANTIC_OBLIGATION_PATTERNS:
+    for category, pattern in patterns:
         for match in re.finditer(pattern, source, flags=re.IGNORECASE):
             span = match.group(0)
             key = (category, span.casefold())
@@ -987,6 +1007,7 @@ def _semantic_obligations(text: str, source_language: str) -> list[dict]:
             seen.add(key)
             obligations.append({"kind": category, "source_span": span})
     return obligations[:24]
+
 
 
 def _build_compact_localization_prompt(
