@@ -1044,7 +1044,9 @@ same entity/name/term spelling consistent. Never import facts from those example
 verbatim with identical multiplicity; never spell it out, convert units, round it,
 or replace it with an equivalent value. "required_number_word_spans" must preserve
 the exact cardinal/ordinal value and scope. "required_protected_literals" must be
-copied exactly.
+copied exactly. "semantic_obligations" is an attention checklist extracted from the
+CURRENT source: each listed relation/modifier must remain materially present in the
+translation. It is not extra content and must never be copied as prose.
 
 FIDELITY RULES — these override elegance and brevity:
 - Produce grammatical, natural target-language text while preserving source meaning.
@@ -1083,24 +1085,21 @@ FIDELITY RULES — these override elegance and brevity:
   previous/next, ago/from now, morning/evening/night, and eve/day distinctions.
   Keep relative dates relative; never invent an absolute calendar date that the
   source does not state.
-  An expression meaning "the eve/day before an event" must NOT become the event
-  day itself. A morning on that eve must remain a morning, not a night. For example,
-  "Christmas Eve morning" means the morning on the day before Christmas Day; it is
-  not Christmas Day and it is not a Christmas night.
+  An expression for an eve/day-before event must remain before the event, and
+  time-of-day modifiers must remain attached to the same temporal reference.
 - Preserve grammatical gender when source or context establishes it. If gender is
   genuinely unknown and the target language would force an unsupported gender,
   rephrase naturally rather than inventing one.
 - Translate idioms, phrasal verbs, collocations, and figurative expressions by
   MEANING IN CONTEXT, not by the first dictionary sense and not word-for-word.
-  An expression meaning "grapple with the reality" is about confronting/dealing
-  with reality, not literal physical struggle.
+  Preserve the underlying action/relation rather than a surface lexical resemblance.
 - Preserve the context-appropriate lexical sense of polysemous words; a fluent
   near-synonym is still wrong if it changes the underlying concept.
 - Preserve logical structure and semantic roles: and/or, if/unless, comparison,
   possession, cause/result versus sequence, and who did what to whom.
-- Preserve degree/frequency/distribution WITH scope: almost/nearly/roughly,
-  always/often/sometimes/rarely/never, any/every/some/no, anywhere/everywhere/
-  nowhere. "Almost anywhere" must keep both "almost" and the broad-location sense.
+- Preserve degree/frequency/distribution WITH scope. When multiple scope markers
+  modify one proposition, preserve all of them together; do not drop one or turn
+  a limited/approximate claim into an absolute one.
 - Preserve temporal operators such as since/until/by/during/while/as of as
   relationships to a reference time, not interchangeable generic time words.
 - Preserve coreference and agency in pronouns, possessives, active/passive voice,
