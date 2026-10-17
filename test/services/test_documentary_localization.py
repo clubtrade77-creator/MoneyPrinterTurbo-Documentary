@@ -1663,13 +1663,12 @@ def test_prompts_explicitly_cover_word_numbers_ordinals_and_scope(
 
     assert plan.semantic_reviewed is True
     assert generation_prompts
-    assert "numbers written as WORDS" in generation_prompts[0]
-    assert "four" in generation_prompts[0]
-    assert "fourth" in generation_prompts[0]
-    assert "only/except/unless" in generation_prompts[0]
+    assert "required_number_word_spans" in generation_prompts[0]
+    assert "cardinal/ordinal role" in generation_prompts[0]
+    assert "QUANTITY/SCOPE" in generation_prompts[0]
     assert any(
-        "numbers written as words" in prompt
-        and "cardinal/ordinal" in prompt
+        "word-numbers" in prompt
+        and "ordinal/cardinal role" in prompt
         for prompt in review_prompts
     )
 
@@ -2755,6 +2754,15 @@ def test_semantic_obligations_cover_en_ru_es_sources():
         item["kind"] for item in es
     }
 
+    may_date = _semantic_obligations(
+        "She disappeared on May 29, 2025.",
+        "en",
+    )
+    assert not any(
+        item["kind"] == "uncertainty" and item["source_span"] == "May"
+        for item in may_date
+    )
+
 
 def test_reviewer_evidence_span_must_exist_in_source():
     batch = [
@@ -2786,6 +2794,26 @@ def test_reviewer_evidence_span_must_exist_in_source():
 
     assert invalid == []
     assert len(valid) == 1
+
+
+def test_reviewer_source_span_cannot_validate_unrelated_multi_item_claim():
+    batch = [
+        {"i": 1, "source": "Alpha happened.", "translation": "Альфа произошла."},
+        {"i": 2, "source": "Beta happened.", "translation": "Бета произошла."},
+    ]
+    issues = _filter_review_issues_for_batch(
+        [
+            (
+                'items 1 and 2 | source_span="Alpha" | '
+                "problem=both items allegedly changed"
+            )
+        ],
+        batch,
+    )
+
+    # One quoted source span cannot prove a material error for two different items.
+    # Such a vague multi-item complaint must not drive a destructive repair.
+    assert issues == []
 
 
 def test_compact_prompts_stay_small_for_qwen_context():
