@@ -31,12 +31,12 @@ COMPACT_LOCALIZATION_BATCH_ITEMS = 12
 COMPACT_REVIEW_THRESHOLD_CHARS = 5_000
 COMPACT_REVIEW_BATCH_CHARS = 1_800
 COMPACT_REVIEW_BATCH_ITEMS = 10
-CURRENT_LOCALIZATION_REVIEW_VERSION = 7
+CURRENT_LOCALIZATION_REVIEW_VERSION = 8
 # Bump when translation/checkpoint semantics change so an interrupted
 # run cannot silently reuse text produced by an older prompt policy.
 _LOCALIZATION_WORK_VERSION = 3
 # Bump whenever deterministic or semantic review policy changes.
-_LOCALIZATION_WORK_REVIEW_POLICY_VERSION = 7
+_LOCALIZATION_WORK_REVIEW_POLICY_VERSION = 8
 
 LocalizationProgressCallback = Callable[[float], None]
 LocalizationStatusCallback = Callable[[str, int, int, int, int], None]
