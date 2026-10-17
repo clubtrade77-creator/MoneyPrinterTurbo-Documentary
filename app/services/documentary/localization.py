@@ -956,6 +956,39 @@ def _with_consistency_context(
     return enriched
 
 
+_SEMANTIC_OBLIGATION_PATTERNS = (
+    ("negation", r"\b(?:not|never|no\s+longer|without|neither|nor)\b"),
+    ("uncertainty", r"\b(?:allegedly|reportedly|apparently|possibly|probably|likely|may|might|could)\b"),
+    ("modality", r"\b(?:must|should|would|can(?:not)?|required|permitted|expected)\b"),
+    ("quantity_scope", r"\b(?:almost|nearly|about|approximately|at\s+least|at\s+most|more\s+than|less\s+than|up\s+to|only|except|unless)\b"),
+    ("distribution_frequency", r"\b(?:anywhere|everywhere|nowhere|always|often|sometimes|rarely|never|any|every|some|none)\b"),
+    ("temporal_relation", r"\b(?:before|after|since|until|during|while|as\s+of|already|still|yet|earlier|later|previous|next|eve|morning|evening|night)\b"),
+    ("status_role", r"\b(?:former|current|acting|interim|suspect|defendant|victim|witness|officer|prosecutor|attorney|judge)\b"),
+    ("legal_procedure", r"\b(?:arrested|detained|questioned|charged|accused|suspected|convicted|sentenced|acquitted|released)\b"),
+    ("causality", r"\b(?:because|due\s+to|caused|led\s+to|resulted\s+in|therefore)\b"),
+)
+
+
+def _semantic_obligations(text: str, source_language: str) -> list[dict]:
+    """Extract high-risk source spans as an attention checklist for the LLM."""
+    language = _normalize_language(source_language).split("-", 1)[0]
+    if language != "en":
+        return []
+
+    source = str(text or "")
+    obligations: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for category, pattern in _SEMANTIC_OBLIGATION_PATTERNS:
+        for match in re.finditer(pattern, source, flags=re.IGNORECASE):
+            span = match.group(0)
+            key = (category, span.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            obligations.append({"kind": category, "source_span": span})
+    return obligations[:24]
+
+
 def _build_compact_localization_prompt(
     *,
     source_language: str,
@@ -980,6 +1013,10 @@ def _build_compact_localization_prompt(
             ),
             "required_protected_literals": sorted(
                 _protected_literal_tokens(unit["text"])
+            ),
+            "semantic_obligations": _semantic_obligations(
+                unit["text"],
+                source_language,
             ),
             "next_source": _compact_consistency_text(
                 unit.get("next_text", ""),
