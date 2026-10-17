@@ -2713,16 +2713,47 @@ def _review_issue_item_ids(issue: str) -> set[int]:
 
 
 
+def _review_issue_source_span(issue: str) -> str:
+    match = re.search(
+        r'source_span\\s*=\\s*["“”«»]([^"“”«»]{1,240})["“”«»]',
+        str(issue or ""),
+        flags=re.IGNORECASE,
+    )
+    return match.group(1).strip() if match else ""
+
+
+def _normalized_span_present(source: str, span: str) -> bool:
+    if not span:
+        return True
+    source_norm = re.sub(r"\\s+", " ", str(source or "").casefold()).strip()
+    span_norm = re.sub(r"\\s+", " ", str(span or "").casefold()).strip()
+    return span_norm in source_norm
+
+
 def _filter_review_issues_for_batch(
     issues: list[str],
     batch: list[dict],
 ) -> list[str]:
     valid_ids = {unit["i"] for unit in batch}
+    units_by_id = {unit["i"]: unit for unit in batch}
     filtered = []
     for issue in _split_review_issue_clauses(issues):
         issue_ids = _review_issue_item_ids(issue)
-        if issue_ids and not (issue_ids & valid_ids):
+        matching_ids = issue_ids & valid_ids
+        if issue_ids and not matching_ids:
             continue
+
+        source_span = _review_issue_source_span(issue)
+        if source_span and matching_ids:
+            if not any(
+                _normalized_span_present(
+                    units_by_id[item_id].get("source", ""),
+                    source_span,
+                )
+                for item_id in matching_ids
+            ):
+                continue
+
         filtered.append(issue)
     return filtered
 
